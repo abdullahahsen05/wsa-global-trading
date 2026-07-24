@@ -320,7 +320,7 @@ export default function AttemptDetailPage({
           <div className="flex gap-3">
             <Link
               href="/evaluations/certificates"
-              className="rounded-md bg-lime-500 px-4 py-1.5 text-xs font-semibold text-black hover:bg-lime-400"
+              className="rounded-[4px] bg-lime-500 px-4 py-1.5 text-xs font-semibold text-black hover:bg-lime-400"
             >
               Download certificate
             </Link>

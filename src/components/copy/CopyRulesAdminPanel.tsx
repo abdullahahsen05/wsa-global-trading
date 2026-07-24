@@ -121,7 +121,7 @@ export function CopyRulesAdminPanel() {
 
   return (
     <div className="mt-5 grid gap-5">
-      <Panel>
+      <Panel className="overflow-hidden">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Global stoppage rules</h2>
@@ -139,7 +139,7 @@ export function CopyRulesAdminPanel() {
           <TextField label="Max lot size" type="number" min="0.01" step="0.01" value={globalForm.maxLotSize} onChange={(e) => setGlobal("maxLotSize", e.target.value)} />
           <TextField label="Max slippage points" type="number" min="0.01" step="0.01" value={globalForm.maxSlippagePoints} onChange={(e) => setGlobal("maxSlippagePoints", e.target.value)} />
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-4">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input type="checkbox" checked={pauseOnDisconnect} onChange={(event) => setPauseOnDisconnectDraft(event.target.checked)} />
             Pause on account disconnect
@@ -164,8 +164,9 @@ export function CopyRulesAdminPanel() {
         </div>
       </Panel>
 
-      <Panel>
+      <Panel className="overflow-hidden">
         <h2 className="text-lg font-semibold text-foreground">Per-account rules</h2>
+        <p className="mt-1 text-sm text-muted">Override platform defaults for specific connected trading accounts.</p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <SelectField label="Trading account" value={selectedAccountId} onChange={(event) => { setAccountId(event.target.value); setAccountFormDraft(null); }}>
             <option value="">Select account</option>
@@ -179,7 +180,7 @@ export function CopyRulesAdminPanel() {
           <TextField label="Allowed symbols" hint="Comma separated; blank allows all" value={accountForm.symbolAllowlist} onChange={(e) => setAccount("symbolAllowlist", e.target.value)} />
           <TextField label="Blocked symbols" hint="Comma separated" value={accountForm.symbolBlocklist} onChange={(e) => setAccount("symbolBlocklist", e.target.value)} />
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-4">
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-4">
           <label className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <input type="checkbox" checked={accountForm.copyEnabled} onChange={(event) => setAccount("copyEnabled", event.target.checked)} />
             Copy enabled for account
@@ -209,10 +210,10 @@ export function CopyRulesAdminPanel() {
         </div>
       </Panel>
 
-      <Panel>
+      <Panel className="overflow-hidden">
         <h2 className="mb-4 text-lg font-semibold text-foreground">Recent rule triggers</h2>
         {events.length === 0 ? (
-          <p className="rounded-xl border border-line bg-background px-4 py-5 text-sm text-muted">
+          <p className="rounded-[4px] border border-line bg-background px-4 py-5 text-sm text-muted">
             No copy rule has blocked an event yet.
           </p>
         ) : (

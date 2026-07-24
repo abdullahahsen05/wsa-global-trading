@@ -56,7 +56,7 @@ export default function WebinarsPage() {
     >
       {isLoading ? (
         <div className="space-y-3">
-          {[1, 2].map((i) => <div key={i} className="h-28 animate-pulse rounded-3xl bg-panel" />)}
+          {[1, 2].map((i) => <div key={i} className="h-28 animate-pulse rounded-[4px] bg-panel" />)}
         </div>
       ) : isError ? (
         <Panel>

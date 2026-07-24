@@ -184,8 +184,8 @@ function ReportsContent() {
               </GhostButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
                 <Dialog.Title className="text-xl font-semibold text-foreground">Schedule report</Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                   Pick a cadence and delivery time for automated report delivery.
@@ -229,8 +229,8 @@ function ReportsContent() {
               </PrimaryButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
                 <Dialog.Title className="text-xl font-semibold text-foreground">Create report packet</Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                   Configure the report scope, delivery format, and notes for the final export.
@@ -296,7 +296,7 @@ function ReportsContent() {
       />
 
       {successMessage ? (
-        <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
+        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
           {successMessage}
         </div>
       ) : null}
@@ -304,6 +304,8 @@ function ReportsContent() {
       <div className="mt-5">
         <DataTable
           headers={["Report", "Period", "Status", "Trades", "Net P&L", "Format", ""]}
+          paginated
+          initialPageSize={10}
           rows={reports.map((report) => [
             <span key="name" className="font-semibold text-foreground">{report.name}</span>,
             report.period,
@@ -330,27 +332,27 @@ function ReportsContent() {
         />
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[0.62fr_0.38fr]">
-        <Panel>
+      <div className="mt-5 grid items-stretch gap-4 xl:h-[380px] xl:grid-cols-[0.62fr_0.38fr]">
+        <Panel className="min-h-0 xl:h-full">
           <h2 className="text-lg font-semibold text-foreground">Report structure</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
             Each report includes account summary, equity curve, closed trade log, risk rule breaches,
             consistency metrics, and admin notes. Generated from {closedCount} closed trades on record.
           </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+          <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Total trades</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{trades.length}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Closed</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{closedCount}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Open</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{trades.filter((t) => t.status === "OPEN").length}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Net P&L</p>
               <p className="mt-1 text-sm font-semibold text-accent-2">
                 {formatMoney({
@@ -361,19 +363,19 @@ function ReportsContent() {
             </div>
           </div>
         </Panel>
-        <Panel>
+        <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
           <h2 className="text-lg font-semibold text-foreground">Delivery queue</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
             Schedule automated delivery or create a manual export above.
           </p>
-          <div className="mt-4 space-y-3">
+          <div className="invisible-scrollbar mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto">
             {readyCount === 0 ? (
               <p className="text-sm text-muted">No queued deliveries yet.</p>
             ) : (
               reports
                 .filter((r) => r.status === "Ready")
                 .map((r, i) => (
-                  <div key={i} className="rounded-2xl border border-line bg-background p-4">
+                  <div key={i} className="border-b border-line bg-background px-4 py-3 last:border-b-0">
                     <p className="text-sm font-semibold text-foreground">{r.name}</p>
                     <p className="mt-1 text-xs text-muted">{r.period} · {r.format}</p>
                   </div>

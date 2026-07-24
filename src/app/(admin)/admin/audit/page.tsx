@@ -87,16 +87,16 @@ export default function AdminAuditPage() {
               {selectedLog.actor} - {selectedLog.entity}
             </p>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Actor</p>
                 <p className="mt-1 text-sm font-semibold text-foreground truncate">{selectedLog.actor}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Entity</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{selectedLog.entity}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Entity ID</p>
                 <p className="mt-1 text-sm font-semibold text-foreground truncate">{selectedLog.entityId}</p>
               </div>
@@ -104,11 +104,11 @@ export default function AdminAuditPage() {
           </Panel>
         </div>
       ) : isLoading ? (
-        <div className="mt-5 rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">
+        <div className="mt-5 rounded-[4px] border border-line bg-panel p-8 text-center text-sm text-muted">
           Loading audit logs...
         </div>
       ) : (
-        <div className="mt-5 rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">
+        <div className="mt-5 rounded-[4px] border border-line bg-panel p-8 text-center text-sm text-muted">
           No audit events found.
         </div>
       )}
@@ -148,10 +148,10 @@ export default function AdminAuditPage() {
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {log.entity}
               </span>
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {new Date(log.createdAt).toLocaleDateString()}
               </span>
             </div>
@@ -168,20 +168,20 @@ export default function AdminAuditPage() {
                 </p>
               </div>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Actor</p>
                 <p className="mt-1 text-sm font-semibold text-foreground truncate">{log.actor}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Entity</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{log.entity}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Entity ID</p>
                 <p className="mt-1 text-sm font-semibold text-foreground truncate">{log.entityId}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Timestamp</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{new Date(log.createdAt).toLocaleString()}</p>
               </div>

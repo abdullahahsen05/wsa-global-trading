@@ -190,19 +190,20 @@ export default function AdminRiskPage() {
       />
 
       {message ? (
-        <div className="mt-5 rounded-2xl border border-accent-2/20 bg-accent-2/10 px-4 py-3 text-sm font-medium text-accent-2">
+        <div className="mt-5 rounded-[4px] border border-accent-2/20 bg-accent-2/10 px-4 py-3 text-sm font-medium text-accent-2">
           {message}
         </div>
       ) : null}
       {errorMessage ? (
-        <div className="mt-5 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+        <div className="mt-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
           {errorMessage}
         </div>
       ) : null}
 
-      <div className="mt-5 grid gap-4">
-        <Panel>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-5 grid gap-5">
+        <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
+        <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Risk rules</h2>
               <p className="mt-1 text-sm text-muted">
@@ -211,7 +212,7 @@ export default function AdminRiskPage() {
             </div>
             <StatusPill tone="lime">MetaApi live monitor</StatusPill>
           </div>
-          <div className="mt-4">
+          <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-auto">
             <DataTable
               headers={["Rule", "Scope", "Metric", "Threshold", "Severity", "Action", "State", ""]}
               rows={riskRules.map((rule) => [
@@ -242,10 +243,40 @@ export default function AdminRiskPage() {
           </div>
         </Panel>
 
+        <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Open risk events</h2>
+              <p className="mt-1 text-sm text-muted">
+                Acknowledging removes the alert; an unresolved live breach will be raised again.
+              </p>
+            </div>
+            <StatusPill tone="accent">{riskEvents.length} open</StatusPill>
+          </div>
+          <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto">
+            {riskEvents.length === 0 ? (
+              <p className="border-t border-line py-4 text-sm text-muted">
+                No open risk events.
+              </p>
+            ) : riskEvents.map((event) => (
+              <div key={event.id} className="flex flex-wrap items-center justify-between gap-4 border-b border-line bg-background px-4 py-3 last:border-b-0">
+                <div className="min-w-0">
+                  <p className="font-semibold text-foreground">{event.ruleName}</p>
+                  <p className="mt-1 text-sm leading-5 text-muted">{event.message}</p>
+                </div>
+                <GhostButton type="button" onClick={() => void acknowledgeEvent(event.id)}>
+                  Acknowledge
+                </GhostButton>
+              </div>
+            ))}
+          </div>
+        </Panel>
+        </div>
+
         <div id="risk-rule-form">
-        <Panel>
+        <Panel className="overflow-hidden">
           <div className="flex items-start gap-4">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-danger/10 text-danger">
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[4px] bg-danger/10 text-danger">
               <ShieldAlert className="h-5 w-5" />
             </div>
             <div>
@@ -358,7 +389,7 @@ export default function AdminRiskPage() {
               <p className="text-sm text-muted">
                 Existing positions remain closable even while new openings are blocked.
               </p>
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-3">
                 <GhostButton type="button" onClick={startCreate}>Reset</GhostButton>
                 <PrimaryButton type="submit" disabled={saving}>
                   {saving ? "Saving…" : editingRuleId ? "Update rule" : "Create rule"}
@@ -369,36 +400,7 @@ export default function AdminRiskPage() {
         </Panel>
         </div>
 
-        <Panel>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">Open risk events</h2>
-              <p className="mt-1 text-sm text-muted">
-                Acknowledging removes the alert; an unresolved live breach will be raised again.
-              </p>
-            </div>
-            <StatusPill tone="accent">{riskEvents.length} open</StatusPill>
-          </div>
-          <div className="mt-4 grid gap-3">
-            {riskEvents.length === 0 ? (
-              <p className="rounded-2xl border border-line bg-background p-4 text-sm text-muted">
-                No open risk events.
-              </p>
-            ) : riskEvents.map((event) => (
-              <div key={event.id} className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-background p-4">
-                <div>
-                  <p className="font-semibold text-foreground">{event.ruleName}</p>
-                  <p className="mt-1 text-sm text-muted">{event.message}</p>
-                </div>
-                <GhostButton type="button" onClick={() => void acknowledgeEvent(event.id)}>
-                  Acknowledge
-                </GhostButton>
-              </div>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel>
+        <Panel className="overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Rule-based account monitoring</h2>
@@ -406,7 +408,7 @@ export default function AdminRiskPage() {
             </div>
             <StatusPill tone="accent">{tradingAccounts.length} accounts</StatusPill>
           </div>
-          <div className="mt-4">
+          <div className="invisible-scrollbar mt-4 overflow-auto">
             <DataTable
               headers={["Account", "Broker", "Status", "Balance", "Equity", "Drawdown", "Risk state"]}
               rows={tradingAccounts.map((account) => [

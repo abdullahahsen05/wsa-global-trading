@@ -110,7 +110,7 @@ export default function MyBotsPage() {
     >
       {/* One-time key display */}
       {shownKey ? (
-        <div className="rounded-3xl border border-accent/30 bg-accent/5 p-5">
+        <div className="rounded-[4px] border border-accent/30 bg-accent/5 p-5">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
             License key — shown once
           </p>
@@ -132,7 +132,7 @@ export default function MyBotsPage() {
       {/* Notice */}
       {notice ? (
         <div
-          className={`rounded-2xl border px-4 py-3 text-sm font-medium ${
+          className={`rounded-[4px] border px-4 py-3 text-sm font-medium ${
             notice.type === "success"
               ? "border-accent/20 bg-accent/10 text-accent"
               : "border-danger/20 bg-danger/10 text-danger"
@@ -143,7 +143,7 @@ export default function MyBotsPage() {
       ) : null}
 
       {isLoading ? (
-        <div className="h-32 animate-pulse rounded-3xl bg-panel" />
+        <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
       ) : accessRecords.length === 0 ? (
         <EmptyState
           title="No bot access yet"
@@ -269,14 +269,14 @@ export default function MyBotsPage() {
         onOpenChange={(o) => { if (!o) setLicenseDialog(null); }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-background p-6 shadow-2xl">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50" />
+          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-background p-6">
             <div className="flex items-center justify-between">
               <Dialog.Title className="text-base font-semibold text-foreground">
                 Generate License
               </Dialog.Title>
               <Dialog.Close asChild>
-                <button className="rounded-lg p-1 text-muted hover:text-foreground">
+                <button className="rounded-[4px] p-1 text-muted hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </Dialog.Close>
@@ -300,7 +300,7 @@ export default function MyBotsPage() {
                       setLicenseForm((f) => ({ ...f, mt5AccountNumber: e.target.value }))
                     }
                     placeholder="Your MT5 account number"
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
                 <div>
@@ -310,7 +310,7 @@ export default function MyBotsPage() {
                   <select
                     value={licenseForm.platform}
                     onChange={(e) => setLicenseForm((f) => ({ ...f, platform: e.target.value }))}
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   >
                     <option value="MT5">MT5</option>
                     <option value="MT4">MT4</option>

@@ -1,5 +1,5 @@
 import { Activity, TrendingDown, TrendingUp } from "lucide-react";
-import { Panel, StatusPill } from "@/components/app/WorkspaceUI";
+import { DataTable, Panel, StatusPill } from "@/components/app/WorkspaceUI";
 import type { CopyLogDto } from "@/lib/copy/types";
 
 function statusTone(status: CopyLogDto["status"]): "lime" | "danger" | "accent" {
@@ -20,7 +20,7 @@ export function CopyExecutionLog({ logs, loading }: { logs: CopyLogDto[]; loadin
     <Panel className="mt-5 overflow-hidden p-0">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-5 py-5">
         <div className="flex items-start gap-3">
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-lime/25 bg-lime/10 text-lime">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[4px] border border-lime/25 bg-lime/10 text-lime">
             <Activity className="h-5 w-5" />
           </div>
           <div>
@@ -38,44 +38,30 @@ export function CopyExecutionLog({ logs, loading }: { logs: CopyLogDto[]; loadin
       {loading ? (
         <p className="px-5 py-8 text-sm text-muted">Loading copy activity…</p>
       ) : logs.length ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[780px] text-left text-sm">
-            <thead className="border-b border-line bg-background/60 text-xs uppercase tracking-widest text-muted">
-              <tr>
-                <th className="px-5 py-3 font-semibold">Strategy</th>
-                <th className="px-4 py-3 font-semibold">Trade</th>
-                <th className="px-4 py-3 font-semibold">Action</th>
-                <th className="px-4 py-3 font-semibold">Lot</th>
-                <th className="px-4 py-3 font-semibold">Result</th>
-                <th className="px-5 py-3 text-right font-semibold">Time</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {logs.map((log) => (
-                <tr key={log.id} className="bg-panel transition-colors hover:bg-background/45">
-                  <td className="px-5 py-4">
-                    <p className="font-semibold text-foreground">{log.strategyName}</p>
-                    <p className="mt-1 text-xs text-muted">WSA live strategy</p>
-                  </td>
-                  <td className="px-4 py-4">
-                    <div className="flex items-center gap-2">
-                      {log.side === "SELL" ? <TrendingDown className="h-4 w-4 text-danger" /> : <TrendingUp className="h-4 w-4 text-lime" />}
-                      <span className="font-mono font-semibold text-foreground">{log.symbol ?? "—"}</span>
-                      <span className={log.side === "SELL" ? "text-danger" : "text-lime"}>{log.side ?? "—"}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-4 font-semibold text-foreground">{log.action}</td>
-                  <td className="px-4 py-4 font-mono text-foreground">{displayLot(log)}</td>
-                  <td className="max-w-xs px-4 py-4">
-                    <StatusPill tone={statusTone(log.status)}>{log.status}</StatusPill>
-                    {log.errorMessage ? <p className="mt-2 text-xs leading-5 text-danger">{log.errorMessage}</p> : null}
-                  </td>
-                  <td className="px-5 py-4 text-right text-xs text-muted">{new Date(log.createdAt).toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          headers={["Strategy", "Trade", "Action", "Lot", "Result", "Time"]}
+          paginated
+          initialPageSize={10}
+          maxBodyHeight="520px"
+          rows={logs.map((log) => [
+            <div key="strategy">
+              <p className="font-semibold text-foreground">{log.strategyName}</p>
+              <p className="mt-1 text-xs text-muted">WSA live strategy</p>
+            </div>,
+            <div key="trade" className="flex items-center justify-end gap-2">
+              {log.side === "SELL" ? <TrendingDown className="h-4 w-4 text-danger" /> : <TrendingUp className="h-4 w-4 text-lime" />}
+              <span className="font-mono font-semibold text-foreground">{log.symbol ?? "—"}</span>
+              <span className={log.side === "SELL" ? "text-danger" : "text-lime"}>{log.side ?? "—"}</span>
+            </div>,
+            <span key="action" className="font-semibold text-foreground">{log.action}</span>,
+            <span key="lot" className="font-mono text-foreground">{displayLot(log)}</span>,
+            <div key="result" className="ml-auto max-w-xs">
+              <StatusPill tone={statusTone(log.status)}>{log.status}</StatusPill>
+              {log.errorMessage ? <p className="mt-2 text-xs leading-5 text-danger">{log.errorMessage}</p> : null}
+            </div>,
+            <span key="time" className="text-xs text-muted">{new Date(log.createdAt).toLocaleString()}</span>,
+          ])}
+        />
       ) : (
         <div className="px-5 py-9">
           <p className="font-semibold text-foreground">No copied trades yet</p>

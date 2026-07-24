@@ -30,8 +30,8 @@ export function NoteEditorDialog({ open, onOpenChange, selectedName, onSave }: N
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-5 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+        <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-5 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
           <Dialog.Title className="text-lg font-semibold text-foreground">Add communication note</Dialog.Title>
           <Dialog.Description className="mt-1 text-sm leading-6 text-muted">
             Save a note to the selected profile&apos;s communication history.

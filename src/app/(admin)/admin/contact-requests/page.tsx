@@ -37,7 +37,7 @@ export default function AdminContactRequestsPage() {
         { label: "Resolved", value: requests.filter((request) => request.status === "RESOLVED").length, tone: "lime" },
       ]} />
       <Panel className="mt-5">
-        {isLoading ? <div className="h-36 animate-pulse rounded-2xl bg-background" /> : requests.length === 0 ? (
+        {isLoading ? <div className="h-36 animate-pulse rounded-[4px] bg-background" /> : requests.length === 0 ? (
           <EmptyState title="No contact requests" description="New mentorship and general enquiries will appear here." />
         ) : (
           <DataTable
@@ -52,7 +52,7 @@ export default function AdminContactRequestsPage() {
                 value={request.status}
                 disabled={update.isPending}
                 onChange={(event) => update.mutate({ id: request.id, status: event.target.value as ContactRequestStatus })}
-                className="h-10 rounded-xl border border-line bg-background px-3 text-sm font-semibold text-foreground"
+                className="h-10 rounded-[4px] border border-line bg-background px-3 text-sm font-semibold text-foreground"
               >
                 <option value="NEW">New</option><option value="IN_PROGRESS">In progress</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option>
               </select>,

@@ -28,7 +28,7 @@ export function PlatformSubscriptionLocked({
     <Panel className="border border-accent/30 bg-accent/5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-accent/15">
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-[4px] bg-accent/15">
             <ShieldCheck className="h-6 w-6 text-accent" />
           </div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">Platform Access</p>

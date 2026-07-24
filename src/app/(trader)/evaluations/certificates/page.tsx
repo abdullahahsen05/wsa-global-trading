@@ -71,7 +71,7 @@ export default function MyCertificatesPage() {
                 {cert.status === "VALID" && (
                   <a
                     href={`/api/evaluations/certificates/${cert.id}/download`}
-                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground hover:opacity-90"
+                    className="rounded-[4px] bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground hover:opacity-90"
                   >
                     Download PDF
                   </a>
@@ -79,7 +79,7 @@ export default function MyCertificatesPage() {
                 <Link
                   href={`/certificates/verify/${cert.verificationId}`}
                   target="_blank"
-                  className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  className="rounded-[4px] border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
                 >
                   Verify
                 </Link>

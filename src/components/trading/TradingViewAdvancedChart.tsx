@@ -120,7 +120,7 @@ export function TradingViewAdvancedChart({
   if (disableThirdPartyWidget || failed) {
     return (
       <div
-        className="flex items-center justify-center rounded-[18px] border border-white/10 bg-[#0a0a0a] text-center"
+        className="flex items-center justify-center rounded-[4px] border border-white/10 bg-[#0a0a0a] text-center"
         style={{ height, width: "100%" }}
       >
         <p className="max-w-xs text-sm text-muted-foreground">
@@ -134,7 +134,7 @@ export function TradingViewAdvancedChart({
   return (
     <div
       ref={containerRef}
-      className="overflow-hidden rounded-[18px] border border-white/10 bg-[#050505]"
+      className="overflow-hidden rounded-[4px] border border-white/10 bg-[#050505]"
       style={{ height, width: "100%" }}
     />
   );

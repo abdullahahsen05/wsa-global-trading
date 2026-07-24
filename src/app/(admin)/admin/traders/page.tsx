@@ -5,7 +5,6 @@ import { Plus, Search, X } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { DirectorySearchOverlay } from "@/components/app/DirectorySearchOverlay";
 import {
-  EmptyState,
   GhostButton,
   FilterChipRow,
   InlineStatusStrip,
@@ -106,8 +105,8 @@ export default function AdminTradersPage() {
               </PrimaryButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
                 <Dialog.Title className="text-xl font-semibold text-foreground">Add CRM note</Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                   Write a relationship note against a trader profile and keep the activity timeline up to date.
@@ -139,7 +138,7 @@ export default function AdminTradersPage() {
                   <button
                     type="button"
                     aria-label="Close dialog"
-                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted"
+                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -166,7 +165,7 @@ export default function AdminTradersPage() {
         ]}
       />
 
-      <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5 invisible-scrollbar overflow-x-auto border-b border-line pb-3">
         <FilterChipRow
           chips={[
             {
@@ -214,7 +213,7 @@ export default function AdminTradersPage() {
       </div>
 
       {successMessage ? (
-        <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
+        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
           {successMessage}
         </div>
       ) : null}
@@ -235,20 +234,20 @@ export default function AdminTradersPage() {
             </StatusPill>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+          <div className="mt-4 grid gap-0 overflow-hidden rounded-[4px] border-l border-t border-line sm:grid-cols-2 xl:grid-cols-4">
+            <div className="border-b border-r border-line bg-background px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Accounts</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{selectedTrader.accountCount}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="border-b border-r border-line bg-background px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Equity</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney(selectedTrader.totalEquity)}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="border-b border-r border-line bg-background px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Last active</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{new Date(selectedTrader.lastActivityAt).toLocaleString()}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="border-b border-r border-line bg-background px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Profile state</p>
               <p className="mt-1 text-sm font-semibold text-foreground">Under review</p>
             </div>
@@ -258,10 +257,13 @@ export default function AdminTradersPage() {
             <h3 className="text-sm font-semibold text-foreground">Latest notes</h3>
             <div className="mt-4 space-y-3">
               {selectedNotes.length === 0 ? (
-                <EmptyState title="No notes yet" description="This trader has no CRM notes yet." />
+                <div className="border-t border-line py-4">
+                  <p className="text-sm font-semibold text-foreground">No notes yet</p>
+                  <p className="mt-1 text-sm text-muted">This trader has no CRM notes yet.</p>
+                </div>
               ) : (
                 selectedNotes.map((note) => (
-                  <div key={note.id} className="rounded-2xl border border-line bg-background p-4">
+                  <div key={note.id} className="border-t border-line py-4">
                     <p className="text-sm leading-6 text-foreground">{note.note}</p>
                     <p className="mt-2 text-xs text-muted">
                       {note.authorName} - {new Date(note.createdAt).toLocaleString()}
@@ -324,10 +326,10 @@ export default function AdminTradersPage() {
               <StatusPill tone={trader.segment === "AT_RISK" ? "accent" : "lime"}>{trader.segment}</StatusPill>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {trader.accountCount} accounts
               </span>
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {new Date(trader.lastActivityAt).toLocaleDateString()}
               </span>
             </div>
@@ -343,20 +345,20 @@ export default function AdminTradersPage() {
               </div>
               <StatusPill tone={trader.segment === "AT_RISK" ? "accent" : "lime"}>{trader.segment}</StatusPill>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="mt-4 grid gap-0 overflow-hidden rounded-[4px] border-l border-t border-line sm:grid-cols-2">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Accounts</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{trader.accountCount}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Equity</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney(trader.totalEquity)}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Last active</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{new Date(trader.lastActivityAt).toLocaleString()}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Mode</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Support + risk review</p>
               </div>

@@ -39,7 +39,7 @@ function LessonRow({ lesson, courseSlug }: { lesson: AcademyLessonSummaryDto; co
   return (
     <Link
       href={`/academy/${courseSlug}/lessons/${lesson.slug}`}
-      className="flex items-center gap-3 rounded-xl border border-line bg-background px-4 py-3 transition-colors hover:border-accent/40 hover:bg-panel"
+      className="flex items-center gap-3 rounded-[4px] border border-line bg-background px-4 py-3 transition-colors hover:border-accent/40 hover:bg-panel"
     >
       <span className="shrink-0">
         {isComplete ? (
@@ -65,7 +65,7 @@ function ModuleAccordion({ mod, courseSlug }: { mod: AcademyModuleDto; courseSlu
   const completed = mod.lessons.filter((l) => l.progressStatus === "COMPLETED").length;
 
   return (
-    <div className="rounded-2xl border border-line bg-panel overflow-hidden">
+    <div className="rounded-[4px] border border-line bg-panel overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -106,7 +106,7 @@ export default function CoursePage({ params }: { params: Promise<{ courseSlug: s
     return (
       <WorkspacePage eyebrow="Academy" title="Loading…" description="">
         <div className="space-y-3">
-          {[1, 2, 3].map((i) => <div key={i} className="h-24 animate-pulse rounded-2xl bg-panel" />)}
+          {[1, 2, 3].map((i) => <div key={i} className="h-24 animate-pulse rounded-[4px] bg-panel" />)}
         </div>
       </WorkspacePage>
     );

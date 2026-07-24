@@ -84,8 +84,8 @@ export function DirectorySearchOverlay<T>({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex h-[92vh] w-[96vw] max-w-6xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[28px] border border-line bg-panel shadow-[0_30px_90px_rgba(0,0,0,0.6)] focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[96vw] max-w-6xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[6px] border border-line bg-panel shadow-[0_24px_64px_rgba(0,0,0,0.5)] focus:outline-none">
           <div className="flex min-h-0 w-full flex-col">
             <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
               <div>
@@ -97,15 +97,15 @@ export function DirectorySearchOverlay<T>({
                 <button
                   type="button"
                   aria-label="Close search"
-                  className="grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted transition hover:text-foreground"
+                  className="grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted transition hover:text-foreground"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </Dialog.Close>
             </div>
 
-            <div className="grid min-h-0 flex-1 gap-0 lg:grid-cols-[360px_minmax(0,1fr)]">
-              <div className="min-h-0 border-r border-line p-5">
+            <div className="grid min-h-0 max-h-[calc(90vh-92px)] flex-1 items-stretch gap-0 lg:grid-cols-[360px_minmax(0,1fr)]">
+              <div className="flex min-h-0 flex-col border-r border-line p-5">
                 <div className="grid gap-3">
                   <SearchField
                     label={searchLabel}
@@ -166,7 +166,7 @@ export function DirectorySearchOverlay<T>({
                   </div>
                 </div>
 
-                <div className="mt-4 min-h-0 space-y-2 overflow-y-auto pr-1" style={{ maxHeight: "calc(92vh - 270px)" }}>
+                <div className="invisible-scrollbar mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
                   {filteredItems.length === 0 ? (
                     <EmptyState title={emptyTitle} description={emptyDescription} />
                   ) : (
@@ -178,7 +178,7 @@ export function DirectorySearchOverlay<T>({
                           key={id}
                           type="button"
                           onClick={() => onSelect(id)}
-                          className={`w-full rounded-2xl border p-3 text-left transition ${
+                          className={`w-full rounded-[4px] border p-3 text-left transition ${
                             active
                               ? "border-accent/40 bg-accent/10"
                               : "border-line bg-background hover:border-accent/30"
@@ -192,7 +192,7 @@ export function DirectorySearchOverlay<T>({
                 </div>
               </div>
 
-              <div className="min-h-0 p-5">
+              <div className="invisible-scrollbar min-h-0 overflow-y-auto p-5">
                 {activeItem ? (
                   renderPreview(activeItem)
                 ) : (

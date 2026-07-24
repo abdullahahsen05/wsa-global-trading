@@ -129,12 +129,12 @@ export function Topbar({
   }, [notificationsOpen]);
 
   return (
-    <header className="sticky top-0 z-20 border-b border-line bg-panel/95 px-4 py-3 backdrop-blur-lg lg:px-7">
+    <header className="sticky top-0 z-20 min-h-16 border-b border-line bg-panel px-4 py-3 lg:px-7">
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <button
             onClick={onOpenMobileNav}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[rgba(255,255,255,0.08)] bg-panel-strong text-muted lg:hidden"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[4px] border border-line bg-panel-strong text-muted lg:hidden"
             aria-label="Open navigation"
           >
             <Menu className="h-4 w-4" />
@@ -155,14 +155,14 @@ export function Topbar({
             >
               <Bell className="h-4 w-4" />
               {unreadCount > 0 && (
-                <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-background">
+                <span className="absolute right-0.5 top-0.5 grid h-4 min-w-4 place-items-center rounded-[4px] bg-accent px-1 text-[10px] font-bold text-background">
                   {unreadCount > 99 ? "99+" : unreadCount}
                 </span>
               )}
             </button>
 
             <div
-              className={`absolute right-0 top-full z-30 mt-3 w-[min(92vw,340px)] rounded-[20px] border border-line bg-panel shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition duration-150 ${
+              className={`absolute right-0 top-full z-30 mt-3 w-[min(92vw,340px)] rounded-[6px] border border-line bg-panel shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition duration-150 ${
                 notificationsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none -translate-y-2 opacity-0"
               }`}
             >
@@ -186,14 +186,14 @@ export function Topbar({
                   <button
                     type="button"
                     onClick={() => setNotificationsOpen(false)}
-                    className="grid h-9 w-9 place-items-center rounded-full border border-line bg-background text-muted transition hover:text-foreground"
+                    className="grid h-8 w-8 place-items-center rounded-[4px] border border-line bg-background text-muted transition-colors hover:text-foreground"
                     aria-label="Close notifications"
                   >
                     <X className="h-4 w-4" />
                   </button>
                 </div>
               </div>
-              <div className="max-h-80 overflow-auto p-2">
+              <div className="invisible-scrollbar max-h-80 overflow-y-auto">
                 {notifications.length === 0 ? (
                   <p className="px-4 py-6 text-center text-sm text-muted">No notifications yet.</p>
                 ) : (
@@ -213,11 +213,11 @@ export function Topbar({
                         key={notification.id}
                         type="button"
                         onClick={() => handleMarkRead(notification.id)}
-                        className={`flex w-full items-start gap-3 rounded-[16px] border px-4 py-3 text-left transition hover:bg-panel ${
-                          isUnread ? "border-accent/20 bg-background/70" : "border-line bg-background/40"
+                        className={`flex w-full items-start gap-3 border-b border-line px-4 py-3 text-left transition-colors hover:bg-panel-strong ${
+                          isUnread ? "border-l-2 border-l-accent bg-background/70" : "bg-background/40"
                         }`}
                       >
-                        <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border ${toneClass}`}>
+                        <div className={`grid h-9 w-9 shrink-0 place-items-center rounded-[4px] border ${toneClass}`}>
                           <Icon className="h-4 w-4" />
                         </div>
                         <div className="min-w-0 flex-1">
@@ -238,13 +238,13 @@ export function Topbar({
               </div>
             </div>
           </div>
-          <span className="hidden rounded-full border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent sm:inline-flex items-center">
+          <span className="hidden rounded-[4px] border border-accent/30 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent sm:inline-flex items-center">
             {role === "ADMIN" ? "Admin" : role === "PARTNER" ? "Partner" : "Trader"}
           </span>
           {role === "TRADER" ? (
             <select
               aria-label="Select one of your trading accounts"
-              className="h-10 max-w-[260px] rounded-full border border-[rgba(255,255,255,0.08)] bg-panel-strong px-4 text-sm font-semibold text-foreground outline-none"
+              className="h-10 max-w-[260px] rounded-[5px] border border-line bg-panel-strong px-3 text-sm font-semibold text-foreground outline-none focus:border-accent"
               disabled={tradingAccounts.length === 0}
             >
               {tradingAccounts.length === 0 ? (
@@ -260,7 +260,7 @@ export function Topbar({
           ) : null}
         </div>
       </div>
-      <nav className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+      <nav className="invisible-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
         {mobileItems.map((item) => (
           <Link
             key={item.href}

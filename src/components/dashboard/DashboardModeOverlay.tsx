@@ -30,10 +30,7 @@ const container = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
-    transition: {
-      staggerChildren: 0.06,
-      delayChildren: 0.04,
-    },
+    transition: { duration: 0.2 },
   },
 };
 
@@ -65,7 +62,7 @@ function DrawdownPanel({ drawdown, riskReward }: { drawdown: number; riskReward:
         </div>
         <TrendingDown className="h-5 w-5 text-accent" />
       </div>
-      <div className="mt-5 rounded-2xl border border-line bg-background p-4">
+      <div className="mt-5 rounded-[4px] border border-line bg-background p-4">
         <div className="flex items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Max drawdown</p>
@@ -82,11 +79,11 @@ function DrawdownPanel({ drawdown, riskReward }: { drawdown: number; riskReward:
         <p className="mt-2 text-xs text-muted">Threshold mapped to an 8% reference band.</p>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
-        <div className="rounded-2xl border border-line bg-background p-4">
+        <div className="rounded-[4px] border border-line bg-background p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Risk / reward</p>
           <p className="mt-2 text-xl font-semibold text-accent-2">{riskReward.toFixed(2)}</p>
         </div>
-        <div className="rounded-2xl border border-line bg-background p-4">
+        <div className="rounded-[4px] border border-line bg-background p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Account state</p>
           <p className="mt-2 text-xl font-semibold text-foreground">Stable</p>
         </div>
@@ -132,8 +129,8 @@ export function DashboardModeOverlay({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/82 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex h-[92vh] w-[96vw] max-w-7xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[28px] border border-line bg-panel focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/82" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[96vw] max-w-7xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[6px] border border-line bg-panel focus:outline-none">
           <motion.div
             variants={container}
             initial="hidden"
@@ -141,24 +138,27 @@ export function DashboardModeOverlay({
             transition={{ duration: 0.28 }}
             className="flex min-h-0 w-full flex-col"
           >
-            <Dialog.Title className="sr-only">{title}</Dialog.Title>
-            <Dialog.Description className="sr-only">{description}</Dialog.Description>
-            <div className="flex justify-end border-b border-line px-5 py-4">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">Dashboard detail</p>
+                <Dialog.Title className="mt-1 text-lg font-semibold text-foreground">{title}</Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm text-muted">{description}</Dialog.Description>
+              </div>
               <Dialog.Close asChild>
                 <button
                   type="button"
                   aria-label="Close dashboard overlay"
-                  className="grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted transition hover:text-foreground"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-[4px] border border-line bg-background text-muted transition hover:text-foreground"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </Dialog.Close>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-5">
+            <div className="invisible-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
               {view === "CURRENT_EQUITY" ? (
-                <div className="grid gap-4 xl:grid-cols-[0.66fr_0.34fr]">
-                  <Panel>
+                <div className="grid items-stretch gap-4 xl:grid-cols-[0.66fr_0.34fr]">
+                  <Panel className="h-full">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
@@ -175,7 +175,7 @@ export function DashboardModeOverlay({
                         {live.pnl >= 0 ? "Open profit" : "Open loss"}
                       </StatusPill>
                     </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="definition-grid mt-4 grid gap-0 md:grid-cols-3">
                       <StatTile
                         label="Account balance"
                         value={formatMoney({ amount: live.balance, currency: "USD" })}
@@ -203,8 +203,8 @@ export function DashboardModeOverlay({
               ) : null}
 
               {view === "CHECK_LIMITS" ? (
-                <div className="grid gap-4 xl:grid-cols-[0.58fr_0.42fr]">
-                  <Panel>
+                <div className="grid items-stretch gap-4 xl:grid-cols-[0.58fr_0.42fr]">
+                  <Panel className="h-full">
                     <div className="flex items-start justify-between gap-4">
                       <div>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
@@ -217,7 +217,7 @@ export function DashboardModeOverlay({
                       </div>
                       <StatusPill tone="accent">Mock limits</StatusPill>
                     </div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div className="definition-grid mt-4 grid gap-0 md:grid-cols-3">
                       <StatTile
                         label="Daily loss limit"
                         value={formatMoney({ amount: dailyLossLimit, currency: "USD" })}
@@ -234,14 +234,14 @@ export function DashboardModeOverlay({
                         helper={`${openTrades.length} open trades currently active.`}
                       />
                     </div>
-                    <div className="mt-5 grid gap-3 md:grid-cols-2">
-                      <div className="rounded-2xl border border-line bg-background p-4">
+                    <div className="definition-grid mt-5 grid gap-0 md:grid-cols-2">
+                      <div className="p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Limit headroom</p>
                         <p className="mt-2 text-xl font-semibold text-accent-2">
                           {formatMoney({ amount: dailyLossLimit - 1240, currency: "USD" })}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-line bg-background p-4">
+                      <div className="p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Risk posture</p>
                         <p className="mt-2 text-xl font-semibold text-foreground">Within bounds</p>
                       </div>
@@ -278,7 +278,7 @@ export function DashboardModeOverlay({
                       ))}
                     </div>
                   </div>
-                  <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  <div className="definition-grid mt-5 grid gap-0 md:grid-cols-3">
                     <StatTile
                       label="Total profit"
                       value={formatMoney({ amount: summary.totalProfit, currency: "USD" })}
@@ -287,7 +287,7 @@ export function DashboardModeOverlay({
                     <StatTile label="Closed trades" value={summary.tradeCount} tone="accent" />
                     <StatTile label="Consistency" value={formatPercent(summary.consistency)} tone="lime" />
                   </div>
-                  <div className="mt-5 grid gap-3 md:grid-cols-3">
+                  <div className="definition-grid mt-5 grid gap-0 md:grid-cols-3">
                     <StatTile label="Win rate" value={formatPercent(summary.winRate)} />
                     <StatTile label="Profit factor" value={profitFactor.toFixed(2)} tone="accent" />
                     <StatTile label="Avg win/loss" value={avgWinLoss.toFixed(2)} tone="lime" />

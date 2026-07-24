@@ -73,8 +73,8 @@ export default function PartnerCrmPage() {
           description="Once traders are assigned to you, you can keep notes about them here."
         />
       ) : (
-        <div className="grid gap-5 xl:grid-cols-[1fr_1.4fr]">
-          <Panel>
+        <div className="grid items-stretch gap-5 xl:h-[560px] xl:grid-cols-[1fr_1.4fr]">
+          <Panel className="flex min-h-0 flex-col xl:h-full">
             <SelectField
               label="Trader"
               value={traderId}
@@ -101,7 +101,7 @@ export default function PartnerCrmPage() {
             </div>
             {notice ? (
               <div
-                className={`mt-3 rounded-xl border px-3 py-2 text-sm ${
+                className={`mt-3 rounded-[4px] border px-3 py-2 text-sm ${
                   notice.type === "success"
                     ? "border-accent/20 bg-accent/10 text-accent"
                     : "border-danger/20 bg-danger/10 text-danger"
@@ -121,16 +121,16 @@ export default function PartnerCrmPage() {
             </div>
           </Panel>
 
-          <Panel>
-            <h2 className="mb-4 text-lg font-semibold text-foreground">
+          <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
+            <h2 className="mb-4 shrink-0 text-lg font-semibold text-foreground">
               Notes {selectedTrader ? `- ${selectedTrader.name}` : ""}
             </h2>
             {notes.length === 0 ? (
               <p className="text-sm text-muted">No notes yet for this trader.</p>
             ) : (
-              <div className="space-y-3">
+              <div className="invisible-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto">
                 {notes.map((n) => (
-                  <div key={n.id} className="rounded-xl border border-line bg-background px-4 py-3">
+                  <div key={n.id} className="border-b border-line bg-background px-4 py-3 last:border-b-0">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-semibold text-accent">{n.authorName}</p>
                       <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">

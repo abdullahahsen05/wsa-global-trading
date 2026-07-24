@@ -16,7 +16,9 @@ const crmTabs: Array<{ key: CrmTab; label: string }> = [
 ];
 
 function tabButtonClass(active: boolean) {
-  return `btn-dark h-9 px-4 text-xs ${active ? "btn-active" : ""}`;
+  return `h-10 shrink-0 border-b-2 px-1 text-sm font-medium transition-colors ${
+    active ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
+  }`;
 }
 
 function traderToContact(trader: TraderProfileDto): CrmContact {
@@ -118,8 +120,8 @@ export default function AdminCrmPage() {
       title="CRM"
       description="Centralized management system for all traders and platform users."
     >
-      <Panel>
-        <div className="flex flex-wrap gap-3">
+      <div className="invisible-scrollbar overflow-x-auto border-b border-line">
+        <div className="flex min-w-max gap-7">
           {crmTabs.map((tab) => {
             const active = activeOverlay === tab.key;
             return (
@@ -134,7 +136,7 @@ export default function AdminCrmPage() {
             );
           })}
         </div>
-      </Panel>
+      </div>
 
       <InlineStatusStrip
         items={[
@@ -154,13 +156,13 @@ export default function AdminCrmPage() {
       />
 
       {feedbackMessage ? (
-        <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
+        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
           {feedbackMessage}
         </div>
       ) : null}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)]">
-        <Panel>
+      <div className="mt-5 grid items-stretch gap-4 lg:h-[420px] lg:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
+        <Panel className="invisible-scrollbar min-h-0 overflow-y-auto lg:h-full">
           {selectedContact ? (
             <>
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -179,20 +181,20 @@ export default function AdminCrmPage() {
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="mt-4 grid gap-0 overflow-hidden rounded-[4px] border-l border-t border-line sm:grid-cols-2 xl:grid-cols-4">
+                <div className="border-b border-r border-line bg-background px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Segment</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.segment}</p>
                 </div>
-                <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                <div className="border-b border-r border-line bg-background px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Team</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.team}</p>
                 </div>
-                <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                <div className="border-b border-r border-line bg-background px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Linked accounts</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.accountIds.length}</p>
                 </div>
-                <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                <div className="border-b border-r border-line bg-background px-4 py-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Subscription</p>
                   <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.subscription}</p>
                 </div>
@@ -200,7 +202,7 @@ export default function AdminCrmPage() {
 
               <div className="mt-4 flex flex-wrap gap-2">
                 {selectedContact.tags.map((tag) => (
-                  <span key={tag} className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+                  <span key={tag} className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                     {tag}
                   </span>
                 ))}
@@ -228,7 +230,7 @@ export default function AdminCrmPage() {
           )}
         </Panel>
 
-        <Panel>
+        <Panel className="flex min-h-0 flex-col overflow-hidden lg:h-full">
           {selectedContact ? (
             <>
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -242,15 +244,15 @@ export default function AdminCrmPage() {
                 </GhostButton>
               </div>
 
-              <div className="mt-4 space-y-3">
+              <div className="invisible-scrollbar mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto">
                 {recentNotes.length === 0 ? (
-                  <EmptyState
-                    title="No notes yet"
-                    description="This profile does not have any CRM notes."
-                  />
+                  <div className="border-t border-line py-4">
+                    <p className="text-sm font-semibold text-foreground">No notes yet</p>
+                    <p className="mt-1 text-sm text-muted">This profile does not have any CRM notes.</p>
+                  </div>
                 ) : (
                   recentNotes.map((note) => (
-                    <div key={note.id} className="rounded-2xl border border-line bg-background p-4">
+                    <div key={note.id} className="border-t border-line py-4">
                       <p className="text-sm leading-6 text-foreground">{note.note}</p>
                       <p className="mt-2 text-xs text-muted">
                         {note.authorName} - {new Date(note.createdAt).toLocaleString()}

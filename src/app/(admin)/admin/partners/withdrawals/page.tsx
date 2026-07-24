@@ -136,11 +136,11 @@ export default function AdminPartnerWithdrawalsPage() {
           onClick: () => setFilter(status),
         }))}
       />
-      {notice ? <p className="mt-4 rounded-xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">{notice}</p> : null}
-      {error ? <p className="mt-4 rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
+      {notice ? <p className="mt-4 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">{notice}</p> : null}
+      {error ? <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
 
-      <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
-        <Panel className="min-w-0 w-full xl:col-span-2">
+      <div className="mt-5 grid items-stretch gap-5 xl:h-[620px] xl:grid-cols-3">
+        <Panel className="invisible-scrollbar min-h-0 min-w-0 w-full overflow-auto xl:col-span-2 xl:h-full">
           {withdrawals.isLoading ? (
             <p className="text-sm text-muted">Loading…</p>
           ) : rows.length === 0 ? (
@@ -192,13 +192,13 @@ export default function AdminPartnerWithdrawalsPage() {
           )}
         </Panel>
 
-        <Panel className="min-w-0 w-full">
+        <Panel className="invisible-scrollbar min-h-0 min-w-0 w-full overflow-y-auto xl:h-full">
           <h2 className="text-lg font-semibold text-foreground">Review request</h2>
           {!selected ? (
             <p className="mt-3 text-sm text-muted">Select a request to inspect its locked ledger items and payout reference.</p>
           ) : (
             <div className="mt-4 space-y-4">
-              <div className="grid grid-cols-2 gap-3 rounded-2xl border border-accent/20 bg-accent/5 p-4">
+              <div className="grid grid-cols-2 gap-3 rounded-[4px] border border-accent/20 bg-accent/5 p-4">
                 <div>
                   <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">Available now</p>
                   <p className="mt-1 text-lg font-semibold text-accent-2">
@@ -219,12 +219,12 @@ export default function AdminPartnerWithdrawalsPage() {
                   Requested funds are locked immediately, so they no longer appear in the available balance.
                 </p>
               </div>
-              <div className="rounded-2xl border border-line bg-background p-4 text-sm">
+              <div className="rounded-[4px] border border-line bg-background p-4 text-sm">
                 <p className="font-semibold text-foreground">{selected.payoutMethod}</p>
                 <p className="mt-1 break-all text-muted">{selected.payoutReference}</p>
                 <p className="mt-2 text-xs text-muted">Requested {new Date(selected.createdAt).toLocaleString()}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background p-4">
+              <div className="rounded-[4px] border border-line bg-background p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Locked ledger items</p>
                 <div className="mt-3 space-y-2">
                   {(selected.includedItems ?? []).map((item) => (
@@ -237,11 +237,11 @@ export default function AdminPartnerWithdrawalsPage() {
                   ))}
                 </div>
               </div>
-              <textarea value={adminNote} onChange={(event) => setAdminNote(event.target.value)} maxLength={1000} rows={3} placeholder="Admin note (optional)" className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground" />
+              <textarea value={adminNote} onChange={(event) => setAdminNote(event.target.value)} maxLength={1000} rows={3} placeholder="Admin note (optional)" className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground" />
               {(selected.status === "PENDING_REVIEW" || selected.status === "APPROVED") ? (
-                <textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} maxLength={1000} rows={2} placeholder="Rejection reason (required only to reject)" className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground" />
+                <textarea value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} maxLength={1000} rows={2} placeholder="Rejection reason (required only to reject)" className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground" />
               ) : null}
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-3 border-t border-line pt-4">
                 {selected.status === "PENDING_REVIEW" ? <PrimaryButton type="button" disabled={action.isPending} onClick={() => action.mutate("approve")}>Approve</PrimaryButton> : null}
                 {selected.status === "APPROVED" ? <PrimaryButton type="button" disabled={action.isPending} onClick={() => action.mutate("mark-paid")}>Mark paid</PrimaryButton> : null}
                 {(selected.status === "PENDING_REVIEW" || selected.status === "APPROVED") ? (
@@ -253,7 +253,7 @@ export default function AdminPartnerWithdrawalsPage() {
         </Panel>
       </div>
 
-      <Panel className="mt-5">
+      <Panel className="mt-5 overflow-hidden">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Partner commission and rebate ledger</h2>
@@ -274,7 +274,7 @@ export default function AdminPartnerWithdrawalsPage() {
 
         {selectedLedger ? (
           <>
-            <div className="mt-4 rounded-2xl border border-line bg-background p-4 text-sm">
+            <div className="mt-4 rounded-[4px] border border-line bg-background p-4 text-sm">
               <p className="font-semibold text-foreground">{selectedLedger.partnerName}</p>
               <p className="mt-1 text-muted">
                 {selectedLedger.partnerEmail} · referral {selectedLedger.referralCode ?? "not set"} · {selectedLedger.referredTraderCount} referred traders
@@ -288,8 +288,8 @@ export default function AdminPartnerWithdrawalsPage() {
                 { label: "Locked", value: formatMoney({ amount: selectedLedger.lockedWithdrawalAmount, currency: selectedLedger.currency }), tone: "accent" },
               ]} />
             </div>
-            <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
-              <div className="min-w-0 xl:col-span-2">
+            <div className="mt-5 grid items-stretch gap-5 xl:h-[520px] xl:grid-cols-3">
+              <div className="invisible-scrollbar min-h-0 min-w-0 overflow-auto xl:col-span-2 xl:h-full">
                 {selectedLedger.items.length === 0 ? (
                   <EmptyState title="No ledger entries" description="Commissions and rebates for this partner will appear here." />
                 ) : (
@@ -306,7 +306,7 @@ export default function AdminPartnerWithdrawalsPage() {
                   />
                 )}
               </div>
-              <form onSubmit={createRebate} className="w-full space-y-4 rounded-2xl border border-line bg-background p-4">
+              <form onSubmit={createRebate} className="invisible-scrollbar flex min-h-0 w-full flex-col gap-4 overflow-y-auto rounded-[4px] border border-line bg-background p-4 xl:h-full">
                 <h3 className="font-semibold text-foreground">Add rebate entry</h3>
                 <TextField label={`Amount (${selectedLedger.currency})`} type="number" min="0.01" step="0.01" required value={rebateAmount} onChange={(event) => setRebateAmount(event.target.value)} />
                 <SelectField label="Initial status" value={rebateStatus} onChange={(event) => setRebateStatus(event.target.value as typeof rebateStatus)}>
@@ -314,7 +314,7 @@ export default function AdminPartnerWithdrawalsPage() {
                   <option value="APPROVED">Approved and withdrawable</option>
                 </SelectField>
                 <TextField label="Description" maxLength={500} value={rebateDescription} onChange={(event) => setRebateDescription(event.target.value)} placeholder="Reason or payment context" />
-                <PrimaryButton type="submit" disabled={rebate.isPending || !rebateAmount}>
+                <PrimaryButton type="submit" disabled={rebate.isPending || !rebateAmount} className="mt-auto w-full">
                   {rebate.isPending ? "Creating…" : "Create rebate"}
                 </PrimaryButton>
               </form>

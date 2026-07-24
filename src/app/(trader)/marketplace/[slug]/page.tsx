@@ -64,7 +64,7 @@ export default function MarketplaceProductPage({
   if (isLoading) {
     return (
       <WorkspacePage eyebrow="Marketplace" title="Loading…" description="">
-        <div className="h-48 animate-pulse rounded-3xl bg-panel" />
+        <div className="h-48 animate-pulse rounded-[4px] bg-panel" />
       </WorkspacePage>
     );
   }

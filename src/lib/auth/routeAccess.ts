@@ -41,8 +41,9 @@ export function workspaceRedirect(role: UserRole, pathname: string): string | nu
   const isPartnerRoute = pathMatches(pathname, PARTNER_ROUTE_PREFIXES)
   const isAdminRoute = pathMatches(pathname, ADMIN_ROUTE_PREFIXES)
   const isTraderRoute = pathMatches(pathname, TRADER_ROUTE_PREFIXES)
+  const isRegisterRoute = pathname === "/register"
 
-  if (isAuthRoute) return home
+  if (isAuthRoute && !isRegisterRoute) return home
 
   if (role === 'PARTNER') {
     return isPartnerRoute ? null : '/partner'

@@ -24,7 +24,7 @@ function EquityCurvePanel({
 }) {
   if (data.length === 0) {
     return (
-      <div className="h-72 rounded-lg border border-line bg-panel p-4 flex flex-col justify-between">
+      <div className="flex h-72 flex-col justify-between rounded-[4px] border border-line bg-panel p-5">
         <div>
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           <p className="mt-1 text-xs text-muted">{description}</p>
@@ -53,19 +53,19 @@ function EquityCurvePanel({
   const latest = data[data.length - 1];
 
   return (
-    <div className="h-72 rounded-lg border border-line bg-panel p-4">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="h-72 rounded-[4px] border border-line bg-panel p-5">
+      <div className="mb-3 flex items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-foreground">{title}</h3>
           <p className="mt-1 text-xs text-muted">{description}</p>
         </div>
-        <span className="text-sm font-semibold text-accent">
+        <span className="shrink-0 text-base font-semibold tabular-nums text-accent">
           {formatMoney({ amount: latest.equity, currency: "USD" })}
         </span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[235px] w-full overflow-visible rounded-md bg-background/45"
+        className="h-[220px] w-full overflow-visible"
         role="img"
         aria-label="Equity curve"
       >
@@ -83,16 +83,15 @@ function EquityCurvePanel({
             y1={height * ratio}
             y2={height * ratio}
             stroke="#1d3832"
-            strokeDasharray="6 8"
             strokeWidth="1"
           />
         ))}
         <polygon points={area} fill="url(#equitySvgGradient)" />
-        <polyline points={line} fill="none" stroke="#21d19f" strokeWidth="4" />
+        <polyline points={line} fill="none" stroke="#21d19f" strokeWidth="2.5" />
         {points.slice(-1).map(({ x, y }) => (
           <g key="latest">
-            <circle cx={x} cy={y} r="7" fill="#07100f" stroke="#21d19f" strokeWidth="4" />
-            <circle cx={x} cy={y} r="3" fill="#21d19f" />
+            <circle cx={x} cy={y} r="5" fill="#07100f" stroke="#21d19f" strokeWidth="2" />
+            <circle cx={x} cy={y} r="2" fill="#21d19f" />
           </g>
         ))}
       </svg>

@@ -67,8 +67,8 @@ export default function PlatformPreviewPage() {
         ]}
       />
 
-      <div className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_0.7fr]">
-        <Panel>
+      <div className="mt-5 grid items-stretch gap-5 lg:grid-cols-[1.3fr_0.7fr]">
+        <Panel className="h-full">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">What unlocks after subscribing</p>
           <h2 className="mt-2 text-xl font-semibold text-foreground">Read-only platform tour</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
@@ -76,12 +76,12 @@ export default function PlatformPreviewPage() {
             and does not trigger copy trading, terminal feeds, or AI actions.
           </p>
 
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
+          <div className="definition-grid mt-5 grid gap-0 md:grid-cols-2">
             {featureCards.map((card) => {
               const Icon = card.icon;
               return (
-                <div key={card.title} className="rounded-2xl border border-line bg-background p-4">
-                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+                <div key={card.title} className="rounded-[4px] border border-line bg-background p-4">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-[4px] bg-accent/10">
                     <Icon className="h-5 w-5 text-accent" />
                   </div>
                   <h3 className="text-sm font-semibold text-foreground">{card.title}</h3>
@@ -92,20 +92,20 @@ export default function PlatformPreviewPage() {
           </div>
         </Panel>
 
-        <Panel>
+        <Panel className="h-full">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">Pricing model</p>
-          <div className="mt-4 space-y-3">
-            <div className="rounded-2xl border border-line bg-background p-4">
+          <div className="mt-4 overflow-hidden rounded-[4px] border border-line">
+            <div className="border-b border-line bg-background p-4">
               <p className="text-sm font-semibold text-foreground">Platform subscription</p>
               <p className="mt-1 text-sm text-accent">$50/month</p>
               <p className="mt-1 text-xs text-muted">Renews monthly from your subscription start date.</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="border-b border-line bg-background p-4">
               <p className="text-sm font-semibold text-foreground">Copy account tiers</p>
               <p className="mt-1 text-xs text-muted">Normal: $10/month per account</p>
               <p className="text-xs text-muted">Ultra Fast: $15/month per account</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="bg-background p-4">
               <p className="text-sm font-semibold text-foreground">Independent purchases</p>
               <p className="mt-1 text-xs text-muted">Bot / EA: $500 one-time</p>
               <p className="text-xs text-muted">1-to-1 mentorship: €2,500 one-time</p>
@@ -115,25 +115,25 @@ export default function PlatformPreviewPage() {
         </Panel>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        <Panel>
+      <div className="mt-5 grid items-stretch gap-5 xl:grid-cols-2">
+        <Panel className="h-full">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">Dashboard Preview</p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-line bg-background p-4">
+          <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-3">
+            <div className="rounded-[4px] border border-line bg-background p-4">
               <p className="text-xs text-muted">Balance</p>
               <p className="mt-2 text-xl font-semibold text-foreground">$52,480</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="rounded-[4px] border border-line bg-background p-4">
               <p className="text-xs text-muted">Equity</p>
               <p className="mt-2 text-xl font-semibold text-accent-2">$54,120</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="rounded-[4px] border border-line bg-background p-4">
               <p className="text-xs text-muted">Floating PnL</p>
               <p className="mt-2 text-xl font-semibold text-accent">+$1,640</p>
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-line bg-background p-4">
+          <div className="mt-4 rounded-[4px] border border-line bg-background p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-foreground">Example MT5 account</p>
@@ -147,10 +147,10 @@ export default function PlatformPreviewPage() {
           </div>
         </Panel>
 
-        <Panel>
+        <Panel className="h-full">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">Workflow Preview</p>
-          <div className="mt-4 space-y-3">
-            <div className="rounded-2xl border border-line bg-background p-4">
+          <div className="mt-4 overflow-hidden rounded-[4px] border border-line">
+            <div className="border-b border-line bg-background p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Copy strategy example</p>
@@ -159,7 +159,7 @@ export default function PlatformPreviewPage() {
                 <StatusPill tone="accent">Locked until active</StatusPill>
               </div>
             </div>
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="border-b border-line bg-background p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-foreground">AI assistant example</p>
@@ -168,7 +168,7 @@ export default function PlatformPreviewPage() {
                 <StatusPill tone="muted">Preview only</StatusPill>
               </div>
             </div>
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="bg-background p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Professional terminal preview</p>
@@ -176,7 +176,7 @@ export default function PlatformPreviewPage() {
                 </div>
                 <StatusPill tone="danger">Professional</StatusPill>
               </div>
-              <div className="mt-3 h-24 rounded-xl border border-dashed border-line bg-panel-strong" />
+              <div className="mt-3 h-24 rounded-[4px] border border-dashed border-line bg-panel-strong" />
             </div>
           </div>
         </Panel>

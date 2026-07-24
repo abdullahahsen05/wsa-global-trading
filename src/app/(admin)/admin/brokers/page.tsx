@@ -161,7 +161,7 @@ export default function AdminBrokersPage() {
       title="Broker catalog"
       description="Manage the broker companies and MetaTrader servers traders can select during account connection."
     >
-      <Panel>
+      <div className="border border-line border-l-2 border-l-accent bg-panel px-4 py-3">
         <div className="flex items-start gap-3">
           <WalletCards className="mt-0.5 h-5 w-5 text-accent" />
           <div>
@@ -172,10 +172,10 @@ export default function AdminBrokersPage() {
             </p>
           </div>
         </div>
-      </Panel>
+      </div>
 
       {notice ? (
-        <div className={`mt-5 rounded-xl border px-4 py-3 text-sm ${
+        <div className={`mt-5 rounded-[4px] border px-4 py-3 text-sm ${
           notice.tone === "success"
             ? "border-accent/20 bg-accent/10 text-accent"
             : "border-danger/20 bg-danger/10 text-danger"
@@ -184,11 +184,11 @@ export default function AdminBrokersPage() {
         </div>
       ) : null}
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.4fr_1fr]">
-        <Panel>
-          <h2 className="text-lg font-semibold text-foreground">Broker providers</h2>
-          <p className="mt-1 text-sm text-muted">Select a provider to manage its server list.</p>
-          <div className="mt-4">
+      <div className="mt-5 grid items-stretch gap-5 xl:h-[520px] xl:grid-cols-[minmax(0,1.8fr)_minmax(340px,0.7fr)]">
+        <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
+          <h2 className="shrink-0 text-lg font-semibold text-foreground">Broker providers</h2>
+          <p className="mt-1 shrink-0 text-sm text-muted">Select a provider to manage its server list.</p>
+          <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-auto">
             {providers.isLoading ? (
               <p className="text-sm text-muted">Loading broker catalog…</p>
             ) : (providers.data?.providers.length ?? 0) === 0 ? (
@@ -217,9 +217,12 @@ export default function AdminBrokersPage() {
           </div>
         </Panel>
 
-        <Panel>
-          <h2 className="text-lg font-semibold text-foreground">Add broker provider</h2>
-          <form className="mt-4 space-y-4" onSubmit={createProvider}>
+        <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
+          <div className="shrink-0">
+            <h2 className="text-lg font-semibold text-foreground">Add broker provider</h2>
+            <p className="mt-1 text-sm text-muted">Create a broker company before assigning server options.</p>
+          </div>
+          <form className="invisible-scrollbar mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" onSubmit={createProvider}>
             <TextField
               label="Display name"
               required
@@ -245,6 +248,7 @@ export default function AdminBrokersPage() {
             <PrimaryButton
               type="submit"
               disabled={mutate.isPending || !providerName.trim() || (!supportsMt4 && !supportsMt5)}
+              className="mt-auto w-full"
             >
               Create provider
             </PrimaryButton>
@@ -263,7 +267,7 @@ export default function AdminBrokersPage() {
                 Supported: {selected.platformsSupported.join(", ")}
               </p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-end gap-3">
               <GhostButton
                 type="button"
                 disabled={mutate.isPending}
@@ -283,8 +287,8 @@ export default function AdminBrokersPage() {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-5 lg:grid-cols-[1.4fr_1fr]">
-            <div>
+          <div className="mt-5 grid items-stretch gap-5 lg:h-[500px] lg:grid-cols-[minmax(0,1.8fr)_minmax(340px,0.7fr)]">
+            <div className="invisible-scrollbar min-h-0 overflow-auto lg:h-full">
               {(servers.data?.servers.length ?? 0) === 0 ? (
                 <EmptyState title="No configured servers" description="Add a server name for this broker and platform." />
               ) : (
@@ -297,7 +301,7 @@ export default function AdminBrokersPage() {
                     <StatusPill key="status" tone={server.isActive ? "lime" : "danger"}>
                       {server.isActive ? "ACTIVE" : "INACTIVE"}
                     </StatusPill>,
-                    <div key="actions" className="flex flex-wrap gap-2">
+                    <div key="actions" className="flex flex-wrap justify-end gap-3">
                       <GhostButton
                         type="button"
                         onClick={() => editServer(server)}
@@ -322,7 +326,7 @@ export default function AdminBrokersPage() {
               )}
             </div>
             {editingServerId ? (
-              <form onSubmit={updateServer} className="space-y-4 rounded-2xl border border-accent/30 bg-background p-4">
+              <form onSubmit={updateServer} className="invisible-scrollbar flex min-h-0 flex-col gap-4 overflow-y-auto rounded-[4px] border border-accent/30 bg-background p-4 lg:h-full">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Editing server</p>
                   <h3 className="mt-1 font-semibold text-foreground">
@@ -338,7 +342,7 @@ export default function AdminBrokersPage() {
                   onChange={(event) => setEditingServerName(event.target.value)}
                   hint="Changing this updates the option shown to traders."
                 />
-                <div className="flex flex-wrap gap-2">
+                <div className="mt-auto flex flex-wrap gap-3 border-t border-line pt-4">
                   <PrimaryButton type="submit" disabled={mutate.isPending || editingServerName.trim().length < 2}>
                     Save server
                   </PrimaryButton>
@@ -355,7 +359,7 @@ export default function AdminBrokersPage() {
                 </div>
               </form>
             ) : (
-              <form onSubmit={createServer} className="space-y-4 rounded-2xl border border-line bg-background p-4">
+              <form onSubmit={createServer} className="invisible-scrollbar flex min-h-0 flex-col gap-4 overflow-y-auto rounded-[4px] border border-line bg-background p-4 lg:h-full">
                 <h3 className="font-semibold text-foreground">Add configured server</h3>
                 <SelectField
                   label="Platform"
@@ -376,7 +380,7 @@ export default function AdminBrokersPage() {
                   placeholder="Broker-Server-Name"
                   hint="Enter the exact server string expected by MetaApi."
                 />
-                <PrimaryButton type="submit" disabled={mutate.isPending || !serverName.trim()}>
+                <PrimaryButton type="submit" disabled={mutate.isPending || !serverName.trim()} className="mt-auto w-full">
                   Add server
                 </PrimaryButton>
               </form>

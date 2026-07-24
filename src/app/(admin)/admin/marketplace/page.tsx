@@ -268,7 +268,7 @@ export default function AdminMarketplacePage() {
     >
       {/* Analytics */}
       {analytics ? (
-        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="definition-grid grid gap-0 sm:grid-cols-3 xl:grid-cols-6">
           <StatTile label="Products" value={analytics.totalProducts} />
           <StatTile label="Published" value={analytics.publishedProducts} />
           <StatTile label="Requests" value={analytics.totalRequests} />
@@ -281,7 +281,7 @@ export default function AdminMarketplacePage() {
       {/* Notice */}
       {notice ? (
         <div
-          className={`mt-4 rounded-2xl border px-4 py-3 text-sm font-medium ${
+          className={`mt-4 rounded-[4px] border px-4 py-3 text-sm font-medium ${
             notice.type === "success"
               ? "border-accent/20 bg-accent/10 text-accent"
               : "border-danger/20 bg-danger/10 text-danger"
@@ -314,7 +314,7 @@ export default function AdminMarketplacePage() {
       {tab === "products" ? (
         <div className="mt-4">
           {productsLoading ? (
-            <div className="h-32 animate-pulse rounded-3xl bg-panel" />
+            <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
           ) : products.length === 0 ? (
             <EmptyState title="No products yet" description="Create your first bot product." />
           ) : (
@@ -367,7 +367,7 @@ export default function AdminMarketplacePage() {
             ]}
           />
           {accessLoading ? (
-            <div className="h-32 animate-pulse rounded-3xl bg-panel" />
+            <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
           ) : accessError ? (
             <Panel>
               <p className="text-sm text-danger">
@@ -438,7 +438,7 @@ export default function AdminMarketplacePage() {
       {tab === "licenses" ? (
         <div className="mt-4">
           {licensesLoading ? (
-            <div className="h-32 animate-pulse rounded-3xl bg-panel" />
+            <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
           ) : licenses.length === 0 ? (
             <EmptyState
               title="No licenses issued"
@@ -481,14 +481,14 @@ export default function AdminMarketplacePage() {
       {/* Create product dialog */}
       <Dialog.Root open={createOpen} onOpenChange={(o) => { if (!o) setCreateOpen(false); }}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-background p-6 shadow-2xl">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50" />
+          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-background p-6">
             <div className="flex items-center justify-between">
               <Dialog.Title className="text-base font-semibold text-foreground">
                 New Bot Product
               </Dialog.Title>
               <Dialog.Close asChild>
-                <button className="rounded-lg p-1 text-muted hover:text-foreground">
+                <button className="rounded-[4px] p-1 text-muted hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </Dialog.Close>
@@ -504,7 +504,7 @@ export default function AdminMarketplacePage() {
                     maxLength={200}
                     value={form.name}
                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
                 <div>
@@ -518,7 +518,7 @@ export default function AdminMarketplacePage() {
                     value={form.slug}
                     onChange={(e) => setForm((f) => ({ ...f, slug: e.target.value }))}
                     placeholder="e.g. trend-master-pro"
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
               </div>
@@ -530,7 +530,7 @@ export default function AdminMarketplacePage() {
                   maxLength={500}
                   value={form.shortDescription}
                   onChange={(e) => setForm((f) => ({ ...f, shortDescription: e.target.value }))}
-                  className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                 />
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
@@ -541,7 +541,7 @@ export default function AdminMarketplacePage() {
                   <select
                     value={form.platform}
                     onChange={(e) => setForm((f) => ({ ...f, platform: e.target.value as BotProductDto["platform"] }))}
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   >
                     <option value="MT5">MT5</option>
                     <option value="MT4">MT4</option>
@@ -555,7 +555,7 @@ export default function AdminMarketplacePage() {
                   <select
                     value={form.status}
                     onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as BotProductDto["status"] }))}
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   >
                     <option value="DRAFT">Draft</option>
                     <option value="PUBLISHED">Published</option>
@@ -571,7 +571,7 @@ export default function AdminMarketplacePage() {
                     onChange={(e) =>
                       setForm((f) => ({ ...f, difficulty: e.target.value as "BEGINNER" | "INTERMEDIATE" | "ADVANCED" | "" }))
                     }
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   >
                     <option value="">None</option>
                     <option value="BEGINNER">Beginner</option>
@@ -590,7 +590,7 @@ export default function AdminMarketplacePage() {
                     onChange={(e) =>
                       setForm((f) => ({ ...f, riskLevel: e.target.value as "LOW" | "MEDIUM" | "HIGH" | "" }))
                     }
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   >
                     <option value="">None</option>
                     <option value="LOW">Low</option>
@@ -607,7 +607,7 @@ export default function AdminMarketplacePage() {
                     value={form.version}
                     onChange={(e) => setForm((f) => ({ ...f, version: e.target.value }))}
                     placeholder="e.g. 1.0.0"
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
               </div>
@@ -620,7 +620,7 @@ export default function AdminMarketplacePage() {
                   value={form.pricingLabel}
                   onChange={(e) => setForm((f) => ({ ...f, pricingLabel: e.target.value }))}
                   placeholder="e.g. Free, $99/mo, Contact us"
-                  className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                 />
               </div>
               <div className="flex justify-end gap-3 border-t border-line pt-4">
@@ -647,8 +647,8 @@ export default function AdminMarketplacePage() {
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-background p-6 shadow-2xl">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50" />
+          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-background p-6">
             <div className="flex items-center justify-between">
               <div>
                 <Dialog.Title className="text-base font-semibold text-foreground">
@@ -659,7 +659,7 @@ export default function AdminMarketplacePage() {
                 </Dialog.Description>
               </div>
               <Dialog.Close asChild>
-                <button className="rounded-lg p-1 text-muted hover:text-foreground">
+                <button className="rounded-[4px] p-1 text-muted hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </Dialog.Close>
@@ -679,7 +679,7 @@ export default function AdminMarketplacePage() {
                       setUploadForm((current) => ({ ...current, version: event.target.value }))
                     }
                     placeholder="1.0.0"
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
                 <div>
@@ -694,7 +694,7 @@ export default function AdminMarketplacePage() {
                         platform: event.target.value as "MT4" | "MT5",
                       }))
                     }
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   >
                     <option value="MT5">MT5</option>
                     <option value="MT4">MT4</option>
@@ -716,7 +716,7 @@ export default function AdminMarketplacePage() {
                       file: event.target.files?.[0] ?? null,
                     }))
                   }
-                  className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-black"
+                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-[4px] file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-black"
                 />
                 <p className="mt-1.5 text-xs text-muted">
                   Compiled .ex4/.ex5 or a .zip package, up to 50 MB. Source files and DLLs are not accepted.
@@ -734,7 +734,7 @@ export default function AdminMarketplacePage() {
                   onChange={(event) =>
                     setUploadForm((current) => ({ ...current, releaseNotes: event.target.value }))
                   }
-                  className="w-full resize-none rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  className="w-full resize-none rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                 />
               </div>
 

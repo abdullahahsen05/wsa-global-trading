@@ -18,13 +18,10 @@
   --accent-2: #d7ff32;
   --danger: #ff5d4d;
 
-  --card-radius: 16px;
-  --section-radius: 20px;
-
-  --shadow-soft: 0 12px 30px rgba(0, 0, 0, 0.28);
-  --shadow-card: 0 8px 22px rgba(0, 0, 0, 0.22);
-
-  --card-gradient: linear-gradient(180deg, rgba(20, 22, 24, 0.96), rgba(12, 13, 14, 0.98));
+  --card-radius: 4px;
+  --section-radius: 4px;
+  --shadow-soft: none;
+  --shadow-card: none;
 }
 
 @theme inline {
@@ -40,17 +37,20 @@
   --color-accent: var(--accent);
   --color-accent-2: var(--accent-2);
   --color-danger: var(--danger);
-  --font-sans: "Aptos", "Segoe UI Variable", "Segoe UI", Arial, Helvetica, sans-serif;
+  --font-sans: var(--font-manrope), "Segoe UI Variable", "Segoe UI", Arial, Helvetica, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", monospace;
 }
 
 * {
   box-sizing: border-box;
+}
+
+.invisible-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 
-*::-webkit-scrollbar {
+.invisible-scrollbar::-webkit-scrollbar {
   display: none;
   width: 0;
   height: 0;
@@ -62,9 +62,7 @@ html {
 
 body {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 50% -10%, rgba(255, 207, 0, 0.045), transparent 32rem),
-    linear-gradient(180deg, #070808 0%, var(--background) 42%, #030303 100%);
+  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
   font-synthesis-weight: none;
@@ -73,48 +71,51 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.28), transparent 70%);
-}
-
 ::selection {
   background: rgba(255, 207, 0, 0.28);
   color: #050505;
 }
 
 .card-surface {
-  background: var(--card-gradient);
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--card-radius);
   box-shadow: var(--shadow-card);
 }
 
 .section-surface {
-  background: linear-gradient(180deg, rgba(15, 17, 18, 0.96), rgba(7, 8, 8, 0.98));
+  background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--section-radius);
   box-shadow: var(--shadow-soft);
 }
 
 .inner-surface {
-  background: rgba(3, 4, 4, 0.72);
+  background: var(--background);
   border: 1px solid var(--line);
-  border-radius: 14px;
+  border-radius: 4px;
+}
+
+.definition-grid {
+  display: grid;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.definition-grid > * {
+  min-width: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--background);
 }
 
 .label-text {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
@@ -122,9 +123,9 @@ body::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.35rem 0.75rem;
-  min-height: 1.85rem;
-  border-radius: 999px;
+  padding: 0.25rem 0.5rem;
+  min-height: 1.5rem;
+  border-radius: 4px;
   border: 1px solid rgba(255, 207, 0, 0.28);
   background: rgba(255, 207, 0, 0.08);
   color: var(--accent);
@@ -151,11 +152,11 @@ body::before {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.035);
   color: var(--foreground);
-  border-radius: 999px;
+  border-radius: 5px;
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
 .btn-dark:hover {
@@ -174,7 +175,7 @@ body::before {
   background: var(--accent);
   color: #050505;
   border-color: var(--accent);
-  border-radius: 999px;
+  border-radius: 5px;
   font-size: 0.75rem;
   font-weight: 600;
   white-space: nowrap;
@@ -187,7 +188,7 @@ body::before {
     .rounded-full.border.border-line.bg-panel\/95,
     .rounded-full.border.border-line.bg-panel-strong\/95
   ) {
-  border-radius: 999px;
+  border-radius: 4px;
 }
 
 :where(
@@ -202,9 +203,20 @@ body::before {
   min-height: 1.85rem;
   font-size: 0.75rem;
   line-height: 1;
-  border-radius: 999px;
+  border-radius: 4px;
 }
 
 .text-muted {
   color: var(--muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

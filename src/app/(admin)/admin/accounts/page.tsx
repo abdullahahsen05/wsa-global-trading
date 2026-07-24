@@ -184,8 +184,8 @@ export default function AdminAccountsPage() {
               </PrimaryButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
                 <Dialog.Title className="text-xl font-semibold text-foreground">Verify accounts</Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                   Queue broker connection verification for the selected trading accounts.
@@ -210,7 +210,7 @@ export default function AdminAccountsPage() {
                   <button
                     type="button"
                     aria-label="Close dialog"
-                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted"
+                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -245,7 +245,7 @@ export default function AdminAccountsPage() {
         ]}
       />
 
-      <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5 invisible-scrollbar overflow-x-auto border-b border-line pb-3">
         <FilterChipRow
           chips={[
             {
@@ -301,13 +301,13 @@ export default function AdminAccountsPage() {
       </div>
 
       {successMessage ? (
-        <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
+        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
           {successMessage}
         </div>
       ) : null}
 
       {accountMessage ? (
-        <div className="mt-3 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+        <div className="mt-3 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
           {accountMessage}
         </div>
       ) : null}
@@ -326,33 +326,30 @@ export default function AdminAccountsPage() {
               </StatusPill>
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="mt-4 grid gap-0 overflow-hidden rounded-[4px] border-l border-t border-line sm:grid-cols-2 xl:grid-cols-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Balance</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney(selectedAccount.balance)}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Equity</p>
                 <p className="mt-1 text-sm font-semibold text-accent-2">{formatMoney(selectedAccount.equity)}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Drawdown</p>
                 <p className="mt-1 text-sm font-semibold text-danger">{formatPercent(selectedAccount.drawdownPercent)}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Open trades</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{selectedAccount.openTradeCount}</p>
               </div>
-            </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Floating P&L</p>
                 <p className={`mt-1 text-sm font-semibold ${selectedAccount.floatingPnl.amount >= 0 ? "text-accent-2" : "text-danger"}`}>
                   {formatMoney(selectedAccount.floatingPnl)}
                 </p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Last updated</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{new Date(selectedAccount.updatedAt).toLocaleString()}</p>
               </div>
@@ -399,7 +396,7 @@ export default function AdminAccountsPage() {
           </Panel>
         </div>
       ) : isLoading ? (
-        <div className="mt-5 rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">
+        <div className="mt-5 rounded-[4px] border border-line bg-panel p-8 text-center text-sm text-muted">
           Loading accounts...
         </div>
       ) : null}
@@ -456,10 +453,10 @@ export default function AdminAccountsPage() {
               <StatusPill tone={STATUS_TONE[account.status] ?? "muted"}>{account.status}</StatusPill>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {formatMoney(account.equity)}
               </span>
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {formatPercent(account.drawdownPercent)} DD
               </span>
             </div>
@@ -478,20 +475,20 @@ export default function AdminAccountsPage() {
               </div>
               <StatusPill tone={STATUS_TONE[account.status] ?? "muted"}>{account.status}</StatusPill>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="mt-4 grid gap-0 overflow-hidden rounded-[4px] border-l border-t border-line sm:grid-cols-2">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Balance</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney(account.balance)}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Equity</p>
                 <p className="mt-1 text-sm font-semibold text-accent-2">{formatMoney(account.equity)}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Drawdown</p>
                 <p className="mt-1 text-sm font-semibold text-danger">{formatPercent(account.drawdownPercent)}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Open trades</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{account.openTradeCount}</p>
               </div>
@@ -503,8 +500,8 @@ export default function AdminAccountsPage() {
       {/* Deactivate confirmation */}
       <Dialog.Root open={confirmDeactivateOpen} onOpenChange={setConfirmDeactivateOpen}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-danger/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-danger/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="text-xl font-semibold text-foreground">Deactivate account?</Dialog.Title>
             <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
               <strong className="text-foreground">{selectedAccount?.accountName}</strong> will be undeployed from MetaAPI (saves cost). The account data stays intact — you can reactivate at any time.
@@ -522,7 +519,7 @@ export default function AdminAccountsPage() {
               </GhostButton>
             </div>
             <Dialog.Close asChild>
-              <button type="button" aria-label="Close" className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted">
+              <button type="button" aria-label="Close" className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted">
                 <X className="h-4 w-4" />
               </button>
             </Dialog.Close>
@@ -533,8 +530,8 @@ export default function AdminAccountsPage() {
       {/* Reactivate confirmation */}
       <Dialog.Root open={confirmReactivateOpen} onOpenChange={setConfirmReactivateOpen}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-accent/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-accent/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="text-xl font-semibold text-foreground">Reactivate account?</Dialog.Title>
             <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
               <strong className="text-foreground">{selectedAccount?.accountName}</strong> will be redeployed on MetaAPI. This will resume MetaAPI billing for this account.
@@ -552,7 +549,7 @@ export default function AdminAccountsPage() {
               </PrimaryButton>
             </div>
             <Dialog.Close asChild>
-              <button type="button" aria-label="Close" className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted">
+              <button type="button" aria-label="Close" className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted">
                 <X className="h-4 w-4" />
               </button>
             </Dialog.Close>
@@ -563,8 +560,8 @@ export default function AdminAccountsPage() {
       {/* Store MT5 credentials dialog for selected account */}
       <Dialog.Root open={credOpen} onOpenChange={setCredOpen}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="text-xl font-semibold text-foreground">Store MT5 credentials</Dialog.Title>
             <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
               For: <strong>{selectedAccount?.accountName ?? "selected account"}</strong>. Credentials are encrypted with AES-256-GCM and never returned or logged.
@@ -579,7 +576,7 @@ export default function AdminAccountsPage() {
                   <select
                     value={credForm.platform}
                     onChange={(e) => setCredForm((f) => ({ ...f, platform: e.target.value }))}
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                   >
                     <option value="MT5">MT5</option>
                     <option value="MT4">MT4</option>
@@ -593,7 +590,7 @@ export default function AdminAccountsPage() {
                     onChange={(e) => setCredForm((f) => ({ ...f, brokerName: e.target.value }))}
                     placeholder="e.g. ICMarkets"
                     maxLength={100}
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
               </div>
@@ -606,7 +603,7 @@ export default function AdminAccountsPage() {
                   onChange={(e) => setCredForm((f) => ({ ...f, login: e.target.value }))}
                   placeholder="MT5 account number"
                   maxLength={50}
-                  className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
                 />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -620,7 +617,7 @@ export default function AdminAccountsPage() {
                     placeholder="Investor or main password"
                     maxLength={200}
                     autoComplete="new-password"
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
                 <div>
@@ -632,12 +629,12 @@ export default function AdminAccountsPage() {
                     onChange={(e) => setCredForm((f) => ({ ...f, server: e.target.value }))}
                     placeholder="e.g. ICMarketsSC-Demo02"
                     maxLength={100}
-                    className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
                   />
                 </div>
               </div>
               {selectedAccount?.status === "CONNECTED" ? (
-                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                <div className="rounded-[4px] border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
                   This account is currently <strong>CONNECTED</strong>. Storing new credentials will replace the existing ones immediately.
                 </div>
               ) : null}
@@ -654,7 +651,7 @@ export default function AdminAccountsPage() {
               </div>
             </form>
             <Dialog.Close asChild>
-              <button type="button" aria-label="Close" className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted">
+              <button type="button" aria-label="Close" className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted">
                 <X className="h-4 w-4" />
               </button>
             </Dialog.Close>

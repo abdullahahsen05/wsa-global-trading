@@ -9,17 +9,17 @@ export function OpenTradesTable({
   updatedAt?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-3xl border border-line bg-panel">
+    <div className="overflow-hidden rounded-[6px] border border-line bg-panel">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Open trades</h3>
           <p className="mt-1 text-xs text-muted">Refreshing from the mock broker feed</p>
         </div>
-        <span className="rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
+        <span className="rounded-[4px] bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
           {updatedAt ? `Updated ${updatedAt}` : "Live refresh"}
         </span>
       </div>
-      <div className="overflow-x-auto">
+      <div className="invisible-scrollbar overflow-x-auto">
         <table className="w-full min-w-[620px] text-left text-sm">
           <thead className="bg-panel-strong text-xs font-semibold uppercase tracking-[0.12em] text-muted">
             <tr>
@@ -36,7 +36,7 @@ export function OpenTradesTable({
                 <td className="px-4 py-3 font-medium text-foreground">{trade.symbol}</td>
                 <td className="px-4 py-3">
                   <span
-                    className={`rounded-md px-2 py-1 text-xs ${
+                    className={`rounded-[4px] px-2 py-1 text-xs ${
                       trade.side === "BUY"
                         ? "bg-accent/12 text-accent"
                         : "bg-danger/12 text-danger"

@@ -93,7 +93,7 @@ export default function BillingReturnPage() {
             </div>
           ) : (
             <div className="flex items-start gap-4 py-3">
-              <div className="rounded-2xl border border-line bg-background p-3">
+              <div className="rounded-[4px] border border-line bg-background p-3">
                 <Icon className={`h-7 w-7 ${iconClass}`} />
               </div>
               <div>
@@ -125,21 +125,21 @@ export default function BillingReturnPage() {
         </div>
 
         {confirmMockPayment.isError ? (
-          <p className="mt-4 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             {(confirmMockPayment.error as Error).message}
           </p>
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-3">
-          <Link href="/marketplace" className="rounded-full border border-line bg-background px-4 py-2 text-xs font-semibold text-foreground hover:border-accent/40">
+          <Link href="/marketplace" className="rounded-[4px] border border-line bg-background px-4 py-2 text-xs font-semibold text-foreground hover:border-accent/40">
             Marketplace
           </Link>
-          <Link href="/billing" className="rounded-full border border-line bg-background px-4 py-2 text-xs font-semibold text-foreground hover:border-accent/40">
+          <Link href="/billing" className="rounded-[4px] border border-line bg-background px-4 py-2 text-xs font-semibold text-foreground hover:border-accent/40">
             Billing
           </Link>
           <Link
             href={platformActivated ? "/dashboard" : "/my-bots"}
-            className="rounded-full bg-accent px-4 py-2 text-xs font-semibold text-background hover:opacity-90"
+            className="rounded-[4px] bg-accent px-4 py-2 text-xs font-semibold text-background hover:opacity-90"
           >
             {platformActivated ? "Open trader portal" : "My Bots"}
           </Link>

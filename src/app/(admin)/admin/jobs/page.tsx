@@ -115,7 +115,7 @@ export default function AdminJobsPage() {
 
       {notice ? (
         <div
-          className={`mt-5 rounded-2xl border px-4 py-3 text-sm font-medium ${
+          className={`mt-5 rounded-[4px] border px-4 py-3 text-sm font-medium ${
             notice.type === "success" ? "border-accent/20 bg-accent/10 text-accent" : "border-danger/20 bg-danger/10 text-danger"
           }`}
         >
@@ -123,7 +123,7 @@ export default function AdminJobsPage() {
         </div>
       ) : null}
 
-      <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5">
         <FilterChipRow
           chips={(["ALL", "PENDING", "RUNNING", "SUCCESS", "FAILED", "SKIPPED", "CANCELLED"] as StatusFilter[]).map((s) => ({
             label: s === "ALL" ? "All" : s.charAt(0) + s.slice(1).toLowerCase(),
@@ -137,17 +137,17 @@ export default function AdminJobsPage() {
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-12 rounded-xl border border-line bg-panel animate-pulse" />
+              <div key={i} className="h-12 rounded-[4px] border border-line bg-panel animate-pulse" />
             ))}
           </div>
         ) : isError ? (
-          <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             Failed to load jobs.
           </div>
         ) : jobs.length === 0 ? (
           <EmptyState title="No jobs yet" description="Queue a sync or monitor job, then run the worker to process it." />
         ) : (
-          <Panel className="min-w-0">
+          <Panel className="min-w-0 overflow-hidden">
             <DataTable
               headers={["Type", "Status", "Attempts", "Created", "Last error", ""]}
               rows={jobs.map((j) => [
@@ -156,7 +156,7 @@ export default function AdminJobsPage() {
                 <span key="a">{j.attempts}/{j.maxAttempts}</span>,
                 <span key="c">{new Date(j.createdAt).toLocaleString()}</span>,
                 <span key="e" className="text-xs text-muted">{j.lastErrorCode ? `${j.lastErrorCode}` : "—"}</span>,
-                <div key="x" className="flex flex-wrap gap-2">
+                <div key="x" className="flex flex-wrap justify-end gap-3">
                   <GhostButton type="button" onClick={() => setDetail(j)}>View</GhostButton>
                   {["FAILED", "CANCELLED", "SKIPPED"].includes(j.status) ? (
                     <GhostButton type="button" disabled={action.isPending} onClick={() => action.mutate({ url: `/api/admin/jobs/${j.id}/retry`, label: "retried" })}>
@@ -178,8 +178,8 @@ export default function AdminJobsPage() {
       {/* Job detail dialog — payload holds IDs only; result holds counts/summaries (no secrets). */}
       <Dialog.Root open={Boolean(detail)} onOpenChange={(o) => !o && setDetail(null)}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="text-xl font-semibold text-foreground">{detail?.type}</Dialog.Title>
             <Dialog.Description className="mt-1 text-sm text-muted">Job {detail?.id}</Dialog.Description>
             {detail ? (
@@ -192,12 +192,12 @@ export default function AdminJobsPage() {
                 {detail.lastErrorCode ? <Row label="Error" value={`${detail.lastErrorCode}: ${detail.lastErrorMessage ?? ""}`} /> : null}
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Payload</p>
-                  <pre className="mt-1 overflow-x-auto rounded-xl border border-line bg-background p-3 text-xs text-foreground/80">{JSON.stringify(detail.payload, null, 2)}</pre>
+                  <pre className="mt-1 invisible-scrollbar overflow-x-auto rounded-[4px] border border-line bg-background p-3 text-xs text-foreground/80">{JSON.stringify(detail.payload, null, 2)}</pre>
                 </div>
                 {detail.result ? (
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Result</p>
-                    <pre className="mt-1 overflow-x-auto rounded-xl border border-line bg-background p-3 text-xs text-foreground/80">{JSON.stringify(detail.result, null, 2)}</pre>
+                    <pre className="mt-1 invisible-scrollbar overflow-x-auto rounded-[4px] border border-line bg-background p-3 text-xs text-foreground/80">{JSON.stringify(detail.result, null, 2)}</pre>
                   </div>
                 ) : null}
               </div>

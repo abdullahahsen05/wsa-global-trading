@@ -334,8 +334,8 @@ function AccountsContent() {
               </PrimaryButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
 
                 {/* Step indicator */}
                 <div className="mb-5 flex items-center gap-3">
@@ -371,7 +371,7 @@ function AccountsContent() {
                     </Dialog.Description>
 
                     {errorMessage ? (
-                      <div className="mt-4 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+                      <div className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
                         {errorMessage}
                       </div>
                     ) : null}
@@ -454,21 +454,21 @@ function AccountsContent() {
                       cannot be used for trade execution or MetaAPI sync. Use your main trading password.
                     </Dialog.Description>
 
-                    <div className="mt-3 rounded-2xl border border-accent/20 bg-accent/5 px-4 py-3 text-xs leading-5 text-muted">
+                    <div className="mt-3 rounded-[4px] border border-accent/20 bg-accent/5 px-4 py-3 text-xs leading-5 text-muted">
                       <span className="font-semibold text-accent-2">Demo testing:</span> Use your MT5 demo account number,
                       main trading password, exact broker server name (e.g. <span className="font-mono">ICMarkets-Demo02</span>),
                       and select platform MT5.
                     </div>
 
                     {errorMessage ? (
-                      <div className="mt-4 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+                      <div className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
                         {errorMessage}
                       </div>
                     ) : null}
 
                     <form className="mt-4 grid gap-4" onSubmit={handleCredentials}>
                       {pendingBrokerProviderId ? (
-                        <div className="grid gap-3 rounded-2xl border border-line bg-background p-4 md:grid-cols-[1fr_auto] md:items-end">
+                        <div className="grid gap-3 rounded-[4px] border border-line bg-background p-4 md:grid-cols-[1fr_auto] md:items-end">
                           <TextField
                             label="Find your MetaTrader server"
                             value={serverSearchDraft}
@@ -551,7 +551,7 @@ function AccountsContent() {
                         <p className="text-xs text-muted">{brokerServersQuery.data.discoveryMessage}</p>
                       ) : null}
 
-                      <div className="rounded-2xl border border-line bg-background px-4 py-3 text-sm text-muted">
+                      <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
                         <span className="font-semibold text-accent-2">🔒 Secure</span> — Your
                         trading password is encrypted with AES-256-GCM on the server. It is
                         never stored in plaintext and never returned to the browser.
@@ -613,12 +613,12 @@ function AccountsContent() {
       />
 
       {successMessage ? (
-        <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
+        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
           {successMessage}
         </div>
       ) : null}
 
-      <div className="mt-5 flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-4 rounded-[4px] border border-line bg-panel p-4">
         <div className="grid flex-1 gap-4">
           <SearchField
             label="Search accounts"
@@ -643,11 +643,11 @@ function AccountsContent() {
         {isLoading ? (
           <div className="xl:col-span-2 space-y-3">
             {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-56 rounded-2xl border border-line bg-panel animate-pulse" />
+              <div key={i} className="h-56 rounded-[4px] border border-line bg-panel animate-pulse" />
             ))}
           </div>
         ) : isError ? (
-          <div className="xl:col-span-2 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div className="xl:col-span-2 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             Failed to load accounts. Please refresh the page.
           </div>
         ) : filteredAccounts.length === 0 && tradingAccounts.length === 0 ? (
@@ -709,7 +709,7 @@ function AccountsContent() {
                 <p className="text-sm text-muted">Updated {new Date(account.updatedAt).toLocaleString()}</p>
                 <Link
                   href={`/accounts/${account.accountId}`}
-                  className="rounded-full bg-panel-strong px-5 py-2 text-sm font-semibold text-accent transition hover:scale-[1.02]"
+                  className="rounded-[4px] bg-panel-strong px-5 py-2 text-sm font-semibold text-accent transition"
                 >
                   View details
                 </Link>

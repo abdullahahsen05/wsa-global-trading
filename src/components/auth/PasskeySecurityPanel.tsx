@@ -58,7 +58,7 @@ export function PasskeySecurityPanel() {
   return (
     <Panel>
       <div className="flex items-start gap-3">
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-accent/15"><Key className="h-5 w-5 text-accent" /></div>
+        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[4px] bg-accent/15"><Key className="h-5 w-5 text-accent" /></div>
         <div>
           <h2 className="text-lg font-semibold text-foreground">Passkeys</h2>
           <p className="mt-1 text-sm text-muted">Use your device unlock, fingerprint, face, or security key to sign in. Password login remains available.</p>
@@ -74,9 +74,9 @@ export function PasskeySecurityPanel() {
       {message ? <p className="mt-3 text-sm text-muted">{message}</p> : null}
       <div className="mt-5 space-y-2">
         {passkeys.length === 0 ? (
-          <p className="rounded-xl border border-line bg-background px-4 py-4 text-sm text-muted">No passkey registered yet.</p>
+          <p className="rounded-[4px] border border-line bg-background px-4 py-4 text-sm text-muted">No passkey registered yet.</p>
         ) : passkeys.map((passkey) => (
-          <div key={passkey.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-background px-4 py-3">
+          <div key={passkey.id} className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-foreground">{passkey.deviceName}</p>
               <p className="mt-1 text-xs text-muted">Added {new Date(passkey.createdAt).toLocaleDateString()} · {passkey.lastUsedAt ? `Last used ${new Date(passkey.lastUsedAt).toLocaleString()}` : "Never used"}</p>

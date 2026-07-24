@@ -194,7 +194,7 @@ export default function AdminEconomicCalendarPage() {
 
       {notice ? (
         <div
-          className={`mt-5 rounded-2xl border px-4 py-3 text-sm font-medium ${
+          className={`mt-5 rounded-[4px] border px-4 py-3 text-sm font-medium ${
             notice.type === "success"
               ? "border-accent/20 bg-accent/10 text-accent"
               : "border-danger/20 bg-danger/10 text-danger"
@@ -208,11 +208,11 @@ export default function AdminEconomicCalendarPage() {
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(5)].map((_, i) => (
-              <div key={i} className="h-12 rounded-xl border border-line bg-panel animate-pulse" />
+              <div key={i} className="h-12 rounded-[4px] border border-line bg-panel animate-pulse" />
             ))}
           </div>
         ) : isError ? (
-          <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             Failed to load economic events.
           </div>
         ) : events.length === 0 ? (
@@ -258,8 +258,8 @@ export default function AdminEconomicCalendarPage() {
       {/* Add / edit dialog */}
       <Dialog.Root open={dialogOpen} onOpenChange={setDialogOpen}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="text-xl font-semibold text-foreground">
               {editingId ? "Edit event" : "Add event"}
             </Dialog.Title>
@@ -369,7 +369,7 @@ export default function AdminEconomicCalendarPage() {
             </div>
 
             {formError ? (
-              <div className="mt-4 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+              <div className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
                 {formError}
               </div>
             ) : null}

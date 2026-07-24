@@ -120,8 +120,8 @@ export default function PartnerOverviewPage() {
         title="Partner Portal"
         description="Your partner application is under review."
       >
-        <div className="mt-5 rounded-3xl border border-line bg-panel p-8 text-center">
-          <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl border border-line bg-background">
+        <div className="mt-5 rounded-[4px] border border-line bg-panel p-8 text-center">
+          <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-[4px] border border-line bg-background">
             <span className="text-2xl">⏳</span>
           </div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-accent">
@@ -144,7 +144,7 @@ export default function PartnerOverviewPage() {
             ].map(({ step, label, done }) => (
               <div
                 key={step}
-                className="flex items-center gap-3 rounded-2xl border border-line bg-background px-4 py-3"
+                className="flex items-center gap-3 rounded-[4px] border border-line bg-background px-4 py-3"
               >
                 <span
                   className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
@@ -190,7 +190,7 @@ export default function PartnerOverviewPage() {
   if (profileLoading) {
     return (
       <WorkspacePage eyebrow="Partner" title="Partner Overview" description="">
-        <div className="mt-5 h-24 animate-pulse rounded-2xl border border-line bg-panel" />
+        <div className="mt-5 h-24 animate-pulse rounded-[4px] border border-line bg-panel" />
       </WorkspacePage>
     );
   }
@@ -230,7 +230,7 @@ export default function PartnerOverviewPage() {
       />
 
       {(summary?.referralCode ?? profile?.referralCode) ? (
-        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel px-4 py-3">
+        <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[4px] border border-line bg-panel px-4 py-3">
           <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Your referral code</p>
             <p className="mt-1 font-mono text-sm font-semibold text-foreground">
@@ -252,7 +252,7 @@ export default function PartnerOverviewPage() {
               const link = referralLink(siteUrl || window.location.origin, code);
               void navigator.clipboard.writeText(link);
             }}
-            className="shrink-0 rounded-xl border border-line bg-background px-3 py-2 text-xs font-semibold text-foreground hover:border-accent/40"
+            className="shrink-0 rounded-[4px] border border-line bg-background px-3 py-2 text-xs font-semibold text-foreground hover:border-accent/40"
           >
             Copy link
           </button>
@@ -305,7 +305,7 @@ export default function PartnerOverviewPage() {
                   {activities.slice(0, 10).map((a) => (
                     <div
                       key={a.id}
-                      className="flex items-center justify-between gap-3 rounded-xl border border-line bg-background px-3 py-2"
+                      className="flex items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-3 py-2"
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-foreground">{a.traderName}</p>
@@ -328,7 +328,7 @@ export default function PartnerOverviewPage() {
             ) : (
               <div className="space-y-2">
                 {riskEvents.slice(0, 12).map((e) => (
-                  <div key={e.id} className="rounded-xl border border-line bg-background px-3 py-3">
+                  <div key={e.id} className="rounded-[4px] border border-line bg-background px-3 py-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate text-sm font-semibold text-foreground">{e.traderName}</p>
                       <StatusPill tone={SEVERITY_TONE[e.severity] ?? "muted"}>{e.severity}</StatusPill>

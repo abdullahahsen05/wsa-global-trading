@@ -175,7 +175,7 @@ function TradesContent() {
 
       {syncResult && (
         <div
-          className={`mt-4 rounded-2xl border px-4 py-3 text-sm font-medium ${
+          className={`mt-4 rounded-[4px] border px-4 py-3 text-sm font-medium ${
             syncResult.type === "success"
               ? "border-accent/20 bg-accent/10 text-accent"
               : "border-danger/20 bg-danger/10 text-danger"
@@ -189,11 +189,11 @@ function TradesContent() {
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(8)].map((_, i) => (
-              <div key={i} className="h-12 rounded-xl border border-line bg-panel animate-pulse" />
+              <div key={i} className="h-12 rounded-[4px] border border-line bg-panel animate-pulse" />
             ))}
           </div>
         ) : isError ? (
-          <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             Failed to load trades. Please refresh the page.
           </div>
         ) : !recentTrades.length ? (
@@ -210,7 +210,7 @@ function TradesContent() {
               </div>
               <span className="text-xs font-semibold uppercase tracking-widest text-muted">{recentTrades.length} trades</span>
             </div>
-            <div className="overflow-x-auto">
+            <div className="invisible-scrollbar overflow-x-auto">
               <table className="w-full min-w-[1040px] text-left text-sm">
                 <thead className="border-b border-line bg-background/60 text-[11px] uppercase tracking-widest text-muted">
                   <tr>
@@ -330,14 +330,14 @@ function TradesContent() {
               <StatusPill tone={trade.status === "OPEN" ? "accent" : "muted"}>{trade.status}</StatusPill>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {trade.side}
               </span>
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {new Date(trade.openedAt).toLocaleDateString()}
               </span>
               {trade.copyStrategyName ? (
-                <span className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
+                <span className="rounded-[4px] border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
                   Copied by {trade.copyStrategyName}
                 </span>
               ) : null}
@@ -360,15 +360,15 @@ function TradesContent() {
               <StatusPill tone={trade.status === "OPEN" ? "accent" : "muted"}>{trade.status}</StatusPill>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Volume</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{trade.volume}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Open price</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{trade.openPrice}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Profit</p>
                 <p
                   className={`mt-1 text-sm font-semibold ${
@@ -378,15 +378,15 @@ function TradesContent() {
                   {trade.copySyncPending ? "Sync pending" : formatMoney(trade.profit)}
                 </p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Opened</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{new Date(trade.openedAt).toLocaleString()}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Close price</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{trade.closePrice ?? "—"}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Closed</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">
                   {trade.closedAt ? new Date(trade.closedAt).toLocaleString() : "—"}

@@ -26,7 +26,7 @@ function RiskBar({
   tone: "accent" | "lime" | "danger";
 }) {
   return (
-    <div className="rounded-2xl border border-line bg-background p-4">
+    <div className="rounded-[4px] border border-line bg-background p-4">
       <div className="flex items-center justify-between gap-4">
         <p className="text-sm font-semibold text-foreground">{label}</p>
         <span
@@ -186,62 +186,22 @@ function RiskContent() {
             tone={maxDrawdown >= maxDrawdownLimit ? "danger" : "lime"}
           />
 
-          {/* Warning notifications — read-only for traders */}
-          <div className="rounded-2xl border border-line bg-panel p-5 lg:col-span-2">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">Warning notifications</h3>
-                <p className="mt-1 text-xs text-muted">
-                  Events flagged by the risk engine. Contact your administrator to resolve.
-                </p>
-              </div>
-              <StatusPill tone="accent">Live</StatusPill>
-            </div>
-            <div className="mt-4 space-y-3">
-              {riskEvents.length === 0 ? (
-                <EmptyState
-                  title="No active warnings"
-                  description="The risk desk is currently clear."
-                />
-              ) : (
-                riskEvents.map((event) => (
-                  <div key={event.id} className="rounded-xl border border-line bg-background p-4">
-                    <div className="flex items-center justify-between gap-4">
-                      <p className="font-semibold text-foreground">{event.ruleName}</p>
-                      <StatusPill
-                        tone={
-                          event.severity === "CRITICAL"
-                            ? "danger"
-                            : event.severity === "WARNING"
-                              ? "accent"
-                              : "muted"
-                        }
-                      >
-                        {event.severity}
-                      </StatusPill>
-                    </div>
-                    <p className="mt-2 text-sm leading-6 text-muted">{event.message}</p>
-                    <p className="mt-2 text-xs text-muted">
-                      Raised {new Date(event.createdAt).toLocaleString()} · Acknowledgement
-                      by admin required
-                    </p>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
         </div>
 
-        {/* ── Full-width rules and account monitoring ──────────────────── */}
-        <div className="grid min-w-0 gap-4">
-          <Panel>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-foreground">Rule set</h2>
+        <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+          <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Rule set</h2>
+                <p className="mt-1 text-sm text-muted">Active account and platform guardrails.</p>
+              </div>
               <StatusPill tone="lime">{riskRules.length} rules</StatusPill>
             </div>
-            <div className="mt-4">
+            <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-auto">
               <DataTable
                 headers={["Rule", "Scope", "Metric", "Threshold", "Severity", "Action", "State"]}
+                paginated
+                initialPageSize={10}
                 rows={riskRules.map((rule) => [
                   <span key="name" className="font-semibold text-foreground">
                     {rule.name}
@@ -268,6 +228,53 @@ function RiskContent() {
             </div>
           </Panel>
 
+          <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Warning notifications</h3>
+                <p className="mt-1 text-xs text-muted">
+                  Events flagged by the risk engine. Contact your administrator to resolve.
+                </p>
+              </div>
+              <StatusPill tone="accent">Live</StatusPill>
+            </div>
+            <div className="invisible-scrollbar mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto">
+              {riskEvents.length === 0 ? (
+                <EmptyState
+                  title="No active warnings"
+                  description="The risk desk is currently clear."
+                />
+              ) : (
+                riskEvents.map((event) => (
+                  <div key={event.id} className="border-b border-line bg-background px-4 py-3 last:border-b-0">
+                    <div className="flex items-center justify-between gap-4">
+                      <p className="font-semibold text-foreground">{event.ruleName}</p>
+                      <StatusPill
+                        tone={
+                          event.severity === "CRITICAL"
+                            ? "danger"
+                            : event.severity === "WARNING"
+                              ? "accent"
+                              : "muted"
+                        }
+                      >
+                        {event.severity}
+                      </StatusPill>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-muted">{event.message}</p>
+                    <p className="mt-2 text-xs text-muted">
+                      Raised {new Date(event.createdAt).toLocaleString()} · Acknowledgement
+                      by admin required
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </Panel>
+        </div>
+
+        {/* ── Full-width account monitoring ───────────────────────────── */}
+        <div className="grid min-w-0 gap-4">
           <Panel>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -283,6 +290,8 @@ function RiskContent() {
             <div className="mt-4">
               <DataTable
                 headers={["Account", "Broker", "Status", "Balance", "Equity", "Drawdown", "Risk"]}
+                paginated
+                initialPageSize={10}
                 rows={tradingAccounts.map((account) => [
                   <span key="account" className="font-semibold text-foreground">
                     {account.accountName}

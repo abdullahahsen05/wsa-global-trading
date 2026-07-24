@@ -95,14 +95,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             return (
               <motion.div
                 key={toast.id}
-                initial={{ opacity: 0, y: 12, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 12, scale: 0.98 }}
-                transition={{ type: "spring", stiffness: 220, damping: 24 }}
-                className={`pointer-events-auto rounded-2xl border p-4 shadow-[0_18px_60px_rgba(0,0,0,0.35)] backdrop-blur ${tone.className}`}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+                className={`pointer-events-auto rounded-[4px] border p-4 ${tone.className}`}
               >
                 <div className="flex items-start gap-3">
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-current/15 bg-background/25">
+                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[4px] border border-current/15 bg-background/25">
                     <Icon className="h-4 w-4" />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -114,7 +114,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   <button
                     type="button"
                     onClick={() => dismissToast(toast.id)}
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-current/15 bg-background/30 text-current/70 transition hover:bg-background/50"
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-[4px] border border-current/15 bg-background/30 text-current/70 transition hover:bg-background/50"
                     aria-label="Dismiss toast"
                   >
                     <X className="h-4 w-4" />

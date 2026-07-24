@@ -108,18 +108,18 @@ export default function AdminCopyPage() {
       title="Live Copy Trading"
       description="Connect master accounts, publish monthly strategies, and control their WSA engine lifecycle."
       action={
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-end gap-3">
           <GhostButton type="button" onClick={() => setMasterOpen(true)}><Copy className="mr-2 inline h-4 w-4" />New master account</GhostButton>
           <PrimaryButton type="button" onClick={() => setStrategyOpen(true)}><Plus className="mr-2 inline h-4 w-4" />New strategy</PrimaryButton>
         </div>
       }
     >
-      <div className={`mb-5 rounded-2xl border px-4 py-3 text-sm ${runtime?.configured ? "border-lime/30 bg-lime/10 text-lime" : "border-accent/30 bg-accent/10 text-accent"}`}>
+      <div className={`mb-5 rounded-[4px] border px-4 py-3 text-sm ${runtime?.configured ? "border-lime/30 bg-lime/10 text-lime" : "border-accent/30 bg-accent/10 text-accent"}`}>
         <strong>WSA engine:</strong> {runtime?.configured ? "configured for explicit live publishing" : "not enabled on this server"}.
         {!runtime?.configured ? " Set METAAPI_TOKEN and WSA_COPY_ENGINE_ENABLED=true before publishing; no order will be copied until then." : runtime.executionEnabled ? " Live execution is enabled and can affect connected brokerage accounts." : " Monitoring is configured, but broker execution is still disabled."}
       </div>
 
-      {notice ? <div className={`mb-5 rounded-2xl border px-4 py-3 text-sm ${notice.tone === "ok" ? "border-lime/30 bg-lime/10 text-lime" : "border-danger/30 bg-danger/10 text-danger"}`}>{notice.text}</div> : null}
+      {notice ? <div className={`mb-5 rounded-[4px] border px-4 py-3 text-sm ${notice.tone === "ok" ? "border-lime/30 bg-lime/10 text-lime" : "border-danger/30 bg-danger/10 text-danger"}`}>{notice.text}</div> : null}
 
       <InlineStatusStrip items={[
         { label: "Engine", value: "WSA GLOBAL", tone: "accent" },
@@ -134,12 +134,12 @@ export default function AdminCopyPage() {
           <div><h2 className="text-lg font-semibold text-foreground">Master accounts</h2><p className="mt-1 text-sm text-muted">Only dedicated admin-owned master accounts can publish strategies.</p></div>
           <Link href="/admin/accounts" className="inline-flex items-center gap-2 text-sm font-semibold text-accent">Manage credentials <ExternalLink className="h-4 w-4" /></Link>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-4 grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-3">
           {accounts.map((account) => (
-            <div key={account.accountId} className="rounded-2xl border border-line bg-background p-4">
+            <div key={account.accountId} className="flex h-full flex-col rounded-[4px] border border-line bg-background p-4">
               <div className="flex items-start justify-between gap-3"><div><p className="font-semibold text-foreground">{account.accountName}</p><p className="mt-1 text-xs text-muted">{account.brokerName}{account.serverName ? ` · ${account.serverName}` : ""}</p></div><StatusPill tone={account.status === "CONNECTED" ? "lime" : "accent"}>{account.status}</StatusPill></div>
               {!account.providerAccountId ? <p className="mt-3 text-xs text-accent">Credentials/provider connection required before publishing.</p> : null}
-              <GhostButton type="button" className="mt-4 w-full" onClick={() => setConnectionAccountId(account.accountId)}>
+              <GhostButton type="button" className="mt-auto w-full" onClick={() => setConnectionAccountId(account.accountId)}>
                 {account.providerAccountId ? "Manage MT4 / MT5 connection" : "Connect MT4 / MT5"}
               </GhostButton>
             </div>
@@ -152,15 +152,17 @@ export default function AdminCopyPage() {
         <div><h2 className="text-lg font-semibold text-foreground">Published strategies</h2><p className="mt-1 text-sm text-muted">Each live strategy renews monthly for each selected follower account.</p></div>
         <div className="mt-4 space-y-3">
           {strategies.map((strategy) => (
-            <div key={strategy.id} className="grid gap-4 rounded-2xl border border-line bg-background p-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
+            <div key={strategy.id} className="grid gap-4 rounded-[4px] border border-line bg-background p-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
               <div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-foreground">{strategy.name}</p><StatusPill tone={strategy.engineStatus === "LIVE" ? "lime" : strategy.engineStatus === "ERROR" ? "danger" : "accent"}>{strategy.engineStatus}</StatusPill></div><p className="mt-1 text-sm text-muted">Master: {strategy.masterAccountName ?? "Unknown"} · {strategy.followerCount} follower(s)</p>{strategy.engineError ? <p className="mt-2 text-xs text-danger">{strategy.engineError}</p> : null}</div>
-              <p className="font-semibold text-foreground">
-                {formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} standard
-                <span className="text-xs font-normal text-muted"> / </span>
-                {formatMoney({ amount: strategy.premiumMonthlyPrice, currency: strategy.currency })} premium
-              </p>
-              <p className="mt-1 text-xs text-muted">Dispatch targets: {strategy.standardDelayMs / 1000}s standard · {strategy.premiumDelayMs / 1000}s premium</p>
-              <div className="flex gap-2">
+              <div>
+                <p className="font-semibold text-foreground">
+                  {formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} standard
+                  <span className="text-xs font-normal text-muted"> / </span>
+                  {formatMoney({ amount: strategy.premiumMonthlyPrice, currency: strategy.currency })} premium
+                </p>
+                <p className="mt-1 text-xs text-muted">Dispatch targets: {strategy.standardDelayMs / 1000}s standard · {strategy.premiumDelayMs / 1000}s premium</p>
+              </div>
+              <div className="flex flex-wrap justify-end gap-3">
                 {strategy.engineStatus !== "LIVE" && strategy.status !== "ARCHIVED" ? <PrimaryButton type="button" disabled={strategyAction.isPending} onClick={() => strategyAction.mutate({ id: strategy.id, action: "publish" })}><Repeat className="mr-2 inline h-4 w-4" />Publish live</PrimaryButton> : null}
                 {strategy.engineStatus === "LIVE" ? <GhostButton type="button" disabled={strategyAction.isPending} onClick={() => window.confirm("Archive this strategy and close its copied follower positions?") && strategyAction.mutate({ id: strategy.id, action: "archive" })}>Archive & close</GhostButton> : null}
               </div>
@@ -195,7 +197,7 @@ export default function AdminCopyPage() {
       <SimpleDialog open={strategyOpen} onClose={() => setStrategyOpen(false)} title="Create monthly live strategy">
         <Field label="Strategy name" value={strategyForm.name} onChange={(value) => setStrategyForm((current) => ({ ...current, name: value }))} />
         <Field label="Description" value={strategyForm.description} onChange={(value) => setStrategyForm((current) => ({ ...current, description: value }))} />
-        <label className="space-y-2 text-sm font-semibold text-foreground">Master account<select className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm" value={strategyForm.masterAccountId} onChange={(event) => setStrategyForm((current) => ({ ...current, masterAccountId: event.target.value }))}><option value="">Select connected master...</option>{connectedMasters.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName}</option>)}</select></label>
+        <label className="space-y-2 text-sm font-semibold text-foreground">Master account<select className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm" value={strategyForm.masterAccountId} onChange={(event) => setStrategyForm((current) => ({ ...current, masterAccountId: event.target.value }))}><option value="">Select connected master...</option>{connectedMasters.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName}</option>)}</select></label>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Standard monthly price" type="number" value={strategyForm.standardMonthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, standardMonthlyPrice: value }))} />
           <Field label="Premium / fast monthly price" type="number" value={strategyForm.premiumMonthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, premiumMonthlyPrice: value }))} />
@@ -209,13 +211,13 @@ export default function AdminCopyPage() {
 }
 
 function Field({ label, value, onChange, type = "text" }: { label: string; value: string; onChange(value: string): void; type?: string }) {
-  return <label className="space-y-2 text-sm font-semibold text-foreground">{label}<input type={type} className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm outline-none focus:border-accent" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+  return <label className="space-y-2 text-sm font-semibold text-foreground">{label}<input type={type} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm outline-none focus:border-accent" value={value} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
 function SimpleDialog({ open, onClose, title, children }: { open: boolean; onClose(): void; title: string; children: React.ReactNode }) {
-  return <Dialog.Root open={open} onOpenChange={(value) => !value && onClose()}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6"><Dialog.Title className="text-xl font-semibold text-foreground">{title}</Dialog.Title><div className="mt-5 space-y-4">{children}</div><Dialog.Close className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full border border-line"><X className="h-4 w-4" /></Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>;
+  return <Dialog.Root open={open} onOpenChange={(value) => !value && onClose()}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6"><Dialog.Title className="text-xl font-semibold text-foreground">{title}</Dialog.Title><div className="mt-5 space-y-4">{children}</div><Dialog.Close className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-full border border-line"><X className="h-4 w-4" /></Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>;
 }
 
 function ConnectionDialog({ open, onClose, children }: { open: boolean; onClose(): void; children: React.ReactNode }) {
-  return <Dialog.Root open={open} onOpenChange={(value) => !value && onClose()}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[94vw] max-w-4xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-3 shadow-[0_24px_80px_rgba(0,0,0,0.6)] focus:outline-none"><Dialog.Title className="sr-only">Connect master trading account</Dialog.Title>{children}<Dialog.Close className="absolute right-6 top-6 z-10 grid h-9 w-9 place-items-center rounded-full border border-line bg-background text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>;
+  return <Dialog.Root open={open} onOpenChange={(value) => !value && onClose()}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" /><Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[94vw] max-w-4xl -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-3 shadow-[0_24px_80px_rgba(0,0,0,0.6)] focus:outline-none"><Dialog.Title className="sr-only">Connect master trading account</Dialog.Title>{children}<Dialog.Close className="absolute right-6 top-6 z-10 grid h-9 w-9 place-items-center rounded-full border border-line bg-background text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>;
 }

@@ -36,7 +36,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           />
           <div className="flex min-w-0 flex-1 flex-col">
             <Topbar role={role} onOpenMobileNav={() => setMobileNavOpen(true)} />
-            <main className="relative flex-1 px-4 py-5 lg:px-7">{children}</main>
+            <main className="relative flex-1 px-4 py-5 md:px-5 lg:px-7 lg:py-6">{children}</main>
           </div>
         </div>
       </div>

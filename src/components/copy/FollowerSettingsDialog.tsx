@@ -99,15 +99,15 @@ export function FollowerSettingsDialog(props: {
   return (
     <Dialog.Root open={Boolean(sub)} onOpenChange={(open) => !open && !saving && props.onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
           <Dialog.Title className="text-xl font-semibold text-foreground">Follower copy settings</Dialog.Title>
           <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
             {sub?.followerAccountName ?? "Follower account"} · supported settings are enforced by both simulation and the guarded live path.
           </Dialog.Description>
 
           <div className="mt-5 grid gap-5">
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="rounded-[4px] border border-line bg-background p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h3 className="font-semibold text-foreground">Copy control</h3>
@@ -146,19 +146,19 @@ export function FollowerSettingsDialog(props: {
               </div>
             </div>
 
-            <div className="grid gap-4 rounded-2xl border border-line bg-background p-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 rounded-[4px] border border-line bg-background p-4 sm:grid-cols-2 lg:grid-cols-3">
               <TextField label="Minimum lot" type="number" min="0.01" step="0.01" value={minLot} onChange={(event) => setMinLot(event.target.value)} />
               <TextField label="Maximum lot" type="number" min="0.01" step="0.01" value={maxLot} onChange={(event) => setMaxLot(event.target.value)} />
               <TextField label="Maximum open trades" type="number" min="1" step="1" value={maxOpenTrades} onChange={(event) => setMaxOpenTrades(event.target.value)} />
               <TextField label="Maximum daily loss %" type="number" min="0.01" max="100" step="0.1" value={maxDailyLoss} onChange={(event) => setMaxDailyLoss(event.target.value)} />
               <TextField label="Maximum drawdown %" type="number" min="0.01" max="100" step="0.1" value={maxDrawdown} onChange={(event) => setMaxDrawdown(event.target.value)} />
-              <label className="flex items-center gap-2 self-end rounded-xl border border-line px-3 py-3 text-sm text-foreground">
+              <label className="flex items-center gap-2 self-end rounded-[4px] border border-line px-3 py-3 text-sm text-foreground">
                 <input type="checkbox" checked={reverseCopy} onChange={(event) => setReverseCopy(event.target.checked)} />
                 Reverse BUY / SELL
               </label>
             </div>
 
-            <div className="grid gap-4 rounded-2xl border border-line bg-background p-4 sm:grid-cols-2">
+            <div className="grid gap-4 rounded-[4px] border border-line bg-background p-4 sm:grid-cols-2">
               <TextAreaField
                 label="Allowed symbols"
                 rows={2}
@@ -187,7 +187,7 @@ export function FollowerSettingsDialog(props: {
               </div>
             </div>
 
-            <div className="grid gap-3 rounded-2xl border border-line bg-background p-4 sm:grid-cols-3">
+            <div className="grid gap-3 rounded-[4px] border border-line bg-background p-4 sm:grid-cols-3">
               <label className="flex items-center gap-2 text-sm text-foreground">
                 <input type="checkbox" checked readOnly />
                 New trades only
@@ -202,7 +202,7 @@ export function FollowerSettingsDialog(props: {
               </label>
             </div>
 
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="rounded-[4px] border border-line bg-background p-4">
               <div className="flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-muted" />
                 <h3 className="font-semibold text-foreground">Coming soon</h3>
@@ -214,7 +214,7 @@ export function FollowerSettingsDialog(props: {
               </p>
             </div>
 
-            {error ? <p className="rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
+            {error ? <p className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
           </div>
 
           <div className="mt-5 flex justify-end gap-3 border-t border-line pt-4">

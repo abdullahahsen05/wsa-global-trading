@@ -235,7 +235,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
   if (isLoading) {
     return (
       <Panel>
-        <div className="h-6 w-48 animate-pulse rounded-lg bg-panel" />
+        <div className="h-6 w-48 animate-pulse rounded-[4px] bg-panel" />
       </Panel>
     );
   }
@@ -285,7 +285,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
 
       {/* Status indicators */}
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
             Credentials
           </p>
@@ -300,7 +300,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
             </span>
           </div>
         </div>
-        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
             MetaAPI account
           </p>
@@ -308,7 +308,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
             {credStatus?.providerAccountId ? "Provisioned" : "Not yet synced"}
           </p>
         </div>
-        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
             Last synced
           </p>
@@ -322,7 +322,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
 
       {/* Sync error */}
       {credStatus?.syncError && !isDeploymentPendingMessage(credStatus.syncError) ? (
-        <div className="mt-3 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+        <div className="mt-3 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           <strong>Sync error:</strong> {credStatus.syncError}
         </div>
       ) : null}
@@ -330,7 +330,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       {/* Notice */}
       {displayedNotice ? (
         <div
-          className={`mt-3 rounded-2xl border px-4 py-3 text-sm font-medium ${
+          className={`mt-3 rounded-[4px] border px-4 py-3 text-sm font-medium ${
             displayedNotice.type === "success"
               ? "border-accent/20 bg-accent/10 text-accent"
               : displayedNotice.type === "error"
@@ -344,7 +344,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
 
       {/* Verify result */}
       {verifyResult && !displayedNotice?.type.startsWith("e") ? (
-        <div className="mt-3 flex items-center gap-2 rounded-2xl border border-line bg-background px-4 py-3 text-sm">
+        <div className="mt-3 flex items-center gap-2 rounded-[4px] border border-line bg-background px-4 py-3 text-sm">
           {verifyResult.connected ? (
             <CheckCircle2 className="h-4 w-4 shrink-0 text-accent-2" />
           ) : (
@@ -414,7 +414,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                   brokerProviderId: "",
                   server: "",
                 }))}
-                className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
               >
                 <option value="MT5">MT5</option>
                 <option value="MT4">MT4</option>
@@ -432,7 +432,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                   brokerProviderId: e.target.value,
                   server: "",
                 }))}
-                className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
               >
                 <option value="">Select configured broker</option>
                 {(providersQuery.data?.providers ?? []).map((provider) => (
@@ -442,7 +442,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
             </div>
           </div>
           {providersQuery.isSuccess && providersQuery.data.providers.length === 0 ? (
-            <div className="rounded-xl border border-line bg-background px-4 py-3 text-sm text-muted">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
               No broker providers are configured for {form.platform}. Contact support or an administrator.
             </div>
           ) : null}
@@ -457,7 +457,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
               onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
               placeholder="MT5 account number"
               maxLength={50}
-              className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+              className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
             />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -473,7 +473,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 placeholder="Main or investor password"
                 maxLength={200}
                 autoComplete="new-password"
-                className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
               />
             </div>
             <div>
@@ -495,7 +495,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 disabled={!form.brokerProviderId || serversQuery.isFetching}
                 value={form.server}
                 onChange={(e) => setForm((f) => ({ ...f, server: e.target.value }))}
-                className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-50"
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-50"
               >
                 <option value="">
                   {!form.brokerProviderId ? "Select a broker first" : "Select configured server"}
@@ -507,7 +507,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
             </div>
           </div>
           {form.brokerProviderId && serversQuery.isSuccess && serversQuery.data.servers.length === 0 ? (
-            <div className="rounded-xl border border-line bg-background px-4 py-3 text-sm text-muted">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
               No servers are configured for this broker and platform. Contact support or an administrator.
             </div>
           ) : null}

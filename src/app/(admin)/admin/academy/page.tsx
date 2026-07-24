@@ -9,10 +9,10 @@ import {
   EmptyState,
   FilterChipRow,
   GhostButton,
+  InlineStatusStrip,
   PageActionGroup,
   Panel,
   PrimaryButton,
-  StatTile,
   StatusPill,
   WorkspacePage,
 } from "@/components/app/WorkspaceUI";
@@ -51,9 +51,9 @@ const STATUS_TONE: Record<string, "lime" | "accent" | "muted"> = {
   ARCHIVED: "muted",
 };
 
-const fieldCls = "h-10 w-full rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
-const textareaCls = "min-h-24 w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/10";
-const selectCls = "h-10 w-full rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
+const fieldCls = "h-10 w-full rounded-[4px] border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
+const textareaCls = "min-h-24 w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/10";
+const selectCls = "h-10 w-full rounded-[4px] border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
 const labelCls = "block text-xs font-semibold uppercase tracking-[0.18em] text-muted mb-1.5";
 
 // ── Create Course Dialog ──────────────────────────────────────
@@ -86,8 +86,8 @@ function CreateCourseDialog({ onCreated }: { onCreated: () => void }) {
         <PrimaryButton type="button"><Plus className="mr-1.5 h-4 w-4 inline-block" />New Course</PrimaryButton>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-2xl focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
+        <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 focus:outline-none">
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold text-foreground">Create course</Dialog.Title>
             <Dialog.Close asChild><button type="button" className="grid h-8 w-8 place-items-center rounded-full border border-line text-muted hover:text-foreground"><X className="h-4 w-4" /></button></Dialog.Close>
@@ -163,8 +163,8 @@ function EditCourseDialog({ course, onUpdated }: { course: AcademyCourseDto; onU
         <button type="button" className="text-xs text-accent hover:underline">Edit</button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-2xl focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
+        <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 focus:outline-none">
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-base font-semibold text-foreground">Edit: {course.title}</Dialog.Title>
             <Dialog.Close asChild><button type="button" className="grid h-8 w-8 place-items-center rounded-full border border-line text-muted hover:text-foreground"><X className="h-4 w-4" /></button></Dialog.Close>
@@ -230,8 +230,8 @@ function CreateLessonDialog({ courses, onCreated }: { courses: AcademyCourseDto[
         <PrimaryButton type="button"><Plus className="mr-1.5 h-4 w-4 inline-block" />New Lesson</PrimaryButton>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-2xl focus:outline-none max-h-[90vh] overflow-y-auto">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 focus:outline-none max-h-[90vh] invisible-scrollbar overflow-y-auto">
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold text-foreground">Create lesson</Dialog.Title>
             <Dialog.Close asChild><button type="button" className="grid h-8 w-8 place-items-center rounded-full border border-line text-muted hover:text-foreground"><X className="h-4 w-4" /></button></Dialog.Close>
@@ -349,8 +349,8 @@ function CreateWebinarDialog({ courses, onCreated }: { courses: AcademyCourseDto
         <PrimaryButton type="button"><Plus className="mr-1.5 h-4 w-4 inline-block" />New Webinar</PrimaryButton>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-2xl focus:outline-none max-h-[90vh] overflow-y-auto">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 focus:outline-none max-h-[90vh] invisible-scrollbar overflow-y-auto">
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-lg font-semibold text-foreground">Create webinar</Dialog.Title>
             <Dialog.Close asChild><button type="button" className="grid h-8 w-8 place-items-center rounded-full border border-line text-muted hover:text-foreground"><X className="h-4 w-4" /></button></Dialog.Close>
@@ -469,12 +469,13 @@ export default function AdminAcademyPage() {
         </PageActionGroup>
       }
     >
-      {/* Stats */}
-      <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label="Published Courses" value={analytics?.publishedCourses ?? 0} helper={`${analytics?.totalCourses ?? 0} total`} tone="accent" />
-        <StatTile label="Published Lessons" value={analytics?.publishedLessons ?? 0} helper={`${analytics?.totalLessons ?? 0} total`} />
-        <StatTile label="Completions" value={analytics?.totalCompletions ?? 0} />
-        <StatTile label="Open Questions" value={analytics?.openQuestions ?? 0} helper={`${analytics?.totalQuestions ?? 0} total`} tone={analytics?.openQuestions ? "danger" : "default"} />
+      <div className="mb-5">
+        <InlineStatusStrip items={[
+          { label: "Published courses", value: analytics?.publishedCourses ?? 0, helper: `${analytics?.totalCourses ?? 0} total`, tone: "accent" },
+          { label: "Published lessons", value: analytics?.publishedLessons ?? 0, helper: `${analytics?.totalLessons ?? 0} total` },
+          { label: "Completions", value: analytics?.totalCompletions ?? 0 },
+          { label: "Open questions", value: analytics?.openQuestions ?? 0, helper: `${analytics?.totalQuestions ?? 0} total`, tone: analytics?.openQuestions ? "danger" : undefined },
+        ]} />
       </div>
 
       <FilterChipRow
@@ -490,7 +491,7 @@ export default function AdminAcademyPage() {
         {/* Courses */}
         {tab === "courses" && (
           coursesLoading ? (
-            <div className="h-32 animate-pulse rounded-2xl bg-panel" />
+            <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
           ) : courses.length === 0 ? (
             <EmptyState title="No courses yet" description="Create your first course to get started." icon={BookOpenCheck} />
           ) : (
@@ -522,7 +523,7 @@ export default function AdminAcademyPage() {
             {!selectedCourseId ? (
               <EmptyState title="Select a course" description="Choose a course above to view its lessons." icon={BookOpenCheck} />
             ) : lessonsLoading ? (
-              <div className="h-32 animate-pulse rounded-2xl bg-panel" />
+              <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
             ) : lessons.length === 0 ? (
               <EmptyState title="No lessons" description="Create the first lesson for this course." icon={BookOpenCheck} />
             ) : (
@@ -544,7 +545,7 @@ export default function AdminAcademyPage() {
         {/* Webinars */}
         {tab === "webinars" && (
           webinarsLoading ? (
-            <div className="h-32 animate-pulse rounded-2xl bg-panel" />
+            <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
           ) : webinars.length === 0 ? (
             <EmptyState title="No webinars" description="Schedule the first webinar." icon={BookOpenCheck} />
           ) : (
@@ -563,7 +564,7 @@ export default function AdminAcademyPage() {
 
         {tab === "progress" && (
           progressLoading ? (
-            <div className="h-32 animate-pulse rounded-2xl bg-panel" />
+            <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
           ) : progress.length === 0 ? (
             <EmptyState title="No learner activity yet" description="Trader course progress will appear after a lesson is started." icon={BookOpenCheck} />
           ) : (

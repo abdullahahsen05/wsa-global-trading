@@ -22,7 +22,7 @@ const periods = ["DAILY", "WEEKLY", "MONTHLY", "ALL_TIME"] as const;
 function DrawdownMeter({ value }: { value: number }) {
   const capped = Math.min(value, 12);
   return (
-    <div className="rounded-2xl border border-line bg-panel p-5">
+    <div className="rounded-[4px] border border-line bg-panel p-5">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Drawdown meter</h3>
@@ -34,7 +34,7 @@ function DrawdownMeter({ value }: { value: number }) {
       </div>
       <div className="mt-5 h-4 overflow-hidden rounded-full border border-line bg-background">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-accent to-accent-2 transition-all"
+          className="h-full rounded-full bg-accent transition-all"
           style={{ width: `${(capped / 12) * 100}%` }}
         />
       </div>
@@ -63,7 +63,7 @@ function GrowthGraph({ points }: { points: EquityPoint[] }) {
   const line = coordinates.map((point) => `${point.x},${point.y}`).join(" ");
 
   return (
-    <div className="rounded-2xl border border-line bg-panel p-5">
+    <div className="rounded-[4px] border border-line bg-panel p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Historical growth</h3>
@@ -195,7 +195,7 @@ function AnalyticsContent() {
   if (accountsError) {
     return (
       <WorkspacePage eyebrow="Analytics" title="Performance intelligence" description="Account-scoped performance analytics.">
-        <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+        <div className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           Connected accounts could not be loaded. Refresh and try again.
         </div>
       </WorkspacePage>
@@ -238,13 +238,13 @@ function AnalyticsContent() {
       title="Performance intelligence"
       description="Profitability, drawdown, consistency, account growth, and risk-adjusted trade quality."
     >
-      <div className="grid gap-4 rounded-2xl border border-line bg-panel p-4 lg:grid-cols-[minmax(220px,0.35fr)_1fr] lg:items-end">
+      <div className="grid gap-4 rounded-[4px] border border-line bg-panel p-4 lg:grid-cols-[minmax(220px,0.35fr)_1fr] lg:items-end">
         <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
           Account scope
           <select
             value={accountScope}
             onChange={(event) => setAccountScope(event.target.value)}
-            className="min-h-11 rounded-xl border border-line bg-background px-3 text-sm font-semibold normal-case tracking-normal text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+            className="min-h-11 rounded-[4px] border border-line bg-background px-3 text-sm font-semibold normal-case tracking-normal text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
           >
             <option value="ALL">All Accounts</option>
             {connectedAccounts.map((account) => (
@@ -254,13 +254,13 @@ function AnalyticsContent() {
             ))}
           </select>
         </label>
-        <div className="flex flex-wrap gap-2 rounded-full border border-line bg-background p-1">
+        <div className="flex flex-wrap gap-2 rounded-[4px] border border-line bg-background p-2">
           {periods.map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => setPeriod(item)}
-              className={`rounded-full px-4 py-2 text-xs font-semibold transition ${
+              className={`rounded-[4px] px-4 py-2 text-xs font-semibold transition ${
                 period === item ? "bg-accent text-background" : "text-muted hover:text-foreground"
               }`}
             >
@@ -271,13 +271,13 @@ function AnalyticsContent() {
       </div>
 
       {analyticsError || curveError ? (
-        <div className="mt-5 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+        <div className="mt-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           Analytics for this account scope could not be loaded. The selection may be unavailable or outside your access.
         </div>
       ) : null}
 
       {analyticsLoading || curveLoading ? (
-        <div className="mt-5 rounded-2xl border border-line bg-panel px-4 py-3 text-sm text-muted">
+        <div className="mt-5 rounded-[4px] border border-line bg-panel px-4 py-3 text-sm text-muted">
           Recalculating metrics for this scope…
         </div>
       ) : null}
@@ -346,35 +346,35 @@ function AnalyticsContent() {
               <p className="mt-1 text-sm text-muted">Selected period: {period.replace("_", " ")}</p>
             </div>
           </div>
-          <div className="mt-5 rounded-2xl border border-line bg-background p-5">
+          <div className="mt-5 rounded-[4px] border border-line bg-background p-5">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted">Primary KPI</p>
                 <p className="mt-3 text-5xl font-semibold text-accent-2">{formatMoney({ amount: kpi.netProfit, currency: "USD" })}</p>
                 <p className="mt-2 max-w-md text-sm text-muted">Net profit for the selected period</p>
               </div>
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-foreground">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-foreground">
                 Performance focused
               </span>
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-line bg-background p-4">
+          <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2">
+            <div className="p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Win rate</p>
               <p className="mt-2 text-lg font-semibold text-foreground">{formatPercent(kpi.winRate)}</p>
             </div>
-            <div className="rounded-xl border border-line bg-background p-4">
+            <div className="p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Risk utilization</p>
               <p className="mt-2 text-lg font-semibold text-accent">{formatPercent(kpi.riskUtilization)}</p>
             </div>
-            <div className="rounded-xl border border-line bg-background p-4 sm:col-span-2">
+            <div className="p-4 sm:col-span-2">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Average R</p>
               <p className="mt-2 text-lg font-semibold text-foreground">{kpi.avgR.toFixed(2)}R</p>
             </div>
           </div>
           <div className="mt-4">
-            <div className="flex items-center gap-3 rounded-2xl border border-line bg-[#050602] p-4">
+            <div className="flex items-center gap-3 rounded-[4px] border border-line bg-[#050602] p-4">
               <TrendingUp className="h-5 w-5 text-accent-2" />
               <div>
                 <p className="text-sm font-semibold text-foreground">{kpi.status} trend</p>
@@ -385,9 +385,9 @@ function AnalyticsContent() {
         </Panel>
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[0.58fr_0.42fr]">
+      <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-[0.58fr_0.42fr]">
         <GrowthGraph points={equityCurve} />
-        <Panel>
+        <Panel className="h-full">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Risk-to-reward overview</h2>
@@ -395,13 +395,13 @@ function AnalyticsContent() {
             </div>
             <TrendingDown className="h-5 w-5 text-danger" />
           </div>
-          <div className="mt-5 space-y-3">
+          <div className="mt-5 overflow-hidden rounded-[4px] border border-line bg-background">
             {[
               ["Winning trades", String(analyticsSummary?.winningTradeCount ?? 0), "Positive profit"],
               ["Losing trades", String(analyticsSummary?.losingTradeCount ?? 0), "Negative profit"],
               ["Closed trades", String(analyticsSummary?.tradeCount ?? 0), "Selected scope and period"],
             ].map(([label, value, note]) => (
-              <div key={label} className="rounded-xl border border-line bg-background p-4">
+              <div key={label} className="border-b border-line p-4 last:border-b-0">
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-sm font-medium text-muted">{label}</span>
                   <span className="text-sm font-semibold text-foreground">{value}</span>

@@ -85,7 +85,7 @@ export default function PartnerTradersPage() {
         ]}
       />
 
-      <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
         <FilterChipRow
           chips={(["ALL", "ACTIVE", "AT_RISK", "RESTRICTED"] as StatusFilter[]).map((s) => ({
             label: s === "ALL" ? "All" : s === "AT_RISK" ? "At risk" : s.charAt(0) + s.slice(1).toLowerCase(),
@@ -99,11 +99,11 @@ export default function PartnerTradersPage() {
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-14 animate-pulse rounded-xl border border-line bg-panel" />
+              <div key={i} className="h-14 animate-pulse rounded-[4px] border border-line bg-panel" />
             ))}
           </div>
         ) : isError ? (
-          <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             Failed to load traders.
           </div>
         ) : filtered.length === 0 ? (
@@ -112,9 +112,10 @@ export default function PartnerTradersPage() {
             description="Traders assigned to you (or who sign up with your referral link) will appear here."
           />
         ) : (
-          <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
-            <Panel className="min-w-0">
-              <DataTable
+          <div className="grid items-stretch gap-5 xl:h-[600px] xl:grid-cols-[1.4fr_1fr]">
+            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-full">
+              <div className="invisible-scrollbar min-h-0 flex-1 overflow-auto">
+                <DataTable
                 headers={["Trader", "Joined", "Accounts", "Equity", "Risk", ""]}
                 rows={filtered.map((t) => [
                   <div key="n" className="min-w-0">
@@ -131,11 +132,12 @@ export default function PartnerTradersPage() {
                     View
                   </GhostButton>,
                 ])}
-              />
+                />
+              </div>
             </Panel>
 
             {selected ? (
-              <Panel>
+              <Panel className="invisible-scrollbar min-h-0 overflow-y-auto xl:h-full">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Trader</p>
@@ -145,7 +147,7 @@ export default function PartnerTradersPage() {
                   <StatusPill tone={RISK_TONE[selected.riskStatus]}>{selected.riskStatus}</StatusPill>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="definition-grid mt-4 grid grid-cols-2 gap-0">
                   <Stat label="Segment" value={selected.segment} />
                   <Stat label="Accounts" value={`${selected.connectedAccounts}/${selected.accountCount}`} />
                   <Stat label="Team equity" value={formatMoney(selected.totalEquity)} />
@@ -173,7 +175,7 @@ export default function PartnerTradersPage() {
                       {detail.recentTrades.slice(0, 8).map((tr) => (
                         <div
                           key={tr.id}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-line bg-background px-3 py-2 text-xs"
+                            className="flex items-center justify-between gap-2 border-b border-line bg-background px-3 py-2 text-xs last:border-b-0"
                         >
                           <span className="font-semibold text-foreground">
                             {tr.symbol} - {tr.side}
@@ -199,7 +201,7 @@ export default function PartnerTradersPage() {
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-2xl border border-line bg-background px-4 py-3">
+    <div className="px-4 py-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">{label}</p>
       <p className="mt-1 text-sm font-semibold text-foreground">{value}</p>
     </div>
@@ -218,7 +220,7 @@ const ACCOUNT_STATUS_TONE: Record<string, "lime" | "accent" | "danger" | "muted"
 function AccountStatusRow({ acc }: { acc: PartnerAccountStatusSummary }) {
   const tone = ACCOUNT_STATUS_TONE[acc.status] ?? "muted";
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-background px-3 py-2 text-xs">
+    <div className="flex items-center justify-between gap-3 border-b border-line bg-background px-3 py-2 text-xs last:border-b-0">
       <span className="truncate font-semibold text-foreground">{acc.accountName ?? acc.accountId.slice(0, 8)}</span>
       <div className="flex shrink-0 items-center gap-2">
         <span className="text-muted">{acc.currency}</span>

@@ -45,9 +45,9 @@ const STATUS_TONE: Record<string, "lime" | "accent" | "danger" | "muted"> = {
   REVOKED: "danger",
 };
 
-const fieldCls = "h-10 w-full rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
-const textareaCls = "min-h-20 w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/10";
-const selectCls = "h-10 w-full rounded-xl border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
+const fieldCls = "h-10 w-full rounded-[4px] border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
+const textareaCls = "min-h-20 w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/10";
+const selectCls = "h-10 w-full rounded-[4px] border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
 const labelCls = "block text-xs font-semibold uppercase tracking-[0.18em] text-muted mb-1.5";
 const numCls = `${fieldCls} [appearance:textfield]`;
 
@@ -104,11 +104,11 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
         <PrimaryButton><Plus className="mr-1.5 inline h-3.5 w-3.5" />New Program</PrimaryButton>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-full max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-line bg-surface p-6 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-xl -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-surface p-6">
           <div className="mb-5 flex items-center justify-between">
             <Dialog.Title className="text-base font-semibold">New Evaluation Program</Dialog.Title>
-            <Dialog.Close className="rounded-lg p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
+            <Dialog.Close className="rounded-[4px] p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
           </div>
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); setErr(""); mutation.mutate(); }} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -213,11 +213,11 @@ function UpdateStatusDialog({ program, onUpdated }: { program: EvaluationProgram
         <button className="text-xs text-accent underline hover:opacity-80">Edit rules</button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-line bg-surface p-6 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Content className="invisible-scrollbar fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-line bg-surface p-6">
           <div className="mb-4 flex items-center justify-between">
             <Dialog.Title className="text-sm font-semibold">{program.name}</Dialog.Title>
-            <Dialog.Close className="rounded-lg p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
+            <Dialog.Close className="rounded-[4px] p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
           </div>
           <div className="space-y-4">
             <div><label className={labelCls}>Name</label><input className={fieldCls} value={form.name} onChange={set("name")} /></div>
@@ -280,11 +280,11 @@ function LinkAccountDialog({ attempt, onLinked }: { attempt: EvaluationAttemptDt
         <button className="text-xs text-accent underline hover:opacity-80">Link Account</button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-surface p-6">
           <div className="mb-4 flex items-center justify-between">
             <Dialog.Title className="text-sm font-semibold">Link Demo Account</Dialog.Title>
-            <Dialog.Close className="rounded-lg p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
+            <Dialog.Close className="rounded-[4px] p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
           </div>
           <p className="mb-4 text-xs text-muted-foreground">Enter the UUID of a connected trading account. Starting balance will be set from the program&apos;s configured value.</p>
           <div className="space-y-4">
@@ -326,11 +326,11 @@ function OverrideDialog({ attempt, onOverridden }: { attempt: EvaluationAttemptD
         <button className="text-xs text-accent underline hover:opacity-80">Override</button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-surface p-6">
           <div className="mb-4 flex items-center justify-between">
             <Dialog.Title className="text-sm font-semibold">Admin Override</Dialog.Title>
-            <Dialog.Close className="rounded-lg p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
+            <Dialog.Close className="rounded-[4px] p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
           </div>
           <p className="mb-4 text-xs text-muted-foreground">Override is audited. Reason required. Trader will be notified.</p>
           <div className="space-y-4">
@@ -465,11 +465,11 @@ function RevokeCertDialog({ cert, onRevoked }: { cert: CertificateDto; onRevoked
         <button className="text-xs text-danger underline hover:opacity-80">Revoke</button>
       </Dialog.Trigger>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-xl">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60" />
+        <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-surface p-6">
           <div className="mb-4 flex items-center justify-between">
             <Dialog.Title className="text-sm font-semibold text-danger">Revoke Certificate</Dialog.Title>
-            <Dialog.Close className="rounded-lg p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
+            <Dialog.Close className="rounded-[4px] p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
           </div>
           <div className="space-y-4">
             <div>
@@ -548,7 +548,7 @@ export default function AdminEvaluationsPage() {
       }
     >
       {/* Stats */}
-      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="definition-grid mb-6 grid grid-cols-2 gap-0 sm:grid-cols-4">
         <StatTile label="Programs" value={String(a?.totalPrograms ?? "—")} />
         <StatTile label="Published" value={String(a?.publishedPrograms ?? "—")} />
         <StatTile label="Attempts" value={String(a?.totalAttempts ?? "—")} />
@@ -589,7 +589,7 @@ export default function AdminEvaluationsPage() {
         {tab === "attempts" && (
           <>
             {attempts.length > 0 ? (
-              <div className="mb-4 rounded-2xl border border-line bg-panel p-3">
+              <div className="mb-4 rounded-[4px] border border-line bg-panel p-3">
                 <FilterChipRow
                   chips={(["ALL", "ACTIVE", "PASSED", "FAILED", "NEEDS_REVIEW"] as const).map((s) => ({
                     label: s === "ALL" ? `All (${attempts.length})` : `${s} (${attempts.filter((a) => a.status === s).length})`,

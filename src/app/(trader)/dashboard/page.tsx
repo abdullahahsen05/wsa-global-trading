@@ -324,7 +324,7 @@ function TraderDashboardContent() {
             <select
               value={accountIndex}
               onChange={(e) => setAccountIndex(Number(e.target.value))}
-              className="h-9 rounded-full border border-line bg-background px-3 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
+              className="h-9 rounded-[4px] border border-line bg-background px-3 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
             >
               {accounts.map((a, i) => (
                 <option key={a.accountId} value={i}>
@@ -354,7 +354,7 @@ function TraderDashboardContent() {
     >
       {/* Platform subscription banner */}
       {showSubBanner && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-accent/30 bg-accent/5 px-4 py-3">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-accent/30 bg-accent/5 px-4 py-3">
           <div>
             <p className="text-sm font-semibold text-foreground">
               {subStatus === "EXPIRED" ? "Subscription expired" : "Activate Platform Subscription"}
@@ -368,14 +368,14 @@ function TraderDashboardContent() {
           <button
             type="button"
             onClick={() => setSubModalOpen(true)}
-            className="shrink-0 rounded-full bg-accent px-4 py-2 text-xs font-semibold text-background hover:opacity-90"
+            className="shrink-0 rounded-[4px] bg-accent px-4 py-2 text-xs font-semibold text-background hover:opacity-90"
           >
             {subStatus === "EXPIRED" ? "Renew — $50/month" : "Pay $50 / month"}
           </button>
         </div>
       )}
       {subStatus === "PENDING_APPROVAL" && (
-        <div className="mb-5 rounded-2xl border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-accent">
+        <div className="mb-5 rounded-[4px] border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-accent">
           Platform subscription payment verified — access activation is finishing automatically.
         </div>
       )}
@@ -396,31 +396,38 @@ function TraderDashboardContent() {
           </div>
           <Link
             href="/accounts"
-            className="rounded-full bg-accent px-6 py-2.5 text-sm font-semibold text-background transition hover:opacity-90"
+            className="rounded-[4px] bg-accent px-6 py-2.5 text-sm font-semibold text-background transition hover:opacity-90"
           >
             Connect account
           </Link>
         </div>
       ) : (
         <>
-          <Panel className="mb-4">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
+          <section className="mb-4 overflow-hidden border border-line bg-panel">
+            <div className="grid lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,2fr)]">
+              <div className="border-b border-line px-4 py-3 lg:border-b-0 lg:border-r">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Connected account</p>
                 <h2 className="mt-2 text-lg font-semibold text-foreground">{baseAccount?.accountName ?? "Trading account"}</h2>
               </div>
-              <div className="grid min-w-0 gap-3 text-sm sm:grid-cols-3">
-                <div className="rounded-xl border border-line bg-background px-4 py-3"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">Broker</p><p className="mt-1 font-semibold text-foreground">{accountIdentity.brokerName}</p></div>
-                <div className="rounded-xl border border-line bg-background px-4 py-3"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">Server</p><p className="mt-1 font-semibold text-foreground">{accountIdentity.serverName}</p></div>
-                <div className="rounded-xl border border-line bg-background px-4 py-3"><p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">Platform</p><p className="mt-1 font-semibold text-foreground">{accountIdentity.platform}</p></div>
+              <div className="grid sm:grid-cols-3">
+                {[
+                  ["Broker", accountIdentity.brokerName],
+                  ["Server", accountIdentity.serverName],
+                  ["Platform", accountIdentity.platform],
+                ].map(([label, value]) => (
+                  <div key={label} className="border-b border-line px-4 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">{label}</p>
+                    <p className="mt-1 truncate font-semibold text-foreground">{value}</p>
+                  </div>
+                ))}
               </div>
             </div>
-          </Panel>
+          </section>
           <DashboardKpiStrip items={kpiItems} />
           <div className="mt-4">
             <MarketSentimentStrip items={marketSentimentItems} />
           </div>
-          <Panel className="mt-4">
+          <Panel className="mt-4 overflow-hidden">
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-foreground">Live performance</p>
@@ -434,7 +441,7 @@ function TraderDashboardContent() {
                     key={period}
                     type="button"
                     onClick={() => setSelectedPeriod(period)}
-                    className={`h-9 rounded-full border px-4 text-xs font-semibold transition ${
+                    className={`h-9 rounded-[4px] border px-4 text-xs font-semibold transition ${
                       selectedPeriod === period
                         ? "border-accent bg-accent text-background"
                         : "border-line bg-background text-muted hover:text-foreground"

@@ -39,7 +39,7 @@ export function PartnerWorkspaceGate({ children }: { children: React.ReactNode }
   if (isLoading) {
     return (
       <WorkspacePage eyebrow="Partner" title="Partner workspace" description="Checking your partner access.">
-        <div className="h-24 animate-pulse rounded-2xl border border-line bg-panel" />
+        <div className="h-24 animate-pulse rounded-[4px] border border-line bg-panel" />
       </WorkspacePage>
     );
   }

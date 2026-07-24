@@ -263,7 +263,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-2xl border border-line bg-background p-1">
+        <div className="inline-flex rounded-[4px] border border-line bg-background p-1">
           {(["MONTH", "YEAR"] as CalendarMode[]).map((value) => {
             const active = mode === value;
             return (
@@ -271,7 +271,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                 key={value}
                 type="button"
                 onClick={() => setMode(value)}
-                className={`rounded-xl px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
+                className={`rounded-[4px] px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
                   active
                     ? "bg-panel-strong text-accent"
                     : "text-muted hover:text-foreground"
@@ -287,7 +287,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
           <button
             type="button"
             onClick={handleShare}
-            className="h-11 rounded-xl border border-line bg-panel px-4 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent"
+            className="h-11 rounded-[4px] border border-line bg-panel px-4 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent"
           >
             Share
           </button>
@@ -305,7 +305,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                   null,
               );
             }}
-            className="h-11 rounded-xl border border-line bg-background px-4 text-sm font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10"
+            className="h-11 rounded-[4px] border border-line bg-background px-4 text-sm font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10"
           >
             {monthNames.map((name, index) => (
               <option key={name} value={index}>
@@ -327,7 +327,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                   null,
               );
             }}
-            className="h-11 rounded-xl border border-line bg-background px-4 text-sm font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10"
+            className="h-11 rounded-[4px] border border-line bg-background px-4 text-sm font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10"
           >
             {availableYears.map((year) => (
               <option key={year} value={year}>
@@ -344,7 +344,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
             {weekdayLabels.map((label) => (
               <div
                 key={label}
-                className="rounded-xl border border-line bg-background py-2 text-center text-[11px] font-semibold uppercase tracking-[0.2em] text-muted"
+                className="rounded-[4px] border border-line bg-background py-2 text-center text-[11px] font-semibold uppercase tracking-[0.2em] text-muted"
               >
                 {label}
               </div>
@@ -366,8 +366,6 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                 <motion.button
                   key={cell.key}
                   type="button"
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.99 }}
                   onClick={() => {
                     if (!cell.inMonth) {
                       setSelectedMonth(cell.date.getMonth());
@@ -375,7 +373,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                     }
                     setSelectedDayKey(cell.key);
                   }}
-                  className={`relative flex min-h-[122px] flex-col rounded-2xl border p-3 text-left transition ${
+                  className={`relative flex min-h-[122px] flex-col rounded-[4px] border p-3 text-left transition ${
                     cell.inMonth
                       ? "border-line bg-background"
                       : "border-line/70 bg-panel/70 text-muted/70"
@@ -417,7 +415,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
           </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-[0.58fr_0.42fr]">
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="rounded-[4px] border border-line bg-background p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
                 Selected day
               </p>
@@ -438,7 +436,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                 <p className="mt-2 text-sm text-muted">Pick a highlighted day to inspect the closed trades.</p>
               )}
             </div>
-            <div className="rounded-2xl border border-line bg-background p-4">
+            <div className="rounded-[4px] border border-line bg-background p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
                 Month summary
               </p>
@@ -481,8 +479,6 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                 <motion.button
                   key={monthName}
                   type="button"
-                  whileHover={{ y: -1 }}
-                  whileTap={{ scale: 0.99 }}
                   onClick={() => {
                     const nextCells = buildMonthCells(selectedYear, monthIndex, daySummaryMap);
                     setSelectedMonth(monthIndex);
@@ -494,7 +490,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                         null,
                     );
                   }}
-                  className={`rounded-2xl border p-4 text-left transition ${
+                  className={`rounded-[4px] border p-4 text-left transition ${
                     selected
                       ? "border-accent/40 bg-[#141106]"
                       : "border-line bg-background hover:border-accent/25"
@@ -518,7 +514,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
             })}
           </div>
 
-          <div className="mt-4 rounded-2xl border border-line bg-background p-4">
+          <div className="mt-4 rounded-[4px] border border-line bg-background p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">

@@ -111,7 +111,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
       </div>
 
       {notice ? (
-        <div className={`mt-4 rounded-xl border px-4 py-3 text-sm ${
+        <div className={`mt-4 rounded-[4px] border px-4 py-3 text-sm ${
           notice.tone === "success"
             ? "border-accent/20 bg-accent/10 text-accent"
             : "border-danger/20 bg-danger/10 text-danger"
@@ -121,7 +121,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
       ) : null}
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1.3fr]">
-        <form className="space-y-4 rounded-2xl border border-line bg-background p-4" onSubmit={create}>
+        <form className="space-y-4 rounded-[4px] border border-line bg-background p-4" onSubmit={create}>
           <h3 className="font-semibold text-foreground">Create live self-copy setup</h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <SelectField label="Source account" value={sourceAccountId} onChange={(event) => setSourceAccountId(event.target.value)}>
@@ -174,7 +174,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
           ) : (
             <div className="space-y-3">
               {(relationships.data?.relationships ?? []).map((relationship) => (
-                <div key={relationship.id} className="rounded-2xl border border-line bg-background p-4">
+                <div key={relationship.id} className="rounded-[4px] border border-line bg-background p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-semibold text-foreground">

@@ -169,7 +169,7 @@ export function CrmOverlay({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/82 backdrop-blur-sm" />
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/82" />
         <Dialog.Content className="fixed inset-0 z-50 overflow-hidden bg-panel focus:outline-none">
           <motion.div
             initial={{ opacity: 0, y: 36 }}
@@ -226,7 +226,7 @@ export function CrmOverlay({
               </div>
             </div>
 
-            <motion.div variants={pageMotion} initial="hidden" animate="show" className="min-h-0 flex-1 overflow-y-auto p-5">
+            <motion.div variants={pageMotion} initial="hidden" animate="show" className="min-h-0 flex-1 invisible-scrollbar overflow-y-auto p-5">
               {activeTab === "CONTACT_DIRECTORY" ? (
                 <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
                   <Panel>
@@ -327,7 +327,7 @@ export function CrmOverlay({
                       </div>
                       <StatusPill tone="muted">{contacts.length} contacts</StatusPill>
                     </div>
-                    <div className="mt-4 max-h-[calc(100vh-260px)] space-y-2 overflow-y-auto pr-1">
+                    <div className="mt-4 max-h-[calc(100vh-260px)] space-y-2 invisible-scrollbar overflow-y-auto pr-1">
                       {totalContacts === 0 ? (
                         <EmptyState
                           title="No profiles match"
@@ -344,7 +344,7 @@ export function CrmOverlay({
                                 onSelectContact(contact.id);
                                 onTabChange("PROFILE_DETAIL");
                               }}
-                              className={`w-full rounded-2xl border p-3 text-left transition ${
+                              className={`w-full rounded-[4px] border p-3 text-left transition ${
                                 active ? "border-accent/40 bg-accent/10" : "border-line bg-background hover:border-accent/30"
                               }`}
                             >
@@ -356,10 +356,10 @@ export function CrmOverlay({
                                 <StatusPill tone={contact.role === "TRADER" ? "lime" : "accent"}>{contact.role}</StatusPill>
                               </div>
                               <div className="mt-3 flex flex-wrap gap-2">
-                                <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+                                <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                                   {contact.role === "TRADER" ? contact.segment : contact.team}
                                 </span>
-                                <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+                                <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                                   {new Date(contact.lastActivityAt).toLocaleDateString()}
                                 </span>
                               </div>
@@ -388,21 +388,21 @@ export function CrmOverlay({
                       </div>
 
                       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Role</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">
                             {selectedContact.role === "TRADER" ? "Trader" : "Platform user"}
                           </p>
                         </div>
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Subscription</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.subscription}</p>
                         </div>
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Segment</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.segment}</p>
                         </div>
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Last activity</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">
                             {new Date(selectedContact.lastActivityAt).toLocaleString()}
@@ -412,7 +412,7 @@ export function CrmOverlay({
 
                       <div className="mt-4 flex flex-wrap gap-2">
                         {selectedContact.tags.map((tag) => (
-                          <span key={tag} className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+                          <span key={tag} className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                             {tag}
                           </span>
                         ))}
@@ -439,7 +439,7 @@ export function CrmOverlay({
                             <EmptyState title="No notes yet" description="This profile has no CRM notes yet." />
                           ) : (
                             selectedNotes.slice(0, 2).map((note) => (
-                              <div key={note.id} className="rounded-2xl border border-line bg-background p-4">
+                              <div key={note.id} className="rounded-[4px] border border-line bg-background p-4">
                                 <p className="text-sm leading-6 text-foreground">{note.note}</p>
                                 <p className="mt-2 text-xs text-muted">
                                   {note.authorName} - {new Date(note.createdAt).toLocaleString()}
@@ -478,23 +478,23 @@ export function CrmOverlay({
                       </div>
 
                       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Started</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">
                             {new Date(selectedContact.lastActivityAt).toLocaleDateString()}
                           </p>
                         </div>
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Ends</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">
                             {selectedContact.role === "TRADER" ? "In 12 days" : "Managed internally"}
                           </p>
                         </div>
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Linked accounts</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.accountIds.length}</p>
                         </div>
-                        <div className="rounded-2xl border border-line bg-background px-4 py-3">
+                        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">State</p>
                           <p className="mt-1 text-sm font-semibold text-foreground">Managed in mock billing</p>
                         </div>
@@ -546,7 +546,7 @@ export function CrmOverlay({
 
                       <div className="mt-5 space-y-3">
                         {timelineEntries.map((entry) => (
-                          <div key={entry.id} className="rounded-2xl border border-line bg-background p-4">
+                          <div key={entry.id} className="rounded-[4px] border border-line bg-background p-4">
                             <div className="flex items-start gap-3">
                               <DotTone type={entry.type} />
                               <div className="min-w-0 flex-1">

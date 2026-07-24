@@ -68,24 +68,24 @@ export default function PartnerPayoutsPage() {
         { label: "Reserved / reconciled", value: balance ? formatMoney({ amount: balance.reserved, currency: balance.currency }) : "…", tone: "accent" },
       ]} />
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[0.8fr_1.2fr]">
-        <Panel>
+      <div className="mt-5 grid items-stretch gap-5 xl:h-[620px] xl:grid-cols-[0.8fr_1.2fr]">
+        <Panel className="invisible-scrollbar min-h-0 overflow-y-auto xl:h-full">
           <h2 className="text-lg font-semibold text-foreground">Request withdrawal</h2>
           <p className="mt-1 text-sm leading-6 text-muted">Only approved, unpaid commissions and rebates that are not already locked are withdrawable. One active request is allowed at a time.</p>
-          {message ? <p className="mt-4 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">{message}</p> : null}
-          {error ? <p className="mt-4 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
+          {message ? <p className="mt-4 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">{message}</p> : null}
+          {error ? <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
           <form onSubmit={submit} className="mt-5 grid gap-4">
             <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Amount (USD)
-              <input name="amount" type="number" min={balance?.minimum ?? 100} max={balance?.available ?? 0} step="0.01" required defaultValue={balance?.available || ""} disabled={hasActive} className="mt-2 w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground" />
+              <input name="amount" type="number" min={balance?.minimum ?? 100} max={balance?.available ?? 0} step="0.01" required defaultValue={balance?.available || ""} disabled={hasActive} className="mt-2 w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground" />
             </label>
             <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Payout method
-              <input name="payoutMethod" required maxLength={80} placeholder="Bank transfer, USDT, etc." disabled={hasActive} className="mt-2 w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground" />
+              <input name="payoutMethod" required maxLength={80} placeholder="Bank transfer, USDT, etc." disabled={hasActive} className="mt-2 w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground" />
             </label>
             <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Payout reference
-              <input name="payoutReference" required maxLength={240} placeholder="Account, wallet, or payment reference" disabled={hasActive} className="mt-2 w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground" />
+              <input name="payoutReference" required maxLength={240} placeholder="Account, wallet, or payment reference" disabled={hasActive} className="mt-2 w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground" />
             </label>
             <label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Note (optional)
-              <textarea name="requestedNote" maxLength={1000} rows={3} disabled={hasActive} className="mt-2 w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground" />
+              <textarea name="requestedNote" maxLength={1000} rows={3} disabled={hasActive} className="mt-2 w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground" />
             </label>
             <PrimaryButton type="submit" disabled={createRequest.isPending || hasActive || !balance || balance.available < balance.minimum}>
               {createRequest.isPending ? "Submitting…" : hasActive ? "Active request in review" : "Submit withdrawal"}
@@ -93,11 +93,12 @@ export default function PartnerPayoutsPage() {
           </form>
         </Panel>
 
-        <Panel>
-          <h2 className="mb-4 text-lg font-semibold text-foreground">Request history</h2>
+        <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
+          <h2 className="mb-4 shrink-0 text-lg font-semibold text-foreground">Request history</h2>
           {isLoading ? <p className="text-sm text-muted">Loading…</p> : withdrawals.length === 0 ? (
             <EmptyState title="No withdrawal requests" description="Your submitted requests will appear here." />
           ) : (
+            <div className="invisible-scrollbar min-h-0 flex-1 overflow-auto">
             <DataTable headers={["Requested", "Amount", "Method", "Status", "Review"]} rows={withdrawals.map((row) => [
               <span key="d" className="text-xs text-muted">{new Date(row.createdAt).toLocaleDateString()}</span>,
               <span key="a">{formatMoney({ amount: row.amount, currency: row.currency })}</span>,
@@ -105,6 +106,7 @@ export default function PartnerPayoutsPage() {
               <StatusPill key="s" tone={TONES[row.status] ?? "muted"}>{row.status.replaceAll("_", " ")}</StatusPill>,
               <span key="r" className="max-w-[220px] text-xs text-muted">{row.rejectionReason ?? row.adminNote ?? (row.paidAt ? `Paid ${new Date(row.paidAt).toLocaleDateString()}` : "-")}</span>,
             ])} />
+            </div>
           )}
         </Panel>
       </div>

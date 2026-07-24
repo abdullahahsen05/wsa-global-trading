@@ -7,6 +7,7 @@ import {
   EmptyState,
   FilterChipRow,
   GhostButton,
+  PaginationControls,
   Panel,
   StatusPill,
   WorkspacePage,
@@ -41,6 +42,8 @@ export default function MarketplacePage() {
   const [platformFilter, setPlatformFilter] = useState<"ALL" | "MT5" | "MT4">("ALL");
   const [riskFilter, setRiskFilter] = useState<"ALL" | "LOW" | "MEDIUM" | "HIGH">("ALL");
   const [buyBotId, setBuyBotId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(9);
 
   const { data: products = [], isLoading, isError, error } = useQuery<BotProductDto[]>({
     queryKey: ["marketplace-products"],
@@ -56,6 +59,7 @@ export default function MarketplacePage() {
   const filtered = products
     .filter((p) => platformFilter === "ALL" || p.platform === platformFilter || p.platform === "BOTH")
     .filter((p) => riskFilter === "ALL" || p.riskLevel === riskFilter);
+  const paged = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   function getBotAccessState(botProductId: string): "NONE" | "PENDING_APPROVAL" | "ACTIVE" | "PENDING_PAYMENT" {
     const access = summary?.botAccess.find((b) => b.botProductId === botProductId);
@@ -74,20 +78,23 @@ export default function MarketplacePage() {
       title="Bot Marketplace"
       description="Explore and purchase trading bots and expert advisors"
     >
-      <div className="space-y-3">
+      <div className="invisible-scrollbar mb-5 flex flex-wrap items-center gap-3 overflow-x-auto border border-line bg-panel p-3">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">Platform</span>
         <FilterChipRow
           chips={[
-            { label: "All platforms", active: platformFilter === "ALL", onClick: () => setPlatformFilter("ALL") },
-            { label: "MT5", active: platformFilter === "MT5", onClick: () => setPlatformFilter("MT5") },
-            { label: "MT4", active: platformFilter === "MT4", onClick: () => setPlatformFilter("MT4") },
+            { label: "All platforms", active: platformFilter === "ALL", onClick: () => { setPlatformFilter("ALL"); setPage(1); } },
+            { label: "MT5", active: platformFilter === "MT5", onClick: () => { setPlatformFilter("MT5"); setPage(1); } },
+            { label: "MT4", active: platformFilter === "MT4", onClick: () => { setPlatformFilter("MT4"); setPage(1); } },
           ]}
         />
+        <span className="hidden h-8 w-px bg-line sm:block" />
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">Risk</span>
         <FilterChipRow
           chips={[
-            { label: "All risk levels", active: riskFilter === "ALL", onClick: () => setRiskFilter("ALL") },
-            { label: "Low risk", active: riskFilter === "LOW", onClick: () => setRiskFilter("LOW") },
-            { label: "Medium risk", active: riskFilter === "MEDIUM", onClick: () => setRiskFilter("MEDIUM") },
-            { label: "High risk", active: riskFilter === "HIGH", onClick: () => setRiskFilter("HIGH") },
+            { label: "All risk levels", active: riskFilter === "ALL", onClick: () => { setRiskFilter("ALL"); setPage(1); } },
+            { label: "Low risk", active: riskFilter === "LOW", onClick: () => { setRiskFilter("LOW"); setPage(1); } },
+            { label: "Medium risk", active: riskFilter === "MEDIUM", onClick: () => { setRiskFilter("MEDIUM"); setPage(1); } },
+            { label: "High risk", active: riskFilter === "HIGH", onClick: () => { setRiskFilter("HIGH"); setPage(1); } },
           ]}
         />
       </div>
@@ -95,7 +102,7 @@ export default function MarketplacePage() {
       {isLoading ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="h-52 animate-pulse rounded-3xl bg-panel" />
+            <div key={i} className="h-52 animate-pulse rounded-[4px] bg-panel" />
           ))}
         </div>
       ) : isError ? (
@@ -111,12 +118,12 @@ export default function MarketplacePage() {
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((product) => {
+          {paged.map((product) => {
             const accessState = getBotAccessState(product.id);
             return (
               <div
                 key={product.id}
-                className="flex flex-col gap-3 rounded-3xl border border-line bg-panel p-5"
+                className="flex h-full flex-col gap-3 rounded-[4px] border border-line bg-panel p-5"
               >
                 <div className="flex items-start justify-between gap-2">
                   <Link
@@ -162,6 +169,17 @@ export default function MarketplacePage() {
           })}
         </div>
       )}
+
+      <PaginationControls
+        currentPage={page}
+        totalItems={filtered.length}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={(value) => {
+          setPage(1);
+          setPageSize(value);
+        }}
+      />
 
       {buyingBot && (
         <BillingCheckoutModal

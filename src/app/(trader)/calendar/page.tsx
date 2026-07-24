@@ -98,10 +98,10 @@ export default function TraderCalendarPage() {
         <div className="mt-5">
           {isLoading ? (
             <div className="grid gap-3">
-              {[0, 1, 2].map((item) => <div key={item} className="h-28 animate-pulse rounded-2xl border border-line bg-background" />)}
+              {[0, 1, 2].map((item) => <div key={item} className="h-28 animate-pulse rounded-[4px] border border-line bg-background" />)}
             </div>
           ) : isError ? (
-            <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-4 text-sm text-danger">
+            <div className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-4 text-sm text-danger">
               The published calendar could not be loaded. Please try again shortly.
             </div>
           ) : groups.length === 0 ? (
@@ -119,7 +119,7 @@ export default function TraderCalendarPage() {
                   </div>
                   <div className="grid gap-3 lg:grid-cols-2">
                     {dayEvents.map((event) => (
-                      <article key={event.id} className="rounded-2xl border border-line bg-background p-4 transition hover:border-accent/30">
+                      <article key={event.id} className="rounded-[4px] border border-line bg-background p-4 transition hover:border-accent/30">
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="min-w-0">
                             <StatusPill tone={typeTone[event.eventType]}>{event.eventType}</StatusPill>

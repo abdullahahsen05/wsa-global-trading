@@ -5,10 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ImagePlus, Loader2, Send, X } from "lucide-react";
 import {
-  DataTable,
   EmptyState,
   GhostButton,
-  InlineStatusStrip,
   Panel,
   PrimaryButton,
   StatusPill,
@@ -221,310 +219,633 @@ export default function AdminAiPage() {
     }
   }
 
+
   return (
     <WorkspacePage
       eyebrow="Admin"
       title="AI Controls"
       description="Use admin-only AI tools, monitor metadata-only usage, and manage per-user limits."
     >
-      <AiProviderSettingsPanel />
-      <div className="mb-5 grid gap-5 xl:grid-cols-2">
-        <Panel>
-          <h2 className="text-lg font-semibold text-foreground">Admin assistant</h2>
-          <p className="mt-1 text-sm text-muted">
-            Operations and support guidance without automatic access to platform-wide user data.
-          </p>
-          <textarea
-            value={assistantPrompt}
-            onChange={(event) => setAssistantPrompt(event.target.value)}
-            rows={3}
-            maxLength={4000}
-            placeholder="Draft a risk-review checklist for a disconnected trader account."
-            className="mt-4 w-full resize-none rounded-xl border border-line bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-accent"
-          />
-          <PrimaryButton
-            type="button"
-            disabled={assistantLoading || assistantPrompt.trim().length === 0}
-            onClick={() => void runAdminAssistant()}
-            className="mt-3"
-          >
-            {assistantLoading ? <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" /> : <Send className="mr-2 inline-block h-4 w-4" />}
-            {assistantLoading ? "Thinking…" : "Ask WSA Assistant"}
-          </PrimaryButton>
-          {assistantError ? <p className="mt-3 text-sm text-danger">{assistantError}</p> : null}
-          {assistantResult ? (
-            <div className="mt-4 whitespace-pre-wrap rounded-xl border border-line bg-background px-4 py-4 text-sm leading-6 text-foreground/90">
-              {assistantResult}
-            </div>
-          ) : null}
-        </Panel>
+      <div className="grid gap-5">
+        <AiProviderSettingsPanel />
 
-        <Panel>
-          <h2 className="text-lg font-semibold text-foreground">Admin image analysis</h2>
-          <p className="mt-1 text-sm text-muted">
-            Generic image upload is available only to Admin and Super Admin. Images are not written to usage logs.
-          </p>
-          <input
-            ref={imageInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            className="hidden"
-            onChange={(event) => {
-              setImageFile(event.target.files?.[0] ?? null);
-              setImageError("");
-              setImageResult("");
-            }}
-          />
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <GhostButton type="button" onClick={() => imageInputRef.current?.click()}>
-              <ImagePlus className="mr-2 inline-block h-4 w-4" />
-              {imageFile ? "Change image" : "Choose image"}
-            </GhostButton>
-            <span className="max-w-xs truncate text-xs text-muted">
-              {imageFile ? imageFile.name : "PNG, JPG, or WebP · max 5MB"}
-            </span>
-          </div>
-          <textarea
-            value={imageFocus}
-            onChange={(event) => setImageFocus(event.target.value)}
-            rows={2}
-            maxLength={1000}
-            placeholder="Optional analysis focus"
-            className="mt-3 w-full resize-none rounded-xl border border-line bg-background px-4 py-3 text-sm text-foreground outline-none focus:border-accent"
-          />
-          <PrimaryButton
-            type="button"
-            disabled={!imageFile || imageLoading}
-            onClick={() => void runImageAnalysis()}
-            className="mt-3"
-          >
-            {imageLoading ? <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 inline-block h-4 w-4" />}
-            {imageLoading ? "Analyzing…" : "Analyze image"}
-          </PrimaryButton>
-          {imageError ? <p className="mt-3 text-sm text-danger">{imageError}</p> : null}
-          {imageResult ? (
-            <div className="mt-4 whitespace-pre-wrap rounded-xl border border-line bg-background px-4 py-4 text-sm leading-6 text-foreground/90">
-              {imageResult}
-            </div>
-          ) : null}
-        </Panel>
-      </div>
+        <section className="grid items-stretch gap-5 xl:grid-cols-2">
+          <Panel className="flex min-h-[380px] min-w-0 flex-col !rounded-[4px] !p-0">
+            <header className="shrink-0 border-b border-line px-5 py-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+                Operations assistant
+              </p>
+              <h2 className="mt-2 text-base font-semibold text-foreground">
+                Admin assistant
+              </h2>
+              <p className="mt-1 max-w-xl text-sm leading-6 text-muted">
+                Draft operational guidance without automatically accessing
+                platform-wide user data.
+              </p>
+            </header>
 
-      <InlineStatusStrip
-        items={[
-          { label: "Requests today", value: usageLoading ? "…" : usage?.today.total ?? 0, tone: "accent" },
-          { label: "Chat", value: usageLoading ? "…" : usage?.today.chat ?? 0, tone: "lime" },
-          { label: "Chart analyses", value: usageLoading ? "…" : usage?.today.chartAnalysis ?? 0, tone: "lime" },
-          { label: "Failed", value: usageLoading ? "…" : usage?.today.failed ?? 0, tone: (usage?.today.failed ?? 0) > 0 ? "danger" : undefined },
-        ]}
-      />
-
-      {notice ? (
-        <div
-          className={`mt-5 rounded-2xl border px-4 py-3 text-sm font-medium ${
-            notice.type === "success"
-              ? "border-accent/20 bg-accent/10 text-accent"
-              : "border-danger/20 bg-danger/10 text-danger"
-          }`}
-        >
-          {notice.text}
-        </div>
-      ) : null}
-
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.5fr_1fr]">
-        {/* Users + limits */}
-        <Panel className="min-w-0">
-          <h2 className="text-lg font-semibold text-foreground">Trader AI limits</h2>
-          <p className="mt-1 text-sm text-muted">Select a user to manage their access and daily limits.</p>
-
-          <div className="mt-4">
-            {usersLoading ? (
-              <div className="space-y-2">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-12 rounded-xl border border-line bg-panel animate-pulse" />
-                ))}
-              </div>
-            ) : isError ? (
-              <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
-                Failed to load users.
-              </div>
-            ) : users.length === 0 ? (
-              <EmptyState title="No users" description="No users to manage yet." />
-            ) : (
-              <DataTable
-                headers={["User", "Access", "Chat (used/limit)", "Chart (used/limit)", "Credits", ""]}
-                rows={users.map((u) => [
-                  <div key="u" className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">{u.name}</p>
-                    <p className="truncate text-xs text-muted">{u.email}</p>
-                  </div>,
-                  <StatusPill key="s" tone={u.aiEnabled ? "lime" : "danger"}>
-                    {u.aiEnabled ? "ENABLED" : "DISABLED"}
-                  </StatusPill>,
-                  <span key="c">{u.chatUsedToday}/{u.effectiveChatLimit}</span>,
-                  <span key="ch">{u.chartUsedToday}/{u.effectiveChartLimit}</span>,
-                  <span key="cr" className={u.aiTokenCredits === 0 ? "text-danger font-semibold" : u.aiTokenCredits < 5000 ? "text-amber-400 font-semibold" : "text-foreground"}>
-                    {u.aiTokenCredits.toLocaleString()}
-                  </span>,
-                  <GhostButton key="b" type="button" onClick={() => selectUser(u)}>
-                    Manage
-                  </GhostButton>,
-                ])}
+            <div className="flex min-h-0 flex-1 flex-col px-5 py-5">
+              <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
+                Request
+              </label>
+              <textarea
+                value={assistantPrompt}
+                onChange={(event) => setAssistantPrompt(event.target.value)}
+                rows={4}
+                maxLength={4000}
+                placeholder="Draft a risk-review checklist for a disconnected trader account."
+                className="mt-2 min-h-[112px] w-full resize-none rounded-[4px] border border-line bg-background px-4 py-3 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-muted/55 focus:border-accent"
               />
-            )}
-          </div>
-        </Panel>
 
-        {/* Selected user controls + recent activity */}
-        <div className="space-y-5">
-          {selected ? (
-            <Panel>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Manage user</p>
-                  <h3 className="mt-2 truncate text-lg font-semibold text-foreground">{selected.name}</h3>
-                  <p className="truncate text-sm text-muted">{selected.email}</p>
+              {assistantError ? (
+                <div className="mt-3 border-l-2 border-danger bg-danger/5 px-3 py-2 text-sm text-danger">
+                  {assistantError}
                 </div>
-                <StatusPill tone={selected.aiEnabled ? "lime" : "danger"}>
-                  {selected.aiEnabled ? "ENABLED" : "DISABLED"}
-                </StatusPill>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-3 border-t border-line pt-4">
-                {selected.aiEnabled ? (
-                  <GhostButton type="button" disabled={mutation.isPending} onClick={() => toggleEnabled(selected)}>
-                    Disable AI
-                  </GhostButton>
-                ) : (
-                  <PrimaryButton type="button" disabled={mutation.isPending} onClick={() => toggleEnabled(selected)}>
-                    Enable AI
-                  </PrimaryButton>
-                )}
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <TextField
-                  label="Chat daily limit"
-                  type="number"
-                  min={0}
-                  placeholder={`Default (${selected.effectiveChatLimit})`}
-                  value={chatLimitInput}
-                  onChange={(e) => setChatLimitInput(e.target.value)}
-                  hint="Blank = use platform default"
-                />
-                <TextField
-                  label="Chart daily limit"
-                  type="number"
-                  min={0}
-                  placeholder={`Default (${selected.effectiveChartLimit})`}
-                  value={chartLimitInput}
-                  onChange={(e) => setChartLimitInput(e.target.value)}
-                  hint="Blank = use platform default"
-                />
-              </div>
-              <div className="mt-4">
-                <PrimaryButton type="button" disabled={mutation.isPending} onClick={() => saveLimits(selected)}>
-                  {mutation.isPending ? "Saving…" : "Save limits"}
-                </PrimaryButton>
-              </div>
-
-              <div className="mt-5 border-t border-line pt-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Token credits</p>
-                <p className="mt-1 text-sm text-muted">
-                  Balance: <span className={selected.aiTokenCredits === 0 ? "font-bold text-danger" : selected.aiTokenCredits < 5000 ? "font-bold text-amber-400" : "font-semibold text-foreground"}>{selected.aiTokenCredits.toLocaleString()}</span>
-                </p>
-                <div className="mt-3 flex flex-wrap items-end gap-3">
-                  <div className="flex-1 min-w-[140px]">
-                    <TextField
-                      label="Amount"
-                      type="number"
-                      min={0}
-                      placeholder="e.g. 50000"
-                      value={creditInput}
-                      onChange={(e) => setCreditInput(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex-1 min-w-[120px]">
-                    <label className="block text-xs font-medium text-muted mb-1">Mode</label>
-                    <select
-                      value={creditMode}
-                      onChange={(e) => setCreditMode(e.target.value as "add" | "set")}
-                      className="w-full rounded-xl border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent"
-                    >
-                      <option value="add">Add</option>
-                      <option value="set">Set exact</option>
-                    </select>
-                  </div>
-                  <GhostButton
-                    type="button"
-                    disabled={creditMutation.isPending || !creditInput.trim()}
-                    onClick={() => saveCredits(selected)}
-                  >
-                    {creditMutation.isPending ? "Updating…" : "Update credits"}
-                  </GhostButton>
-                </div>
-              </div>
-            </Panel>
-          ) : null}
-
-          <Panel>
-            <h3 className="text-sm font-semibold text-foreground">Recent activity</h3>
-            <div className="mt-3 space-y-2">
-              {(usage?.recent ?? []).slice(0, 12).map((r) => (
-                <div
-                  key={r.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-background px-3 py-2 text-xs"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-foreground">{r.userName}</p>
-                    <p className="truncate text-muted">
-                      {r.feature.replaceAll("_", " ")} · {r.model}
-                    </p>
-                  </div>
-                  <StatusPill tone={r.status === "SUCCESS" ? "lime" : "danger"}>{r.status}</StatusPill>
-                </div>
-              ))}
-              {(usage?.recent ?? []).length === 0 ? (
-                <p className="text-xs text-muted">No AI activity recorded yet.</p>
               ) : null}
+
+              {assistantResult ? (
+                <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto border border-line bg-background px-4 py-4 text-sm leading-6 text-foreground/90">
+                  <div className="whitespace-pre-wrap">{assistantResult}</div>
+                </div>
+              ) : (
+                <div className="mt-4 flex min-h-[88px] flex-1 items-start border-t border-line pt-4">
+                  <p className="max-w-lg text-sm leading-6 text-muted">
+                    The response will appear here after the assistant completes
+                    the request.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <footer className="shrink-0 border-t border-line px-5 py-4">
+              <PrimaryButton
+                type="button"
+                disabled={
+                  assistantLoading || assistantPrompt.trim().length === 0
+                }
+                onClick={() => void runAdminAssistant()}
+                className="!h-10 !min-w-[190px] !rounded-[4px]"
+              >
+                {assistantLoading ? (
+                  <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="mr-2 inline-block h-4 w-4" />
+                )}
+                {assistantLoading ? "Thinking…" : "Ask WSA Assistant"}
+              </PrimaryButton>
+            </footer>
+          </Panel>
+
+          <Panel className="flex min-h-[380px] min-w-0 flex-col !rounded-[4px] !p-0">
+            <header className="shrink-0 border-b border-line px-5 py-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+                Visual analysis
+              </p>
+              <h2 className="mt-2 text-base font-semibold text-foreground">
+                Admin image analysis
+              </h2>
+              <p className="mt-1 max-w-xl text-sm leading-6 text-muted">
+                Analyze an uploaded image without writing its contents to usage
+                logs.
+              </p>
+            </header>
+
+            <div className="flex min-h-0 flex-1 flex-col px-5 py-5">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(event) => {
+                  setImageFile(event.target.files?.[0] ?? null);
+                  setImageError("");
+                  setImageResult("");
+                }}
+              />
+
+              <div className="flex min-h-11 flex-wrap items-center gap-3 border border-line bg-background px-3 py-2">
+                <GhostButton
+                  type="button"
+                  onClick={() => imageInputRef.current?.click()}
+                  className="!h-9 !rounded-[4px]"
+                >
+                  <ImagePlus className="mr-2 inline-block h-4 w-4" />
+                  {imageFile ? "Change image" : "Choose image"}
+                </GhostButton>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted">
+                  {imageFile
+                    ? imageFile.name
+                    : "PNG, JPG, or WebP · max 5MB"}
+                </span>
+              </div>
+
+              <label className="mt-4 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
+                Analysis focus
+              </label>
+              <textarea
+                value={imageFocus}
+                onChange={(event) => setImageFocus(event.target.value)}
+                rows={3}
+                maxLength={1000}
+                placeholder="Optional analysis focus"
+                className="mt-2 min-h-[88px] w-full resize-none rounded-[4px] border border-line bg-background px-4 py-3 text-sm leading-6 text-foreground outline-none transition-colors placeholder:text-muted/55 focus:border-accent"
+              />
+
+              {imageError ? (
+                <div className="mt-3 border-l-2 border-danger bg-danger/5 px-3 py-2 text-sm text-danger">
+                  {imageError}
+                </div>
+              ) : null}
+
+              {imageResult ? (
+                <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto border border-line bg-background px-4 py-4 text-sm leading-6 text-foreground/90">
+                  <div className="whitespace-pre-wrap">{imageResult}</div>
+                </div>
+              ) : (
+                <div className="mt-4 flex min-h-[64px] flex-1 items-start border-t border-line pt-4">
+                  <p className="text-sm leading-6 text-muted">
+                    Select an image and optionally describe what the analysis
+                    should focus on.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <footer className="shrink-0 border-t border-line px-5 py-4">
+              <PrimaryButton
+                type="button"
+                disabled={!imageFile || imageLoading}
+                onClick={() => void runImageAnalysis()}
+                className="!h-10 !min-w-[170px] !rounded-[4px]"
+              >
+                {imageLoading ? (
+                  <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" />
+                ) : (
+                  <ImagePlus className="mr-2 inline-block h-4 w-4" />
+                )}
+                {imageLoading ? "Analyzing…" : "Analyze image"}
+              </PrimaryButton>
+            </footer>
+          </Panel>
+        </section>
+
+        <section className="overflow-hidden rounded-[4px] border border-line bg-panel/55">
+          <div className="grid sm:grid-cols-2 xl:grid-cols-4">
+            {[
+              {
+                label: "Requests today",
+                value: usageLoading ? "…" : usage?.today.total ?? 0,
+                tone: "text-accent",
+              },
+              {
+                label: "Chat",
+                value: usageLoading ? "…" : usage?.today.chat ?? 0,
+                tone: "text-accent-2",
+              },
+              {
+                label: "Chart analyses",
+                value: usageLoading
+                  ? "…"
+                  : usage?.today.chartAnalysis ?? 0,
+                tone: "text-accent-2",
+              },
+              {
+                label: "Failed",
+                value: usageLoading ? "…" : usage?.today.failed ?? 0,
+                tone:
+                  (usage?.today.failed ?? 0) > 0
+                    ? "text-danger"
+                    : "text-foreground",
+              },
+            ].map((item, index) => (
+              <div
+                key={item.label}
+                className={[
+                  "flex min-h-[68px] items-center justify-between gap-4 px-5 py-4",
+                  index > 0 ? "border-t border-line sm:border-t-0" : "",
+                  index % 2 === 1 ? "sm:border-l sm:border-line" : "",
+                  index >= 2 ? "sm:border-t sm:border-line xl:border-t-0" : "",
+                  index > 0 ? "xl:border-l xl:border-line" : "",
+                ].join(" ")}
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
+                  {item.label}
+                </p>
+                <p
+                  className={`text-lg font-semibold tabular-nums ${item.tone}`}
+                >
+                  {item.value}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {notice ? (
+          <div
+            className={`border-l-2 px-4 py-3 text-sm font-medium ${
+              notice.type === "success"
+                ? "border-accent bg-accent/5 text-accent"
+                : "border-danger bg-danger/5 text-danger"
+            }`}
+          >
+            {notice.text}
+          </div>
+        ) : null}
+
+        <section className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(340px,0.85fr)]">
+          <Panel className="flex min-h-[620px] min-w-0 flex-col !rounded-[4px] !p-0">
+            <header className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-4">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+                  Access and allowances
+                </p>
+                <h2 className="mt-2 text-base font-semibold text-foreground">
+                  Trader AI limits
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-muted">
+                  Select a user to manage AI access, daily limits, and token
+                  credits.
+                </p>
+              </div>
+              <StatusPill tone="muted">
+                {usersLoading ? "Loading" : `${users.length} users`}
+              </StatusPill>
+            </header>
+
+            <div className="invisible-scrollbar min-h-0 flex-1 overflow-auto">
+              {usersLoading ? (
+                <div className="space-y-px p-4">
+                  {[...Array(5)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="h-14 animate-pulse border border-line bg-background"
+                    />
+                  ))}
+                </div>
+              ) : isError ? (
+                <div className="m-5 border-l-2 border-danger bg-danger/5 px-4 py-3 text-sm text-danger">
+                  Failed to load users.
+                </div>
+              ) : users.length === 0 ? (
+                <div className="px-5 py-8">
+                  <EmptyState
+                    title="No users"
+                    description="No users are available to manage yet."
+                  />
+                </div>
+              ) : (
+                <table className="w-full min-w-[760px] table-fixed text-left text-sm">
+                  <colgroup>
+                    <col className="w-[29%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[17%]" />
+                    <col className="w-[17%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[10%]" />
+                  </colgroup>
+                  <thead className="sticky top-0 z-10 border-b border-line bg-panel">
+                    <tr className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted">
+                      <th className="px-5 py-3">User</th>
+                      <th className="px-4 py-3">Access</th>
+                      <th className="px-4 py-3 text-right">
+                        Chat used / limit
+                      </th>
+                      <th className="px-4 py-3 text-right">
+                        Chart used / limit
+                      </th>
+                      <th className="px-4 py-3 text-right">Credits</th>
+                      <th className="px-5 py-3 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-line">
+                    {users.map((u) => {
+                      const active = u.userId === selected?.userId;
+
+                      return (
+                        <tr
+                          key={u.userId}
+                          className={`transition-colors ${
+                            active
+                              ? "bg-accent/[0.045]"
+                              : "hover:bg-background/35"
+                          }`}
+                        >
+                          <td className="relative px-5 py-4">
+                            {active ? (
+                              <span className="absolute inset-y-0 left-0 w-0.5 bg-accent" />
+                            ) : null}
+                            <p className="truncate font-semibold text-foreground">
+                              {u.name}
+                            </p>
+                            <p className="mt-1 truncate text-xs text-muted">
+                              {u.email}
+                            </p>
+                          </td>
+                          <td className="px-4 py-4">
+                            <StatusPill
+                              tone={u.aiEnabled ? "lime" : "danger"}
+                            >
+                              {u.aiEnabled ? "ENABLED" : "DISABLED"}
+                            </StatusPill>
+                          </td>
+                          <td className="px-4 py-4 text-right tabular-nums text-foreground">
+                            {u.chatUsedToday}/{u.effectiveChatLimit}
+                          </td>
+                          <td className="px-4 py-4 text-right tabular-nums text-foreground">
+                            {u.chartUsedToday}/{u.effectiveChartLimit}
+                          </td>
+                          <td
+                            className={`px-4 py-4 text-right font-semibold tabular-nums ${
+                              u.aiTokenCredits === 0
+                                ? "text-danger"
+                                : u.aiTokenCredits < 5000
+                                  ? "text-amber-400"
+                                  : "text-foreground"
+                            }`}
+                          >
+                            {u.aiTokenCredits.toLocaleString()}
+                          </td>
+                          <td className="px-5 py-4 text-right">
+                            <GhostButton
+                              type="button"
+                              onClick={() => selectUser(u)}
+                              className="!h-9 !rounded-[4px] !px-3"
+                            >
+                              Manage
+                            </GhostButton>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </Panel>
-        </div>
+
+          <div className="grid min-h-[620px] min-w-0 grid-rows-[minmax(0,1.35fr)_minmax(180px,0.65fr)] gap-5">
+            {selected ? (
+              <Panel className="invisible-scrollbar flex min-h-0 flex-col overflow-y-auto !rounded-[4px] !p-0">
+                <header className="flex shrink-0 items-start justify-between gap-3 border-b border-line px-5 py-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-accent">
+                      Manage user
+                    </p>
+                    <h3 className="mt-2 truncate text-base font-semibold text-foreground">
+                      {selected.name}
+                    </h3>
+                    <p className="mt-1 truncate text-sm text-muted">
+                      {selected.email}
+                    </p>
+                  </div>
+                  <StatusPill
+                    tone={selected.aiEnabled ? "lime" : "danger"}
+                  >
+                    {selected.aiEnabled ? "ENABLED" : "DISABLED"}
+                  </StatusPill>
+                </header>
+
+                <div className="grid gap-5 px-5 py-5">
+                  <section>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
+                          Access
+                        </p>
+                        <p className="mt-1 text-sm text-foreground">
+                          AI access is currently{" "}
+                          {selected.aiEnabled ? "enabled" : "disabled"}.
+                        </p>
+                      </div>
+                      {selected.aiEnabled ? (
+                        <GhostButton
+                          type="button"
+                          disabled={mutation.isPending}
+                          onClick={() => toggleEnabled(selected)}
+                          className="!h-9 !rounded-[4px]"
+                        >
+                          Disable AI
+                        </GhostButton>
+                      ) : (
+                        <PrimaryButton
+                          type="button"
+                          disabled={mutation.isPending}
+                          onClick={() => toggleEnabled(selected)}
+                          className="!h-9 !rounded-[4px]"
+                        >
+                          Enable AI
+                        </PrimaryButton>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="border-t border-line pt-5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
+                      Daily limits
+                    </p>
+                    <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                      <TextField
+                        label="Chat daily limit"
+                        type="number"
+                        min={0}
+                        placeholder={`Default (${selected.effectiveChatLimit})`}
+                        value={chatLimitInput}
+                        onChange={(e) => setChatLimitInput(e.target.value)}
+                        hint="Blank uses platform default"
+                      />
+                      <TextField
+                        label="Chart daily limit"
+                        type="number"
+                        min={0}
+                        placeholder={`Default (${selected.effectiveChartLimit})`}
+                        value={chartLimitInput}
+                        onChange={(e) => setChartLimitInput(e.target.value)}
+                        hint="Blank uses platform default"
+                      />
+                    </div>
+                    <PrimaryButton
+                      type="button"
+                      disabled={mutation.isPending}
+                      onClick={() => saveLimits(selected)}
+                      className="mt-4 !h-9 !rounded-[4px]"
+                    >
+                      {mutation.isPending ? "Saving…" : "Save limits"}
+                    </PrimaryButton>
+                  </section>
+
+                  <section className="border-t border-line pt-5">
+                    <div className="flex items-end justify-between gap-4">
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-accent">
+                          Token credits
+                        </p>
+                        <p className="mt-1 text-sm text-muted">
+                          Current balance
+                        </p>
+                      </div>
+                      <p
+                        className={`text-lg font-semibold tabular-nums ${
+                          selected.aiTokenCredits === 0
+                            ? "text-danger"
+                            : selected.aiTokenCredits < 5000
+                              ? "text-amber-400"
+                              : "text-foreground"
+                        }`}
+                      >
+                        {selected.aiTokenCredits.toLocaleString()}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                      <TextField
+                        label="Amount"
+                        type="number"
+                        min={0}
+                        placeholder="e.g. 50000"
+                        value={creditInput}
+                        onChange={(e) => setCreditInput(e.target.value)}
+                      />
+                      <label className="grid gap-2 text-sm font-semibold text-muted">
+                        <span className="text-[10px] uppercase tracking-[0.18em]">
+                          Mode
+                        </span>
+                        <select
+                          value={creditMode}
+                          onChange={(e) =>
+                            setCreditMode(e.target.value as "add" | "set")
+                          }
+                          className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-accent"
+                        >
+                          <option value="add">Add</option>
+                          <option value="set">Set exact</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <GhostButton
+                      type="button"
+                      disabled={
+                        creditMutation.isPending || !creditInput.trim()
+                      }
+                      onClick={() => saveCredits(selected)}
+                      className="mt-4 !h-9 !rounded-[4px]"
+                    >
+                      {creditMutation.isPending
+                        ? "Updating…"
+                        : "Update credits"}
+                    </GhostButton>
+                  </section>
+                </div>
+              </Panel>
+            ) : (
+              <Panel className="!rounded-[4px]">
+                <EmptyState
+                  title="Select a user"
+                  description="Choose a user from the table to manage AI access and allowances."
+                />
+              </Panel>
+            )}
+
+            <Panel className="flex min-h-0 flex-col !rounded-[4px] !p-0">
+              <header className="shrink-0 border-b border-line px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    Recent activity
+                  </h3>
+                  <span className="text-xs text-muted">
+                    {(usage?.recent ?? []).length} records
+                  </span>
+                </div>
+              </header>
+              <div className="invisible-scrollbar min-h-0 flex-1 overflow-y-auto">
+                {(usage?.recent ?? []).slice(0, 12).map((r) => (
+                  <div
+                    key={r.id}
+                    className="flex items-center justify-between gap-3 border-b border-line px-5 py-3 text-xs last:border-b-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-foreground">
+                        {r.userName}
+                      </p>
+                      <p className="mt-1 truncate text-muted">
+                        {r.feature.replaceAll("_", " ")} · {r.model}
+                      </p>
+                    </div>
+                    <StatusPill
+                      tone={r.status === "SUCCESS" ? "lime" : "danger"}
+                    >
+                      {r.status}
+                    </StatusPill>
+                  </div>
+                ))}
+                {(usage?.recent ?? []).length === 0 ? (
+                  <p className="px-5 py-6 text-sm text-muted">
+                    No AI activity recorded yet.
+                  </p>
+                ) : null}
+              </div>
+            </Panel>
+          </div>
+        </section>
       </div>
-      {/* Disable AI confirmation */}
-      <Dialog.Root open={Boolean(disableAiUser)} onOpenChange={(o) => !o && setDisableAiUser(null)}>
+
+      <Dialog.Root
+        open={Boolean(disableAiUser)}
+        onOpenChange={(open) => !open && setDisableAiUser(null)}
+      >
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-danger/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
-            <Dialog.Title className="flex items-center gap-2 text-xl font-semibold text-foreground">
-              <AlertTriangle className="h-5 w-5 text-danger" />
-              Disable AI for {disableAiUser?.name}?
-            </Dialog.Title>
-            <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
-              This will immediately block <strong className="text-foreground">{disableAiUser?.name}</strong> from using the AI assistant. Their chat history is preserved. You can re-enable at any time.
-            </Dialog.Description>
-            <div className="mt-5 flex justify-end gap-3 border-t border-line pt-4">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+          <Dialog.Content className="invisible-scrollbar fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-danger/30 bg-panel shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+            <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+              <div>
+                <Dialog.Title className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                  <AlertTriangle className="h-5 w-5 text-danger" />
+                  Disable AI for {disableAiUser?.name}?
+                </Dialog.Title>
+                <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
+                  This immediately blocks{" "}
+                  <strong className="text-foreground">
+                    {disableAiUser?.name}
+                  </strong>{" "}
+                  from using the AI assistant. Chat history is preserved and
+                  access can be restored later.
+                </Dialog.Description>
+              </div>
               <Dialog.Close asChild>
-                <GhostButton type="button">Cancel</GhostButton>
+                <button
+                  type="button"
+                  aria-label="Close"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-[4px] border border-line bg-background text-muted transition-colors hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </Dialog.Close>
+            </header>
+
+            <footer className="flex justify-end gap-3 px-5 py-4">
+              <Dialog.Close asChild>
+                <GhostButton type="button" className="!h-10 !rounded-[4px]">
+                  Cancel
+                </GhostButton>
               </Dialog.Close>
               <GhostButton
                 type="button"
                 disabled={mutation.isPending}
                 onClick={() => {
                   if (disableAiUser) {
-                    mutation.mutate({ userId: disableAiUser.userId, body: { aiEnabled: false } });
+                    mutation.mutate({
+                      userId: disableAiUser.userId,
+                      body: { aiEnabled: false },
+                    });
                     setDisableAiUser(null);
                   }
                 }}
+                className="!h-10 !rounded-[4px] !border-danger/40 !text-danger"
               >
                 {mutation.isPending ? "Disabling…" : "Yes, disable AI"}
               </GhostButton>
-            </div>
-            <Dialog.Close asChild>
-              <button type="button" aria-label="Close" className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted">
-                <X className="h-4 w-4" />
-              </button>
-            </Dialog.Close>
+            </footer>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

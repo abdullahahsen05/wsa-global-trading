@@ -97,7 +97,7 @@ export default function BillingPage() {
       />
 
       {pendingApprovals.length > 0 && (
-        <div className="mt-4 flex items-start gap-3 rounded-2xl border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-accent">
+        <div className="mt-4 flex items-start gap-3 rounded-[4px] border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-accent">
           <Clock className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
             <strong>{pendingApprovals.length} payment(s)</strong> are awaiting admin approval.
@@ -151,7 +151,7 @@ export default function BillingPage() {
               {copyEntitlements.map((e) => (
                 <div
                   key={e.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-line bg-background px-3 py-2"
+                  className="flex items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-3 py-2"
                 >
                   <div>
                     <p className="text-sm font-semibold text-foreground">
@@ -185,7 +185,7 @@ export default function BillingPage() {
             {botAccess.map((b) => (
               <div
                 key={b.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-background px-3 py-2"
+                className="flex items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-3 py-2"
               >
                 <p className="text-sm font-semibold text-foreground">{b.botName}</p>
                 <StatusPill tone={STATUS_TONE[b.status] ?? "muted"}>
@@ -204,7 +204,7 @@ export default function BillingPage() {
       {mentorshipAccess && mentorshipAccess.status !== "NONE" && (
         <Panel className="mt-5">
           <h2 className="mb-4 text-lg font-semibold text-foreground">Mentorship Access</h2>
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-line bg-background px-3 py-2">
+          <div className="flex items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-3 py-2">
             <p className="text-sm font-semibold text-foreground">{mentorshipAccess.productName}</p>
             <StatusPill tone={STATUS_TONE[mentorshipAccess.status] ?? "muted"}>
               {mentorshipAccess.status === "ACTIVE"
@@ -238,6 +238,8 @@ export default function BillingPage() {
         ) : (
           <DataTable
             headers={["Product", "Amount", "Status", "Date"]}
+            paginated
+            initialPageSize={10}
             rows={filteredHistory.map((h) => [
               <span key="n" className="text-sm font-medium text-foreground">
                 {h.productName}

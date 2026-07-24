@@ -37,27 +37,27 @@ const RULE_LABELS: Record<CommissionType, string> = {
 
 function CommissionRulePanel({ summary }: { summary: PartnerCommissionSummaryDto }) {
   return (
-    <div className="mt-4 rounded-2xl border border-line bg-panel p-4">
+    <div className="mt-4 rounded-[4px] border border-line bg-panel p-4">
       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Your commission rule</p>
-      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-line bg-background px-4 py-3">
+      <div className="definition-grid mt-3 grid grid-cols-2 gap-0 sm:grid-cols-3">
+        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Type</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{RULE_LABELS[summary.commissionType]}</p>
         </div>
         {summary.commissionType === "CPA" ? (
-          <div className="rounded-xl border border-line bg-background px-4 py-3">
+          <div className="rounded-[4px] border border-line bg-background px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">CPA amount</p>
             <p className="mt-1 text-sm font-semibold text-foreground">
               {summary.cpaAmount != null ? formatMoney({ amount: summary.cpaAmount, currency: summary.currency }) : "-"}
             </p>
           </div>
         ) : (
-          <div className="rounded-xl border border-line bg-background px-4 py-3">
+          <div className="rounded-[4px] border border-line bg-background px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Rate</p>
             <p className="mt-1 text-sm font-semibold text-foreground">{summary.commissionPercent}%</p>
           </div>
         )}
-        <div className="rounded-xl border border-line bg-background px-4 py-3">
+        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Currency</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{summary.currency}</p>
         </div>
@@ -114,7 +114,7 @@ export default function PartnerCommissionsPage() {
 
       {summary ? <CommissionRulePanel summary={summary} /> : null}
 
-      <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
         <FilterChipRow
           chips={(["ALL", "PENDING", "APPROVED", "PAID", "CANCELLED"] as const).map((s) => ({
             label: s === "ALL" ? `All (${allRecords.length})` : `${s} (${allRecords.filter((r) => r.status === s).length})`,
@@ -128,11 +128,11 @@ export default function PartnerCommissionsPage() {
         {isLoading ? (
           <div className="space-y-2">
             {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-12 animate-pulse rounded-xl border border-line bg-panel" />
+              <div key={i} className="h-12 animate-pulse rounded-[4px] border border-line bg-panel" />
             ))}
           </div>
         ) : isError ? (
-          <div className="rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             Failed to load commissions.
           </div>
         ) : records.length === 0 ? (

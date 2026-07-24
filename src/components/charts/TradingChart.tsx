@@ -299,7 +299,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
         </div>
       </div>
 
-      <div className="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1fr)_240px]">
+      <div className="grid items-stretch gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.8fr)_minmax(300px,0.7fr)]">
         <div className="relative">
           <div ref={chartRegionRef}>
             <TradingViewAdvancedChart
@@ -313,21 +313,18 @@ export function TradingChart({ accountId }: { accountId?: string }) {
           <button
             type="button"
             onClick={() => setAssistantOpen((open) => !open)}
-            className="absolute bottom-4 right-4 inline-flex min-h-11 items-center gap-2 rounded-full border border-accent/40 bg-background/95 px-4 text-sm font-semibold text-accent shadow-xl backdrop-blur transition hover:-translate-y-0.5 hover:bg-panel"
+            className="absolute bottom-4 right-4 inline-flex min-h-11 items-center gap-2 rounded-[5px] border border-accent/40 bg-background/95 px-4 text-sm font-semibold text-accent transition hover:bg-panel"
           >
             <Sparkles className="h-4 w-4" />
             {ASK_ASSISTANT_LABEL}
           </button>
         </div>
 
-        <div className="grid gap-3">
-          <div className="inner-surface p-4">
+        <div className="invisible-scrollbar flex min-h-0 flex-col overflow-y-auto border border-line bg-background">
+          <div className="border-b border-line p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Data source</p>
             <div className="mt-3 flex items-center gap-3">
-              <span className="relative flex h-3 w-3">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-30" />
-                <span className="relative inline-flex h-3 w-3 rounded-full bg-accent" />
-              </span>
+              <span className="inline-flex h-3 w-3 rounded-full bg-accent" />
               <div>
                 <p className="text-sm font-semibold text-foreground">TradingView</p>
                 <p className="text-xs text-muted">Live market data via embedded widget.</p>
@@ -335,15 +332,15 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             </div>
           </div>
 
-          <div className="inner-surface p-4">
+          <div className="border-b border-line p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">{AI_ASSISTANT_NAME} chart vision</p>
-            <div className="mt-3 flex items-center gap-3">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-accent/10 text-accent">
+            <div className="mt-3 flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[4px] bg-accent/10 text-accent">
                 <Eye className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-sm font-semibold text-foreground">{visionStatus}</p>
-                <p className="text-xs leading-5 text-muted">
+                <p className="mt-1 text-xs leading-5 text-muted">
                   {chartShared
                     ? `${AI_ASSISTANT_NAME} captures only this chart region when you ask.`
                     : `No trend is claimed until ${AI_ASSISTANT_NAME} receives a chart frame.`}
@@ -352,7 +349,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             </div>
           </div>
 
-          <div className="inner-surface p-4">
+          <div className="p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Chart controls</p>
             <p className="mt-3 text-sm leading-6 text-muted">
               Symbol is locked to XAUUSD so the chart and {AI_ASSISTANT_NAME} stay aligned. Use the timeframe controls above.
@@ -374,7 +371,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
                     : "Uses XAUUSD, timeframe, selected-account metrics, recent trades, and news. Live chart capture is disabled on this deployment."}
               </p>
             </div>
-            <span className="rounded-full border border-line bg-background px-3 py-1 text-xs font-semibold text-muted">
+            <span className="rounded-[4px] border border-line bg-background px-3 py-1 text-xs font-semibold text-muted">
               {visionStatus}
             </span>
           </div>
@@ -391,7 +388,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
                   type="button"
                   onClick={() => void startChartShare()}
                   disabled={!captureSupported || shareLoading}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-accent px-4 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-[4px] bg-accent px-4 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {shareLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScreenShare className="h-4 w-4" />}
                   {shareLoading ? "Starting…" : "Share live chart"}
@@ -418,25 +415,25 @@ export function TradingChart({ accountId }: { accountId?: string }) {
                 maxLength={2000}
                 rows={2}
                 placeholder="Review the visible structure, key zones, and invalidation risk."
-                className="min-h-[54px] resize-none rounded-xl border border-line bg-background px-4 py-3 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-accent"
+                className="min-h-[54px] resize-none rounded-[4px] border border-line bg-background px-4 py-3 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-accent"
               />
             </label>
             <button
               type="submit"
               disabled={assistantLoading || question.trim().length === 0 || (captureEnabled && !captureSupported)}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[4px] bg-accent px-4 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
             >
               {assistantLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {assistantLoading ? "Analyzing…" : chartShared ? "Review chart" : ASK_ASSISTANT_LABEL}
             </button>
           </form>
           {assistantError ? (
-            <div className="mt-4 rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+            <div className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
               {assistantError}
             </div>
           ) : null}
           {answer ? (
-            <div className="mt-4 whitespace-pre-wrap rounded-xl border border-line bg-background px-4 py-4 text-sm leading-6 text-foreground/90">
+            <div className="mt-4 whitespace-pre-wrap rounded-[4px] border border-line bg-background px-4 py-4 text-sm leading-6 text-foreground/90">
               {answer}
             </div>
           ) : null}

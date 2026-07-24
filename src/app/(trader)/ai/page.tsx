@@ -17,6 +17,7 @@ import { SelectField } from "@/components/app/FormFields";
 import { queryKeys } from "@/lib/data/queryKeys";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
+import { formatMoney, formatPercent } from "@/lib/utils/format";
 
 const SUGGESTED_PROMPTS = [
   "Analyze my current account risk.",
@@ -246,12 +247,11 @@ function AiAssistantContent() {
         ]}
       />
 
-      <div className="mt-5">
-        {/* ── Chat panel ─────────────────────────────────────────────── */}
-        <Panel className="flex min-h-[520px] flex-col">
+      <div className="mt-5 grid items-stretch gap-4 xl:h-[min(720px,calc(100vh-250px))] xl:min-h-[560px] xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.7fr)]">
+        <Panel className="flex min-h-[520px] min-w-0 flex-col xl:h-full xl:min-h-0">
           <div className="flex items-center justify-between gap-2 border-b border-line pb-4">
             <div className="flex items-center gap-2">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-accent/10 text-accent">
+              <span className="grid h-9 w-9 place-items-center rounded-[4px] bg-accent/10 text-accent">
                 <Sparkles className="h-4 w-4" />
               </span>
               <div>
@@ -267,20 +267,20 @@ function AiAssistantContent() {
             ) : null}
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto py-4">
+          <div className="invisible-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto py-4">
             {messages.length === 0 ? (
-              <div className="py-6">
+              <div className="py-2">
                 <EmptyState
                   title="Ask your first question"
                   description="The assistant reads your live WSA Global account data to answer. Try one of these:"
                 />
-                <div className="mx-auto mt-5 flex max-w-xl flex-wrap justify-center gap-2">
+                <div className="mt-5 grid gap-2 md:grid-cols-2">
                   {SUGGESTED_PROMPTS.map((p) => (
                     <button
                       key={p}
                       type="button"
                       onClick={() => sendMessage(p)}
-                      className="btn-dark text-left"
+                      className="btn-dark justify-start text-left"
                     >
                       {p}
                     </button>
@@ -296,8 +296,8 @@ function AiAssistantContent() {
                   <div
                     className={
                       m.role === "user"
-                        ? "max-w-[85%] rounded-2xl rounded-br-sm border border-accent/30 bg-accent/10 px-4 py-3 text-sm leading-6 text-foreground"
-                        : "max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-bl-sm border border-line bg-background px-4 py-3 text-sm leading-6 text-foreground/90"
+                        ? "max-w-[85%] rounded-[4px] rounded-br-sm border border-accent/30 bg-accent/10 px-4 py-3 text-sm leading-6 text-foreground"
+                        : "max-w-[85%] whitespace-pre-wrap rounded-[4px] rounded-bl-sm border border-line bg-background px-4 py-3 text-sm leading-6 text-foreground/90"
                     }
                   >
                     {m.content}
@@ -314,7 +314,7 @@ function AiAssistantContent() {
           </div>
 
           {chatError ? (
-            <div className="mb-3 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+            <div className="mb-3 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
               {chatError}
             </div>
           ) : null}
@@ -338,7 +338,7 @@ function AiAssistantContent() {
               placeholder="Ask about your risk, performance, exposure, or upcoming news…"
               rows={2}
               maxLength={4000}
-              className="min-h-[52px] w-full resize-none rounded-xl border border-line bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/10"
+              className="min-h-[52px] w-full resize-none rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted/60 focus:border-accent focus:ring-2 focus:ring-accent/10"
             />
             <PrimaryButton type="submit" disabled={isSending || input.trim().length === 0}>
               <Send className="mr-2 inline-block h-4 w-4" />
@@ -349,7 +349,41 @@ function AiAssistantContent() {
             Educational analysis only — not financial advice. The assistant never guarantees profits.
           </p>
         </Panel>
-
+        <Panel className="flex min-h-0 flex-col xl:h-full">
+          <div className="shrink-0 border-b border-line pb-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">Analysis context</p>
+            <h2 className="mt-2 text-lg font-semibold text-foreground">Grounding and limits</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">
+              The assistant uses this account scope and current platform allowance for every response.
+            </p>
+          </div>
+          <div className="invisible-scrollbar min-h-0 flex-1 overflow-y-auto py-4">
+            <dl className="overflow-hidden rounded-[4px] border border-line bg-background">
+              {[
+                ["Scope", selectedAccount?.accountName ?? "All connected accounts"],
+                ["Broker", selectedAccount?.brokerName ?? `${accounts.length} accounts available`],
+                ["Connection", selectedAccount?.status ?? "Mixed account scope"],
+                ["Platform", selectedAccount?.platform ?? "MT4 / MT5"],
+                ["Open trades", selectedAccount ? selectedAccount.openTradeCount.toString() : "Across all accounts"],
+                ["Drawdown", selectedAccount ? formatPercent(selectedAccount.drawdownPercent) : "Account dependent"],
+                ["Equity", selectedAccount ? formatMoney(selectedAccount.equity) : "Combined context"],
+              ].map(([label, value]) => (
+                <div key={label} className="grid grid-cols-[108px_minmax(0,1fr)] border-b border-line px-4 py-3 last:border-b-0">
+                  <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted">{label}</dt>
+                  <dd className="min-w-0 text-right text-sm font-medium text-foreground">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="mt-4 border-t border-line pt-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">Response boundaries</p>
+              <ul className="mt-3 space-y-3 text-sm leading-5 text-muted">
+                <li className="border-l-2 border-accent/50 pl-3">Account data is used only for the selected context.</li>
+                <li className="border-l-2 border-line-strong pl-3">Analysis is educational and does not execute trades.</li>
+                <li className="border-l-2 border-line-strong pl-3">Usage and token allowances remain visible in the summary rail.</li>
+              </ul>
+            </div>
+          </div>
+        </Panel>
       </div>
     </WorkspacePage>
   );

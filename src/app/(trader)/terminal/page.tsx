@@ -213,12 +213,12 @@ function TerminalContent() {
       {/* ─── Professional Trader locked overlay ───────────────────────── */}
       {proOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
           onClick={(e) => { if (e.target === e.currentTarget) setProOpen(false); }}
         >
           <div
             ref={proDialogRef}
-            className="relative mx-4 w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 p-8 shadow-2xl"
+            className="relative mx-4 w-full max-w-lg rounded-[4px] border border-zinc-700 bg-zinc-900 p-8"
           >
             <button
               onClick={() => setProOpen(false)}
@@ -229,7 +229,7 @@ function TerminalContent() {
             </button>
 
             {/* Lock icon */}
-            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-zinc-700 bg-zinc-800 text-2xl">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-[4px] border border-zinc-700 bg-zinc-800 text-2xl">
               🔒
             </div>
 
@@ -260,7 +260,7 @@ function TerminalContent() {
               ))}
             </div>
 
-            <div className="mt-6 rounded-xl border border-zinc-700 bg-zinc-800/60 px-4 py-3 text-xs text-zinc-400">
+            <div className="mt-6 rounded-[4px] border border-zinc-700 bg-zinc-800/60 px-4 py-3 text-xs text-zinc-400">
               <strong className="text-zinc-300">Current status:</strong> Demo simulation data active.
               Professional data will be enabled once the dxFeed agreement and API credentials are
               configured by your administrator.
@@ -268,7 +268,7 @@ function TerminalContent() {
 
             <button
               onClick={() => setProOpen(false)}
-              className="mt-6 w-full rounded-xl bg-zinc-800 py-2.5 text-sm font-semibold text-zinc-300 hover:bg-zinc-700"
+              className="mt-6 w-full rounded-[4px] bg-zinc-800 py-2.5 text-sm font-semibold text-zinc-300 hover:bg-zinc-700"
             >
               Continue with Demo Data
             </button>
@@ -336,7 +336,7 @@ function TerminalContent() {
       {/* ─── Main content ─────────────────────────────────────────────── */}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Watchlist sidebar */}
-        <aside className="hidden w-36 shrink-0 overflow-y-auto border-r border-border bg-card lg:block">
+        <aside className="hidden w-36 shrink-0 invisible-scrollbar overflow-y-auto border-r border-border bg-card lg:block">
           {["forex", "commodities", "indices", "crypto"].map((cat) => {
             const items = byCategory(cat);
             if (items.length === 0) return null;
@@ -420,7 +420,7 @@ function TerminalContent() {
 
           {/* DOM */}
           {rightPanel === "dom" && dom && (
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className="flex-1 invisible-scrollbar overflow-y-auto p-2">
               {/* Asks (reversed — highest at top, lowest closest to spread) */}
               {[...dom.asks].reverse().slice(0, 8).map((l, i) => {
                 const maxSize = Math.max(...dom.asks.map((a) => a.size));
@@ -474,7 +474,7 @@ function TerminalContent() {
 
           {/* Volume Profile */}
           {rightPanel === "vprofile" && vprofile && (
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className="flex-1 invisible-scrollbar overflow-y-auto p-2">
               <div className="mb-1 text-[9px] text-muted-foreground">
                 POC: <span className="font-mono text-foreground">{fmtPrice(vprofile.pocPrice)}</span>
               </div>
@@ -556,7 +556,7 @@ function TerminalContent() {
 
         {/* Macro events */}
         {bottomPanel === "macro" && (
-          <div className="flex-1 overflow-x-auto overflow-y-hidden">
+          <div className="flex-1 invisible-scrollbar overflow-x-auto overflow-y-hidden">
             {macro.length === 0 ? (
               <div className="p-3 text-xs text-muted-foreground">No high-impact events in the next 3 days</div>
             ) : (
@@ -606,7 +606,7 @@ function TerminalContent() {
 
         {/* News feed */}
         {bottomPanel === "news" && (
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 invisible-scrollbar overflow-y-auto">
             {news.length === 0 ? (
               <div className="p-3 text-xs text-muted-foreground">No news available</div>
             ) : (

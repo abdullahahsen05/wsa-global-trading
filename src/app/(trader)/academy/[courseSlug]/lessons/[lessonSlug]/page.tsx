@@ -28,7 +28,7 @@ function VideoEmbed({ lesson }: { lesson: AcademyLessonDto }) {
 
   if (isEmbed) {
     return (
-      <div className="relative w-full overflow-hidden rounded-2xl" style={{ paddingBottom: "56.25%" }}>
+      <div className="relative w-full overflow-hidden rounded-[4px]" style={{ paddingBottom: "56.25%" }}>
         <iframe
           src={src}
           className="absolute inset-0 h-full w-full"
@@ -45,7 +45,7 @@ function VideoEmbed({ lesson }: { lesson: AcademyLessonDto }) {
     <video
       src={src}
       controls
-      className="w-full rounded-2xl bg-black"
+      className="w-full rounded-[4px] bg-black"
       style={{ maxHeight: "480px" }}
     />
   );
@@ -135,7 +135,7 @@ export default function LessonPage({
   if (isLoading) {
     return (
       <WorkspacePage eyebrow="Academy" title="Loading…" description="">
-        <div className="h-64 animate-pulse rounded-2xl bg-panel" />
+        <div className="h-64 animate-pulse rounded-[4px] bg-panel" />
       </WorkspacePage>
     );
   }
@@ -221,7 +221,7 @@ export default function LessonPage({
                 {lesson.remarks.map((remark) => (
                   <div
                     key={remark.id}
-                    className={`rounded-xl border px-4 py-3 ${remark.pinned ? "border-accent/30 bg-accent/5" : "border-line bg-background"}`}
+                    className={`rounded-[4px] border px-4 py-3 ${remark.pinned ? "border-accent/30 bg-accent/5" : "border-line bg-background"}`}
                   >
                     {remark.pinned ? (
                       <StatusPill tone="accent">Pinned</StatusPill>
@@ -245,13 +245,13 @@ export default function LessonPage({
               Questions & Answers
             </h2>
             {lesson.questions.map((q) => (
-              <div key={q.id} className="mb-4 rounded-xl border border-line bg-background px-4 py-3">
+              <div key={q.id} className="mb-4 rounded-[4px] border border-line bg-background px-4 py-3">
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-sm text-foreground">{q.question}</p>
                   <StatusPill tone={q.status === "ANSWERED" ? "lime" : "muted"}>{q.status}</StatusPill>
                 </div>
                 {q.answer ? (
-                  <div className="mt-3 rounded-lg border-l-2 border-accent pl-3">
+                  <div className="mt-3 rounded-[4px] border-l-2 border-accent pl-3">
                     <p className="text-xs font-semibold text-accent mb-1">Instructor answer</p>
                     <p className="text-sm text-muted leading-5 whitespace-pre-line">{q.answer}</p>
                   </div>
@@ -294,7 +294,7 @@ export default function LessonPage({
                       href={m.materialUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex items-center gap-2 rounded-xl border border-line bg-background px-3 py-2.5 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent"
+                      className="flex items-center gap-2 rounded-[4px] border border-line bg-background px-3 py-2.5 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent"
                     >
                       <BookOpenCheck className="h-4 w-4 shrink-0 text-muted" />
                       <span className="truncate">{m.title}</span>

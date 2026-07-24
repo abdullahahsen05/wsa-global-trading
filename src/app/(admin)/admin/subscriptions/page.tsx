@@ -102,8 +102,8 @@ export default function AdminSubscriptionsPage() {
               </PrimaryButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
                 <Dialog.Title className="text-xl font-semibold text-foreground">Create plan</Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                   Prepare a plan template with pricing and invoice settings for the billing queue.
@@ -166,7 +166,7 @@ export default function AdminSubscriptionsPage() {
         ]}
       />
 
-      <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
         <FilterChipRow
           chips={[
             {
@@ -206,7 +206,7 @@ export default function AdminSubscriptionsPage() {
       </div>
 
       {successMessage ? (
-        <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
+        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
           {successMessage}
         </div>
       ) : null}
@@ -225,20 +225,20 @@ export default function AdminSubscriptionsPage() {
               <StatusPill tone="lime">{selectedPlan.status}</StatusPill>
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Billing cycle</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Monthly</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Price</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{selectedPlan.price}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Billing</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{selectedPlan.billing}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Entitlement</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{selectedPlan.status}</p>
               </div>
@@ -302,10 +302,10 @@ export default function AdminSubscriptionsPage() {
               <StatusPill tone="lime">{plan.status}</StatusPill>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {plan.price}
               </span>
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {plan.billing}
               </span>
             </div>
@@ -323,20 +323,20 @@ export default function AdminSubscriptionsPage() {
               </div>
               <StatusPill tone="lime">{plan.status}</StatusPill>
             </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Price</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{plan.price}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Billing</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{plan.billing}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Status</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{plan.status}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Provider</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">Pending integration</p>
               </div>

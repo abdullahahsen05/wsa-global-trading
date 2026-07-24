@@ -4,6 +4,7 @@ import { loadEnvConfig } from "@next/env";
 
 const production = process.argv.includes("--production");
 loadEnvConfig(process.cwd(), !production);
+const runWorkers = production || process.env.WSA_DEV_WORKERS === "true";
 
 const node = process.execPath;
 const services: Array<{ name: string; process: ChildProcess }> = [];
@@ -46,16 +47,32 @@ start(
     : [resolve("node_modules/next/dist/bin/next"), "dev", "--webpack"],
 );
 
-if (process.env.WSA_COPY_ENGINE_ENABLED === "true" && process.env.BROKER_EXECUTION_ENABLED === "true") {
+if (
+  runWorkers &&
+  process.env.WSA_COPY_ENGINE_ENABLED === "true" &&
+  process.env.BROKER_EXECUTION_ENABLED === "true"
+) {
   start("WSA copy worker", [resolve("node_modules/tsx/dist/cli.mjs"), resolve("scripts/wsa-copy-worker.ts")]);
   console.log("[dev] WSA live copy worker enabled.");
 } else {
-  console.warn("[dev] WSA live copy worker is disabled by the execution flags.");
+  console.warn(
+    production
+      ? "[dev] WSA live copy worker is disabled by the execution flags."
+      : "[dev] WSA live copy worker is disabled in development. Set WSA_DEV_WORKERS=true to enable it.",
+  );
 }
 
-if (process.env.METAAPI_TOKEN && process.env.WSA_RISK_ENGINE_ENABLED !== "false") {
+if (
+  runWorkers &&
+  process.env.METAAPI_TOKEN &&
+  process.env.WSA_RISK_ENGINE_ENABLED !== "false"
+) {
   start("WSA risk worker", [resolve("node_modules/tsx/dist/cli.mjs"), resolve("scripts/wsa-risk-worker.ts")]);
   console.log("[dev] WSA live risk worker enabled.");
 } else {
-  console.warn("[dev] WSA live risk worker is disabled or METAAPI_TOKEN is missing.");
+  console.warn(
+    production
+      ? "[dev] WSA live risk worker is disabled or METAAPI_TOKEN is missing."
+      : "[dev] WSA live risk worker is disabled in development. Set WSA_DEV_WORKERS=true to enable it.",
+  );
 }

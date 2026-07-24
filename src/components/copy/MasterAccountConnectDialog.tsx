@@ -145,8 +145,8 @@ export function MasterAccountConnectDialog({
   return (
     <Dialog.Root open={open} onOpenChange={(value) => !value && close()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-panel p-6 shadow-[0_24px_80px_rgba(0,0,0,0.62)] focus:outline-none">
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-6 shadow-[0_24px_80px_rgba(0,0,0,0.62)] focus:outline-none">
           <Dialog.Title className="text-2xl font-semibold text-foreground">Connect a master trading account</Dialog.Title>
           <Dialog.Description className="mt-2 max-w-2xl text-sm leading-6 text-muted">
             Add the MT4 or MT5 account that will generate the live strategy trades. Credentials are encrypted and never returned.
@@ -155,12 +155,12 @@ export function MasterAccountConnectDialog({
           <form onSubmit={submit} className="mt-6 space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Account label" value={accountLabel} onChange={setAccountLabel} placeholder="e.g. Gold Master" disabled={Boolean(createdAccountId)} />
-              <label className="space-y-2 text-sm font-semibold text-foreground">Platform<select value={platform} disabled={Boolean(createdAccountId)} onChange={(event) => { setPlatform(event.target.value as Platform); setProviderId(""); setServerSelection(""); }} className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm"><option value="MT5">MetaTrader 5</option><option value="MT4">MetaTrader 4</option></select></label>
+              <label className="space-y-2 text-sm font-semibold text-foreground">Platform<select value={platform} disabled={Boolean(createdAccountId)} onChange={(event) => { setPlatform(event.target.value as Platform); setProviderId(""); setServerSelection(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="MT5">MetaTrader 5</option><option value="MT4">MetaTrader 4</option></select></label>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="space-y-2 text-sm font-semibold text-foreground">Broker<select required value={providerId} disabled={Boolean(createdAccountId) || providers.isFetching} onChange={(event) => { setProviderId(event.target.value); setServerSelection(""); }} className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm"><option value="">Select broker...</option>{providerOptions.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}<option value={CUSTOM}>Enter another broker</option></select></label>
-              {customBroker ? <Field label="Broker name" value={manualBroker} onChange={setManualBroker} placeholder="Broker name" disabled={Boolean(createdAccountId)} /> : <label className="space-y-2 text-sm font-semibold text-foreground">Server<select required value={serverSelection} onChange={(event) => setServerSelection(event.target.value)} disabled={!providerId || servers.isFetching} className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm"><option value="">Select server...</option>{serverOptions.map((server) => <option key={server.id} value={server.serverName}>{server.serverName}</option>)}<option value={CUSTOM}>Enter another server</option></select></label>}
+              <label className="space-y-2 text-sm font-semibold text-foreground">Broker<select required value={providerId} disabled={Boolean(createdAccountId) || providers.isFetching} onChange={(event) => { setProviderId(event.target.value); setServerSelection(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="">Select broker...</option>{providerOptions.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}<option value={CUSTOM}>Enter another broker</option></select></label>
+              {customBroker ? <Field label="Broker name" value={manualBroker} onChange={setManualBroker} placeholder="Broker name" disabled={Boolean(createdAccountId)} /> : <label className="space-y-2 text-sm font-semibold text-foreground">Server<select required value={serverSelection} onChange={(event) => setServerSelection(event.target.value)} disabled={!providerId || servers.isFetching} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="">Select server...</option>{serverOptions.map((server) => <option key={server.id} value={server.serverName}>{server.serverName}</option>)}<option value={CUSTOM}>Enter another server</option></select></label>}
             </div>
 
             {customServerSelected ? <Field label="Broker server" value={customServer} onChange={setCustomServer} placeholder="Exact MT4/MT5 server name" /> : null}
@@ -170,8 +170,8 @@ export function MasterAccountConnectDialog({
               <Field label="Trading password" type="password" value={password} onChange={setPassword} placeholder="Main or investor password" autoComplete="new-password" />
             </div>
 
-            {createdAccountId ? <div className="rounded-xl border border-accent/25 bg-accent/10 px-4 py-3 text-sm text-accent">The master record is saved. Correct the connection details and retry without creating another account.</div> : null}
-            {error ? <div className="rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
+            {createdAccountId ? <div className="rounded-[4px] border border-accent/25 bg-accent/10 px-4 py-3 text-sm text-accent">The master record is saved. Correct the connection details and retry without creating another account.</div> : null}
+            {error ? <div className="rounded-[4px] border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
               <div className="flex items-center gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4 text-accent" />Encrypted credential storage and honest provider status.</div>
@@ -187,5 +187,5 @@ export function MasterAccountConnectDialog({
 }
 
 function Field({ label, value, onChange, placeholder, type = "text", disabled = false, autoComplete }: { label: string; value: string; onChange(value: string): void; placeholder: string; type?: string; disabled?: boolean; autoComplete?: string }) {
-  return <label className="space-y-2 text-sm font-semibold text-foreground">{label}<input required type={type} value={value} disabled={disabled} autoComplete={autoComplete} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm outline-none placeholder:text-muted/50 focus:border-accent disabled:opacity-60" /></label>;
+  return <label className="space-y-2 text-sm font-semibold text-foreground">{label}<input required type={type} value={value} disabled={disabled} autoComplete={autoComplete} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm outline-none placeholder:text-muted/50 focus:border-accent disabled:opacity-60" /></label>;
 }

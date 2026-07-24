@@ -10,7 +10,7 @@ export default function NotFound() {
         action={
           <Link
             href="/accounts"
-            className="rounded-full bg-accent px-6 py-3 text-sm font-semibold text-background transition hover:scale-[1.02]"
+            className="rounded-[4px] bg-accent px-6 py-3 text-sm font-semibold text-background transition"
           >
             Back to accounts
           </Link>

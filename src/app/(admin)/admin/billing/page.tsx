@@ -183,7 +183,7 @@ export default function AdminBillingPage() {
       description="Review mock or live payments, approve access, and monitor active and expired billing access."
     >
       {successMessage ? (
-        <div className="mb-5 flex items-center gap-2 rounded-2xl border border-lime/20 bg-lime/10 px-4 py-3 text-sm font-medium text-lime">
+        <div className="mb-5 flex items-center gap-2 rounded-[4px] border border-lime/20 bg-lime/10 px-4 py-3 text-sm font-medium text-lime">
           <CheckCircle className="h-4 w-4 shrink-0" />
           {successMessage}
         </div>
@@ -314,8 +314,8 @@ export default function AdminBillingPage() {
 
       <Dialog.Root open={Boolean(approveTarget)} onOpenChange={(open) => !open && setApproveTarget(null)}>
         <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-lime/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-lime/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="flex items-center gap-2 text-xl font-semibold text-foreground">
               <CheckCircle className="h-5 w-5 text-lime" />
               Approve access

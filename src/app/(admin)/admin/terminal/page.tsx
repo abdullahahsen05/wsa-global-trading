@@ -114,7 +114,7 @@ export default function AdminTerminalPage() {
       )}
 
       {/* Professional Tier locked status — always visible */}
-      <div className="mb-6 rounded-2xl border border-zinc-700 bg-zinc-900/60 p-5">
+      <div className="mb-6 rounded-[4px] border border-zinc-700 bg-zinc-900/60 p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-zinc-500">
@@ -129,17 +129,17 @@ export default function AdminTerminalPage() {
               are configured below.
             </p>
           </div>
-          <span className="shrink-0 rounded-full border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs font-semibold text-zinc-400">
+          <span className="shrink-0 rounded-[4px] border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs font-semibold text-zinc-400">
             Pending Agreement
           </span>
         </div>
-        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-3">
           {[
             { label: "Data Agreement", status: "Required", ok: false },
             { label: "dxFeed API Credentials", status: "Not configured", ok: false },
             { label: "Demo Fallback", status: "Active", ok: true },
           ].map(({ label, status: st, ok }) => (
-            <div key={label} className="rounded-xl border border-zinc-800 bg-zinc-800/40 px-3 py-2">
+            <div key={label} className="px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{label}</p>
               <p className={`mt-0.5 text-xs font-semibold ${ok ? "text-green-400" : "text-zinc-400"}`}>{st}</p>
             </div>
@@ -150,7 +150,7 @@ export default function AdminTerminalPage() {
       {status && (
         <div className="space-y-6">
           {/* Stat overview */}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="definition-grid grid grid-cols-2 gap-0 sm:grid-cols-4">
             <StatTile
               label="Active Provider"
               value={s?.provider?.toUpperCase() ?? "—"}

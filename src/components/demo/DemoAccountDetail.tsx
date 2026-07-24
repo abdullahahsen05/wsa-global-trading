@@ -56,15 +56,15 @@ export function DemoAccountDetail({ accountId }: { accountId: string }) {
             <StatusPill tone={account.status === "CONNECTED" ? "lime" : "accent"}>{account.status}</StatusPill>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Account number</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{account.accountNumber}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Leverage</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{account.leverage}</p>
             </div>
-            <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Copy tier</p>
               <p className="mt-1 text-sm font-semibold text-foreground">{account.copyTier}</p>
             </div>
@@ -103,7 +103,7 @@ export function DemoAccountDetail({ accountId }: { accountId: string }) {
           <h2 className="text-lg font-semibold text-foreground">Snapshot feed</h2>
           <div className="mt-4 space-y-3">
             {snapshots.map((snapshot) => (
-              <div key={snapshot.capturedAt} className="flex items-center justify-between rounded-xl border border-line bg-background p-3 text-sm">
+              <div key={snapshot.capturedAt} className="flex items-center justify-between rounded-[4px] border border-line bg-background p-3 text-sm">
                 <span className="text-muted">{snapshot.capturedAt}</span>
                 <span className="font-semibold text-accent-2">{snapshot.equity}</span>
               </div>

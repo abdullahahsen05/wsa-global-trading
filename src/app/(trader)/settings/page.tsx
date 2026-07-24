@@ -72,12 +72,12 @@ export default function SettingsPage() {
       }
     >
       {successMessage ? (
-        <div className="mb-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
+        <div className="mb-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
           {successMessage}
         </div>
       ) : null}
       {errorMessage ? (
-        <div className="mb-5 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+        <div className="mb-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
           {errorMessage}
         </div>
       ) : null}
@@ -103,7 +103,7 @@ export default function SettingsPage() {
               <option value="America/New_York">America/New_York</option>
             </SelectField>
           </div>
-          <div className="mt-4 rounded-2xl border border-line bg-background px-4 py-3">
+          <div className="mt-4 rounded-[4px] border border-line bg-background px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Role</p>
             <p className="mt-1 text-sm font-semibold text-foreground">{sessionUser?.role ?? "—"}</p>
           </div>
@@ -112,14 +112,14 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between gap-4">
             <h2 className="text-lg font-semibold text-foreground">Broker access</h2>
           </div>
-          <div className="mt-4 rounded-2xl border border-line bg-background px-4 py-4 text-sm leading-6 text-muted">
+          <div className="mt-4 rounded-[4px] border border-line bg-background px-4 py-4 text-sm leading-6 text-muted">
             Broker credentials and connection checks are managed per trading account so their
             status is never confused with profile settings.
           </div>
           <div className="mt-5">
             <Link
               href="/accounts"
-              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-background transition hover:brightness-110"
+              className="inline-flex min-h-10 items-center justify-center rounded-[4px] bg-accent px-4 py-2 text-sm font-semibold text-background transition hover:brightness-110"
             >
               Manage trading accounts
             </Link>

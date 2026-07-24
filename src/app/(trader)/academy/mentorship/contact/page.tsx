@@ -56,7 +56,7 @@ export default function MentorshipContactPage() {
     >
       <div className="grid gap-5 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]">
         <Panel>
-          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-accent/15"><Users className="h-6 w-6 text-accent" /></div>
+          <div className="grid h-12 w-12 place-items-center rounded-[4px] bg-accent/15"><Users className="h-6 w-6 text-accent" /></div>
           <StatusPill tone="accent">EUR 2,500 · one-time</StatusPill>
           <h2 className="mt-4 text-xl font-semibold text-foreground">1-to-1 Trading Mentorship</h2>
           <p className="mt-3 text-sm leading-6 text-muted">
@@ -78,12 +78,12 @@ export default function MentorshipContactPage() {
             </div>
           </div>
           {success ? (
-            <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/10 px-4 py-4 text-sm text-accent">
+            <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-4 text-sm text-accent">
               Your mentorship request has been sent. The WSA Global team can now review it from the admin console.
             </div>
           ) : null}
           {submit.error ? (
-            <div className="mt-5 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-4 text-sm text-danger">{submit.error.message}</div>
+            <div className="mt-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-4 text-sm text-danger">{submit.error.message}</div>
           ) : null}
           <form onSubmit={handleSubmit} className="mt-5 grid gap-4 sm:grid-cols-2">
             <TextField label="Name" required value={form.name || user?.name || ""} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />

@@ -261,15 +261,15 @@ export default function AdminUsersPage() {
               </GhostButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
                 <Dialog.Title className="text-xl font-semibold text-foreground">
                   Bulk user import
                 </Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                   CSV bulk import is not yet available. This feature requires additional backend configuration.
                 </Dialog.Description>
-                <div className="mt-5 rounded-2xl border border-line bg-background px-4 py-4 text-sm text-muted">
+                <div className="mt-5 rounded-[4px] border border-line bg-background px-4 py-4 text-sm text-muted">
                   To onboard multiple users, have them register individually. Use the status management below to activate accounts.
                 </div>
                 <div className="mt-5 flex justify-end border-t border-line pt-4">
@@ -281,7 +281,7 @@ export default function AdminUsersPage() {
                   <button
                     type="button"
                     aria-label="Close dialog"
-                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted"
+                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -299,15 +299,15 @@ export default function AdminUsersPage() {
               </PrimaryButton>
             </Dialog.Trigger>
             <Dialog.Portal>
-              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
-              <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
+              <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
                 <Dialog.Title className="text-xl font-semibold text-foreground">
                   User invite
                 </Dialog.Title>
                 <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                   Inviting users directly from the platform requires email provider configuration. This feature will be available in a future release.
                 </Dialog.Description>
-                <div className="mt-5 rounded-2xl border border-line bg-background px-4 py-4 text-sm text-muted">
+                <div className="mt-5 rounded-[4px] border border-line bg-background px-4 py-4 text-sm text-muted">
                   To add a user, have them register at the sign-up page. An admin can then update their status and role from this page.
                 </div>
                 <div className="mt-5 flex justify-end border-t border-line pt-4">
@@ -319,7 +319,7 @@ export default function AdminUsersPage() {
                   <button
                     type="button"
                     aria-label="Close dialog"
-                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted"
+                    className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-[4px] border border-line bg-background text-muted"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -343,7 +343,7 @@ export default function AdminUsersPage() {
 
       {/* Pending partner applications */}
       {pendingPartners.length > 0 ? (
-        <div className="mt-5 rounded-2xl border border-accent/20 bg-accent/5 p-4">
+        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/5 p-4">
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-accent">
             Partner applications pending review ({pendingPartners.length})
           </p>
@@ -351,7 +351,7 @@ export default function AdminUsersPage() {
             {pendingPartners.map((p) => (
               <div
                 key={p.userId}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-3"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-line bg-panel px-4 py-3"
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-foreground">{p.name}</p>
@@ -392,7 +392,7 @@ export default function AdminUsersPage() {
       ) : null}
 
       {/* Filter chips */}
-      <div className="mt-5 rounded-2xl border border-line bg-panel p-4">
+      <div className="mt-5 invisible-scrollbar overflow-x-auto border-b border-line pb-3">
         <FilterChipRow
           chips={[
             {
@@ -432,7 +432,7 @@ export default function AdminUsersPage() {
       {/* Notice banner */}
       {notice ? (
         <div
-          className={`mt-5 rounded-2xl border px-4 py-3 text-sm font-medium ${
+          className={`mt-5 rounded-[4px] border px-4 py-3 text-sm font-medium ${
             notice.type === "success"
               ? "border-accent/20 bg-accent/10 text-accent"
               : "border-danger/20 bg-danger/10 text-danger"
@@ -446,11 +446,11 @@ export default function AdminUsersPage() {
       {isLoading ? (
         <div className="mt-5 space-y-2">
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-14 rounded-xl border border-line bg-panel animate-pulse" />
+            <div key={i} className="h-14 rounded-[4px] border border-line bg-panel animate-pulse" />
           ))}
         </div>
       ) : isError ? (
-        <div className="mt-5 rounded-2xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+        <div className="mt-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           Failed to load users. Please refresh the page.
         </div>
       ) : filteredUsers.length === 0 ? (
@@ -483,8 +483,8 @@ export default function AdminUsersPage() {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+            <div className="mt-4 grid gap-0 overflow-hidden rounded-[4px] border-l border-t border-line sm:grid-cols-2 xl:grid-cols-4">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
                   Status
                 </p>
@@ -492,7 +492,7 @@ export default function AdminUsersPage() {
                   {selectedUser.status}
                 </p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
                   Segment
                 </p>
@@ -500,7 +500,7 @@ export default function AdminUsersPage() {
                   {selectedUser.segment}
                 </p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
                   Joined
                 </p>
@@ -508,7 +508,7 @@ export default function AdminUsersPage() {
                   {new Date(selectedUser.lastActiveAt).toLocaleDateString()}
                 </p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
                   Role
                 </p>
@@ -602,7 +602,7 @@ export default function AdminUsersPage() {
 
       {/* Pagination */}
       {filteredUsers.length > PAGE_SIZE && (
-        <div className="mt-5 flex items-center justify-between rounded-2xl border border-line bg-panel px-4 py-3">
+        <div className="mt-5 flex items-center justify-between rounded-[4px] border border-line bg-panel px-4 py-3">
           <p className="text-sm text-muted">
             Showing {(currentPageSafe - 1) * PAGE_SIZE + 1}–{Math.min(currentPageSafe * PAGE_SIZE, filteredUsers.length)} of {filteredUsers.length} users
           </p>
@@ -611,7 +611,7 @@ export default function AdminUsersPage() {
               type="button"
               disabled={currentPageSafe <= 1}
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              className="rounded-full border border-line bg-panel px-4 py-1.5 text-sm font-semibold text-muted disabled:opacity-40 hover:text-foreground"
+              className="rounded-[4px] border border-line bg-panel px-4 py-1.5 text-sm font-semibold text-muted disabled:opacity-40 hover:text-foreground"
             >
               Previous
             </button>
@@ -622,7 +622,7 @@ export default function AdminUsersPage() {
               type="button"
               disabled={currentPageSafe >= totalPages}
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              className="rounded-full border border-line bg-panel px-4 py-1.5 text-sm font-semibold text-muted disabled:opacity-40 hover:text-foreground"
+              className="rounded-[4px] border border-line bg-panel px-4 py-1.5 text-sm font-semibold text-muted disabled:opacity-40 hover:text-foreground"
             >
               Next
             </button>
@@ -695,10 +695,10 @@ export default function AdminUsersPage() {
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {user.segment}
               </span>
-              <span className="rounded-full border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
+              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
                 {new Date(user.lastActiveAt).toLocaleDateString()}
               </span>
             </div>
@@ -720,11 +720,11 @@ export default function AdminUsersPage() {
               </div>
             </div>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Segment</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{user.segment}</p>
               </div>
-              <div className="rounded-2xl border border-line bg-background px-4 py-3">
+              <div className="border-b border-r border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Joined</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">
                   {new Date(user.lastActiveAt).toLocaleString()}

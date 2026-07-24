@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { EmptyState, Panel, StatusPill, WorkspacePage } from "@/components/app/WorkspaceUI";
+import { EmptyState, PaginationControls, Panel, StatusPill, WorkspacePage } from "@/components/app/WorkspaceUI";
 import type { ProgramWithStatusDto } from "@/lib/services/evaluationService";
 
 async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -24,6 +25,8 @@ const STATUS_TONE: Record<string, "lime" | "accent" | "danger" | "muted"> = {
 
 export default function EvaluationsPage() {
   const qc = useQueryClient();
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(5);
 
   const { data: programs = [], isLoading, isError, error } = useQuery<ProgramWithStatusDto[]>({
     queryKey: ["evaluations-programs"],
@@ -38,12 +41,18 @@ export default function EvaluationsPage() {
       qc.invalidateQueries({ queryKey: ["evaluations-attempts"] });
     },
   });
+  const pagedPrograms = programs.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <WorkspacePage
       eyebrow="Certification"
       title="Evaluation Programs"
       description="Complete academy requirements and challenge yourself with a funded trader evaluation"
+      action={
+        <Link href="/evaluations/certificates" className="btn-dark">
+          My Certificates
+        </Link>
+      }
     >
       {isLoading && (
         <div className="py-16 text-center text-sm text-muted-foreground">Loading programs…</div>
@@ -60,19 +69,19 @@ export default function EvaluationsPage() {
       )}
 
       <div className="space-y-4">
-        {programs.map((prog) => {
+        {pagedPrograms.map((prog) => {
           const hasAttempt = prog.attemptId !== null;
           const locked = !prog.isUnlocked;
           const attemptStatus = prog.attemptStatus;
 
           return (
-            <Panel key={prog.id}>
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <Panel key={prog.id} className="overflow-hidden">
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="text-sm font-semibold text-foreground">{prog.name}</h3>
                     {locked && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      <span className="rounded-[4px] bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                         Locked
                       </span>
                     )}
@@ -87,13 +96,20 @@ export default function EvaluationsPage() {
                     <p className="mt-1 text-xs text-muted-foreground">{prog.description}</p>
                   )}
 
-                  <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted-foreground sm:grid-cols-3 lg:grid-cols-5">
-                    <span>Balance: <strong className="text-foreground">${prog.startingBalance.toLocaleString()}</strong></span>
-                    <span>Target: <strong className="text-foreground">{prog.profitTargetPercent}%</strong></span>
-                    <span>Max daily DD: <strong className="text-foreground">{prog.maxDailyDrawdownPercent}%</strong></span>
-                    <span>Max DD: <strong className="text-foreground">{prog.maxOverallDrawdownPercent}%</strong></span>
-                    <span>Min days: <strong className="text-foreground">{prog.minimumTradingDays}</strong></span>
-                    <span>Duration: <strong className="text-foreground">{prog.durationDays} days</strong></span>
+                  <div className="mt-4 grid overflow-hidden border border-line text-xs sm:grid-cols-2 lg:grid-cols-3">
+                    {[
+                      ["Balance", `$${prog.startingBalance.toLocaleString()}`],
+                      ["Target", `${prog.profitTargetPercent}%`],
+                      ["Max daily DD", `${prog.maxDailyDrawdownPercent}%`],
+                      ["Max DD", `${prog.maxOverallDrawdownPercent}%`],
+                      ["Min days", prog.minimumTradingDays],
+                      ["Duration", `${prog.durationDays} days`],
+                    ].map(([label, value]) => (
+                      <div key={label} className="border-b border-line px-3 py-2 last:border-b-0 sm:border-r sm:last:border-r-0 lg:[&:nth-child(3n)]:border-r-0 lg:[&:nth-last-child(-n+3)]:border-b-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">{label}</p>
+                        <p className="mt-1 font-semibold text-foreground">{value}</p>
+                      </div>
+                    ))}
                   </div>
 
                   {prog.requiredCourseId && (
@@ -109,18 +125,18 @@ export default function EvaluationsPage() {
                   )}
                 </div>
 
-                <div className="flex shrink-0 items-start gap-2">
+                <div className="flex shrink-0 items-start gap-2 lg:justify-end">
                   {hasAttempt && prog.attemptId ? (
                     <Link
                       href={`/evaluations/${prog.attemptId}`}
-                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground hover:opacity-90"
+                      className="rounded-[4px] bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground hover:opacity-90"
                     >
                       View Attempt
                     </Link>
                   ) : locked ? (
                     <button
                       disabled
-                      className="cursor-not-allowed rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground"
+                      className="cursor-not-allowed rounded-[4px] bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground"
                     >
                       Complete Academy First
                     </button>
@@ -128,7 +144,7 @@ export default function EvaluationsPage() {
                     <button
                       onClick={() => startMutation.mutate(prog.id)}
                       disabled={startMutation.isPending}
-                      className="rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90 disabled:opacity-60"
+                      className="rounded-[4px] bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90 disabled:opacity-60"
                     >
                       {startMutation.isPending ? "Starting…" : "Start Evaluation"}
                     </button>
@@ -146,11 +162,17 @@ export default function EvaluationsPage() {
         </p>
       )}
 
-      <div className="mt-6 flex justify-end">
-        <Link href="/evaluations/certificates" className="text-xs text-muted-foreground underline hover:text-foreground">
-          My Certificates
-        </Link>
-      </div>
+      <PaginationControls
+        currentPage={page}
+        totalItems={programs.length}
+        pageSize={pageSize}
+        pageSizeOptions={[5, 10, 20]}
+        onPageChange={setPage}
+        onPageSizeChange={(value) => {
+          setPage(1);
+          setPageSize(value);
+        }}
+      />
     </WorkspacePage>
   );
 }

@@ -131,6 +131,8 @@ export default async function AccountDetailPage({
           <div className="mt-4">
             <DataTable
               headers={["Trade ID", "Symbol", "Side", "Status", "Profit", "Close price", "Closed"]}
+              paginated
+              initialPageSize={10}
               rows={accountTrades.map((trade) => [
                 <span key="trade-id" className="font-mono text-xs text-muted">{trade.shortTradeId}</span>,
                 <span key="symbol" className="font-semibold text-foreground">{trade.symbol}</span>,
@@ -148,7 +150,7 @@ export default async function AccountDetailPage({
           <div className="mt-4 space-y-3">
             {latestSnapshots.length > 0 ? (
               latestSnapshots.map((snapshot) => (
-                <div key={snapshot.capturedAt} className="flex items-center justify-between rounded-xl border border-line bg-background p-3 text-sm">
+                <div key={snapshot.capturedAt} className="flex items-center justify-between rounded-[4px] border border-line bg-background p-3 text-sm">
                   <span className="text-muted">{new Date(snapshot.capturedAt).toLocaleString()}</span>
                   <span className="font-semibold text-accent-2">${snapshot.equity.toLocaleString()}</span>
                 </div>
