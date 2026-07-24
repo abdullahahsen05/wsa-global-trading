@@ -162,20 +162,23 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
         const activePositionIds = new Set(positions.map((position) => String(position.id)));
         const deals = connection.historyStorage.getDealsByTimeRange(utcDayStart(), new Date()) as any[];
 
-        const openRows = positions.map((position) => ({
-          trading_account_id: accountRow.id,
-          external_trade_id: String(position.id),
-          symbol: String(position.symbol ?? ""),
-          side: position.type === "POSITION_TYPE_BUY" ? "BUY" : "SELL",
-          status: "OPEN" as const,
-          volume: Number(position.volume ?? 0),
-          open_price: Number(position.openPrice ?? 0),
-          close_price: null,
-          profit: Number(position.profit ?? 0),
-          currency,
-          opened_at: safeIso(position.time ?? position.openTime),
-          closed_at: null,
-        }));
+        const openRows = positions.map((position) => {
+          const openedAt = position.time ?? position.openTime;
+          return {
+            trading_account_id: accountRow.id,
+            external_trade_id: String(position.id),
+            symbol: String(position.symbol ?? ""),
+            side: position.type === "POSITION_TYPE_BUY" ? "BUY" : "SELL",
+            status: "OPEN" as const,
+            volume: Number(position.volume ?? 0),
+            open_price: Number(position.openPrice ?? 0),
+            close_price: null,
+            profit: Number(position.profit ?? 0),
+            currency,
+            opened_at: openedAt == null ? null : safeIso(openedAt),
+            closed_at: null,
+          };
+        });
 
         const closingDealsByPosition = new Map<string, any[]>();
         for (const deal of deals.filter(isClosingDeal)) {
@@ -208,7 +211,10 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
         for (const row of openRows) {
           const existing = existingByExternalId.get(row.external_trade_id);
           if (!existing) {
-            const { error } = await supabase.from("trades").insert(row);
+            const { error } = await supabase.from("trades").insert({
+              ...row,
+              opened_at: row.opened_at ?? new Date().toISOString(),
+            });
             if (error) throw new Error(error.message);
             changedTrades++;
             continue;
@@ -219,7 +225,8 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
             existing.side !== row.side ||
             !numbersMatch(existing.volume, row.volume) ||
             !numbersMatch(existing.open_price, row.open_price) ||
-            !numbersMatch(existing.profit, row.profit);
+            !numbersMatch(existing.profit, row.profit) ||
+            (row.opened_at !== null && !datesMatch(existing.opened_at, row.opened_at));
           if (!changed) continue;
           const { error } = await supabase
             .from("trades")
@@ -232,7 +239,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
               close_price: null,
               profit: row.profit,
               currency: row.currency,
-              opened_at: row.opened_at,
+              opened_at: row.opened_at ?? existing.opened_at,
               closed_at: null,
             })
             .eq("id", existing.id);
