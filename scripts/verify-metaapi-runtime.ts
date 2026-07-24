@@ -70,6 +70,28 @@ async function main() {
     api.close();
   }
 
+  const tradeCounts = await Promise.all((accounts ?? []).map(async (account) => {
+    const [open, closed] = await Promise.all([
+      supabase
+        .from("trades")
+        .select("id", { count: "exact", head: true })
+        .eq("trading_account_id", account.id)
+        .eq("status", "OPEN"),
+      supabase
+        .from("trades")
+        .select("id", { count: "exact", head: true })
+        .eq("trading_account_id", account.id)
+        .eq("status", "CLOSED"),
+    ]);
+    if (open.error) throw new Error(open.error.message);
+    if (closed.error) throw new Error(closed.error.message);
+    return {
+      account: account.account_name,
+      open: open.count ?? 0,
+      closed: closed.count ?? 0,
+    };
+  }));
+
   console.log(JSON.stringify({
     accounts: (accounts ?? []).map((account) => ({
       account: account.account_name,
@@ -80,6 +102,7 @@ async function main() {
       hasSyncError: Boolean(account.sync_error),
     })),
     providerAccounts,
+    tradeCounts,
     jobCounts: Object.fromEntries(jobCounts),
     pendingOrFailedJobs: (jobs ?? [])
       .filter((job) => job.status === "PENDING" || job.status === "FAILED")
