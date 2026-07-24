@@ -85,7 +85,7 @@ export async function calculateEvaluationMetrics(
   const startedAt = attempt.started_at as string | null;
   const endsAt = attempt.ends_at as string | null;
 
-  const [snapshotRes, metricsRes, tradesRes] = await Promise.all([
+  const [snapshotRes, historyRes, tradesRes] = await Promise.all([
     supabase
       .from("account_snapshots")
       .select("balance, equity, drawdown_percent, captured_at")
@@ -94,12 +94,12 @@ export async function calculateEvaluationMetrics(
       .limit(1)
       .maybeSingle(),
     supabase
-      .from("daily_account_metrics")
-      .select("max_drawdown_percent, metric_day")
+      .from("account_snapshots")
+      .select("balance, equity, captured_at")
       .eq("trading_account_id", accountId)
-      .order("max_drawdown_percent", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+      .gte("captured_at", startedAt ?? new Date(0).toISOString())
+      .order("captured_at", { ascending: true })
+      .limit(20_000),
     supabase
       .from("trades")
       .select("opened_at, closed_at, status")
@@ -110,8 +110,26 @@ export async function calculateEvaluationMetrics(
   const snap = snapshotRes.data;
   const currentBalance = snap ? Number(snap.balance) : startingBalance;
   const currentEquity = snap ? Number(snap.equity) : startingBalance;
-  const maxOverallDrawdown = snap ? Number(snap.drawdown_percent) : 0;
-  const maxDailyDrawdown = metricsRes.data ? Number(metricsRes.data.max_drawdown_percent) : 0;
+  let overallPeakEquity = startingBalance;
+  let maxOverallDrawdown = 0;
+  let maxDailyDrawdown = 0;
+  const dailyPeaks = new Map<string, number>();
+  for (const row of historyRes.data ?? []) {
+    const equity = Number(row.equity);
+    if (!Number.isFinite(equity)) continue;
+    overallPeakEquity = Math.max(overallPeakEquity, equity);
+    if (overallPeakEquity > 0) {
+      maxOverallDrawdown = Math.max(maxOverallDrawdown, ((overallPeakEquity - equity) / overallPeakEquity) * 100);
+    }
+    const day = String(row.captured_at).slice(0, 10);
+    const balance = Number(row.balance);
+    const initialPeak = Number.isFinite(balance) ? balance : equity;
+    const dailyPeak = Math.max(dailyPeaks.get(day) ?? initialPeak, equity);
+    dailyPeaks.set(day, dailyPeak);
+    if (dailyPeak > 0) {
+      maxDailyDrawdown = Math.max(maxDailyDrawdown, ((dailyPeak - equity) / dailyPeak) * 100);
+    }
+  }
 
   // Count distinct calendar days with at least one closed trade since attempt started
   const trades = tradesRes.data ?? [];
@@ -206,20 +224,9 @@ export async function evaluateAttempt(attemptId: string): Promise<CheckResult> {
     startingBalance: Number(program.starting_balance),
   };
 
-  // Only check ACTIVE attempts
-  if (attempt.status !== "ACTIVE") {
+  // NEEDS_REVIEW remains checkable so a delayed provider sync can recover.
+  if (!["ACTIVE", "NEEDS_REVIEW"].includes(attempt.status as string)) {
     return { result: "NO_CHANGE", reason: null, metrics: null, rulesSnapshot: rules };
-  }
-
-  // Check expiry first
-  const endsAt = attempt.ends_at ? new Date(attempt.ends_at as string) : null;
-  if (endsAt && endsAt < new Date()) {
-    return {
-      result: "EXPIRED",
-      reason: "Evaluation period has ended without meeting all pass conditions",
-      metrics: null,
-      rulesSnapshot: rules,
-    };
   }
 
   if (!attempt.trading_account_id) {
@@ -268,6 +275,16 @@ export async function evaluateAttempt(attemptId: string): Promise<CheckResult> {
     return {
       result: "PASSED",
       reason: `Profit target of ${rules.profitTargetPercent}% reached with ${metrics.tradingDays} trading days`,
+      metrics,
+      rulesSnapshot: rules,
+    };
+  }
+
+  const endsAt = attempt.ends_at ? new Date(attempt.ends_at as string) : null;
+  if (endsAt && endsAt < new Date()) {
+    return {
+      result: "EXPIRED",
+      reason: "Evaluation period ended before all pass conditions were met",
       metrics,
       rulesSnapshot: rules,
     };

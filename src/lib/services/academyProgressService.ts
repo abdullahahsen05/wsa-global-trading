@@ -274,6 +274,9 @@ export async function markLessonComplete(userId: string, lessonId: string): Prom
       last_watched_at: now,
     });
   }
+
+  const { autoStartEligibleEvaluationsForCourse } = await import("@/lib/services/evaluationService");
+  await autoStartEligibleEvaluationsForCourse(userId, courseId);
 }
 
 export async function getProgressMapForUser(

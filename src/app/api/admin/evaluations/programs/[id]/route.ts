@@ -13,6 +13,10 @@ const UpdateSchema = z.object({
   maxOverallDrawdownPercent: z.number().positive().max(100).optional(),
   minimumTradingDays: z.number().int().min(0).optional(),
   durationDays: z.number().int().positive().optional(),
+  demoServerName: z.string().trim().min(2).max(160).nullable().optional(),
+  demoAccountType: z.string().trim().min(1).max(120).nullable().optional(),
+  demoLeverage: z.number().int().min(1).max(5000).optional(),
+  demoBrokerKeywords: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
   status: z.enum(["DRAFT", "PUBLISHED", "ARCHIVED"]).optional(),
 });
 

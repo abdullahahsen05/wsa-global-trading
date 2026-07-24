@@ -17,6 +17,10 @@ const CreateSchema = z.object({
   maxOverallDrawdownPercent: z.number().positive().max(100),
   minimumTradingDays: z.number().int().min(0),
   durationDays: z.number().int().positive(),
+  demoServerName: z.string().trim().min(2).max(160).optional(),
+  demoAccountType: z.string().trim().min(1).max(120).optional(),
+  demoLeverage: z.number().int().min(1).max(5000).optional(),
+  demoBrokerKeywords: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
 });
 
 export async function GET() {

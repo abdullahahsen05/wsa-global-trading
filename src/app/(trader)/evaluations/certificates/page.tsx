@@ -67,13 +67,23 @@ export default function MyCertificatesPage() {
                   <p className="mt-1 text-xs text-danger">Revoked: {cert.revocationReason}</p>
                 )}
               </div>
-              <Link
-                href={`/certificates/verify/${cert.verificationId}`}
-                target="_blank"
-                className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-              >
-                View Certificate
-              </Link>
+              <div className="flex gap-2">
+                {cert.status === "VALID" && (
+                  <a
+                    href={`/api/evaluations/certificates/${cert.id}/download`}
+                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-accent-foreground hover:opacity-90"
+                  >
+                    Download PDF
+                  </a>
+                )}
+                <Link
+                  href={`/certificates/verify/${cert.verificationId}`}
+                  target="_blank"
+                  className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Verify
+                </Link>
+              </div>
             </div>
           </Panel>
         ))}

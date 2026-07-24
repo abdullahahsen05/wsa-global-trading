@@ -5,6 +5,7 @@ if (typeof window !== "undefined") {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { createNotification } from "@/lib/services/notificationService";
+import { issueCertificateForPassedAttempt } from "@/lib/services/certificateService";
 import {
   evaluateAttempt,
   calculateAcademyCompletion,
@@ -28,6 +29,10 @@ export interface EvaluationProgramDto {
   maxOverallDrawdownPercent: number;
   minimumTradingDays: number;
   durationDays: number;
+  demoServerName: string | null;
+  demoAccountType: string | null;
+  demoLeverage: number;
+  demoBrokerKeywords: string[];
   status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
   rules: Record<string, unknown>;
   createdAt: string;
@@ -40,6 +45,8 @@ export interface EvaluationAttemptDto {
   programName: string;
   programSlug: string;
   userId: string;
+  traderName: string | null;
+  traderEmail: string | null;
   tradingAccountId: string | null;
   tradingAccountName: string | null;
   status: string;
@@ -55,6 +62,17 @@ export interface EvaluationAttemptDto {
   lastCheckedAt: string | null;
   adminOverrideBy: string | null;
   adminOverrideReason: string | null;
+  fundingStatus: "NOT_ELIGIBLE" | "PENDING_REVIEW" | "FUNDED" | "DECLINED";
+  fundingNote: string | null;
+  provisioningStatus: "NOT_STARTED" | "PROVISIONING" | "CONNECTED" | "ACTION_REQUIRED" | "FAILED";
+  provisioningError: string | null;
+  programRules: {
+    profitTargetPercent: number;
+    maxDailyDrawdownPercent: number;
+    maxOverallDrawdownPercent: number;
+    minimumTradingDays: number;
+    durationDays: number;
+  } | null;
   createdAt: string;
 }
 
@@ -76,6 +94,10 @@ export interface CreateProgramInput {
   maxOverallDrawdownPercent: number;
   minimumTradingDays: number;
   durationDays: number;
+  demoServerName?: string;
+  demoAccountType?: string;
+  demoLeverage?: number;
+  demoBrokerKeywords?: string[];
 }
 
 export interface UpdateProgramInput {
@@ -88,6 +110,10 @@ export interface UpdateProgramInput {
   maxOverallDrawdownPercent?: number;
   minimumTradingDays?: number;
   durationDays?: number;
+  demoServerName?: string | null;
+  demoAccountType?: string | null;
+  demoLeverage?: number;
+  demoBrokerKeywords?: string[];
   status?: "DRAFT" | "PUBLISHED" | "ARCHIVED";
 }
 
@@ -129,6 +155,10 @@ export async function adminCreateEvaluationProgram(
       max_overall_drawdown_percent: input.maxOverallDrawdownPercent,
       minimum_trading_days: input.minimumTradingDays,
       duration_days: input.durationDays,
+      demo_server_name: input.demoServerName?.trim() || null,
+      demo_account_type: input.demoAccountType?.trim() || null,
+      demo_leverage: input.demoLeverage ?? 100,
+      demo_broker_keywords: input.demoBrokerKeywords ?? [],
       created_by: actorUserId,
     })
     .select("*, academy_courses(title)")
@@ -160,6 +190,10 @@ export async function adminUpdateEvaluationProgram(
   if (input.maxOverallDrawdownPercent !== undefined) patch.max_overall_drawdown_percent = input.maxOverallDrawdownPercent;
   if (input.minimumTradingDays !== undefined) patch.minimum_trading_days = input.minimumTradingDays;
   if (input.durationDays !== undefined) patch.duration_days = input.durationDays;
+  if ("demoServerName" in input) patch.demo_server_name = input.demoServerName?.trim() || null;
+  if ("demoAccountType" in input) patch.demo_account_type = input.demoAccountType?.trim() || null;
+  if (input.demoLeverage !== undefined) patch.demo_leverage = input.demoLeverage;
+  if (input.demoBrokerKeywords !== undefined) patch.demo_broker_keywords = input.demoBrokerKeywords;
   if (input.status !== undefined) patch.status = input.status;
 
   const { data, error } = await supabase
@@ -190,7 +224,7 @@ export async function adminListEvaluationAttempts(
   let query = supabase
     .from("evaluation_attempts")
     .select(
-      "*, evaluation_programs(name, slug), trading_accounts(account_name)"
+      "*, evaluation_programs(name, slug, profit_target_percent, max_daily_drawdown_percent, max_overall_drawdown_percent, minimum_trading_days, duration_days), trading_accounts(account_name), profiles!evaluation_attempts_user_id_fkey(full_name, email)"
     )
     .order("created_at", { ascending: false })
     .limit(200);
@@ -206,52 +240,185 @@ export async function adminLinkEvaluationAccount(
   tradingAccountId: string,
   actorUserId: string
 ): Promise<EvaluationAttemptDto> {
+  return linkEvaluationAccount({
+    attemptId,
+    tradingAccountId,
+    actorUserId,
+  });
+}
+
+export async function traderLinkEvaluationAccount(
+  attemptId: string,
+  tradingAccountId: string,
+  traderUserId: string,
+): Promise<EvaluationAttemptDto> {
+  return linkEvaluationAccount({
+    attemptId,
+    tradingAccountId,
+    actorUserId: traderUserId,
+    requiredTraderUserId: traderUserId,
+  });
+}
+
+async function linkEvaluationAccount(params: {
+  attemptId: string;
+  tradingAccountId: string;
+  actorUserId: string;
+  requiredTraderUserId?: string;
+}): Promise<EvaluationAttemptDto> {
   const supabase = createAdminClient();
 
-  // Fetch the attempt and the account's initial_balance to snapshot
   const [{ data: attempt, error: aErr }, { data: account, error: accErr }] = await Promise.all([
-    supabase.from("evaluation_attempts").select("id, status, program_id").eq("id", attemptId).maybeSingle(),
-    supabase.from("trading_accounts").select("id, initial_balance, account_name").eq("id", tradingAccountId).maybeSingle(),
+    supabase
+      .from("evaluation_attempts")
+      .select("id, status, program_id, user_id, trading_account_id")
+      .eq("id", params.attemptId)
+      .maybeSingle(),
+    supabase
+      .from("trading_accounts")
+      .select("id, user_id, initial_balance, account_name, account_usage, status")
+      .eq("id", params.tradingAccountId)
+      .maybeSingle(),
   ]);
   if (aErr) throw new Error(aErr.message);
   if (!attempt) throw new Error("Attempt not found");
   if (accErr) throw new Error(accErr.message);
   if (!account) throw new Error("Trading account not found");
+  if (params.requiredTraderUserId && attempt.user_id !== params.requiredTraderUserId) {
+    throw new Error("Attempt not found");
+  }
+  if (account.user_id !== attempt.user_id) throw new Error("Evaluation account must belong to this trader.");
+  if (!["PENDING", "NEEDS_REVIEW"].includes(attempt.status)) {
+    throw new Error("This evaluation has already started or finished.");
+  }
+  if (account.status !== "CONNECTED") {
+    throw new Error("Connect and synchronize the demo account before starting the evaluation.");
+  }
 
-  const { data: program } = await supabase
-    .from("evaluation_programs")
-    .select("starting_balance")
-    .eq("id", (attempt as Record<string, unknown>).program_id as string)
-    .maybeSingle();
+  const [
+    { data: program },
+    { data: otherAttempt },
+    { data: snapshot },
+    { count: tradeCount },
+    { data: publicCopyFollower },
+    { data: selfCopyRelationship },
+    { data: masterStrategy },
+  ] = await Promise.all([
+    supabase
+      .from("evaluation_programs")
+      .select("starting_balance, duration_days")
+      .eq("id", attempt.program_id)
+      .maybeSingle(),
+    supabase
+      .from("evaluation_attempts")
+      .select("id")
+      .eq("trading_account_id", params.tradingAccountId)
+      .neq("id", params.attemptId)
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("account_snapshots")
+      .select("balance, equity, captured_at")
+      .eq("trading_account_id", params.tradingAccountId)
+      .order("captured_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("trades")
+      .select("id", { count: "exact", head: true })
+      .eq("trading_account_id", params.tradingAccountId),
+    supabase
+      .from("copy_strategy_followers")
+      .select("id")
+      .eq("follower_account_id", params.tradingAccountId)
+      .in("status", ["PENDING", "ACTIVE", "PAUSED"])
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("self_copy_relationships")
+      .select("id")
+      .or(`source_account_id.eq.${params.tradingAccountId},follower_account_id.eq.${params.tradingAccountId}`)
+      .in("status", ["LIVE", "PAUSED"])
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("copy_strategies")
+      .select("id")
+      .eq("master_account_id", params.tradingAccountId)
+      .neq("status", "ARCHIVED")
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (!program) throw new Error("Evaluation program not found.");
+  if (otherAttempt) throw new Error("This demo account is already assigned to another evaluation.");
+  if (publicCopyFollower || selfCopyRelationship || masterStrategy) {
+    throw new Error("Evaluation accounts cannot participate in copy trading.");
+  }
+  if (!snapshot) {
+    throw new Error("Sync the demo account once before starting so its balance can be verified.");
+  }
+  if ((tradeCount ?? 0) > 0) {
+    throw new Error("Use a fresh demo account with no previous trades for this evaluation.");
+  }
 
-  const startingBalance = program ? Number((program as Record<string, unknown>).starting_balance) : Number((account as Record<string, unknown>).initial_balance);
+  const startingBalance = Number(program.starting_balance);
+  const syncedBalance = Number(snapshot.balance);
+  const balanceTolerance = Math.max(1, startingBalance * 0.001);
+  if (!Number.isFinite(syncedBalance) || Math.abs(syncedBalance - startingBalance) > balanceTolerance) {
+    throw new Error(
+      `Demo balance must be ${startingBalance.toLocaleString()} before the evaluation starts. Synced balance is ${Number.isFinite(syncedBalance) ? syncedBalance.toLocaleString() : "unavailable"}.`,
+    );
+  }
+
+  const now = new Date();
+  const { error: accountUpdateError } = await supabase
+    .from("trading_accounts")
+    .update({
+      account_usage: "EVALUATION",
+      initial_balance: startingBalance,
+    })
+    .eq("id", params.tradingAccountId);
+  if (accountUpdateError) throw new Error(accountUpdateError.message);
 
   const { data, error } = await supabase
     .from("evaluation_attempts")
     .update({
-      trading_account_id: tradingAccountId,
+      trading_account_id: params.tradingAccountId,
       starting_balance: startingBalance,
       status: "ACTIVE",
-      started_at: new Date().toISOString(),
-      ends_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+      provisioning_status: "CONNECTED",
+      provisioning_error: null,
+      started_at: now.toISOString(),
+      ends_at: new Date(now.getTime() + Number(program.duration_days ?? 14) * 86_400_000).toISOString(),
     })
-    .eq("id", attemptId)
-    .select("*, evaluation_programs(name, slug), trading_accounts(account_name)")
+    .eq("id", params.attemptId)
+    .select("*, evaluation_programs(name, slug), trading_accounts(account_name), profiles!evaluation_attempts_user_id_fkey(full_name, email)")
     .single();
   if (error) throw new Error(error.message);
+  await createNotification({
+    userId: attempt.user_id,
+    accountId: params.tradingAccountId,
+    type: "EVAL_REVIEW",
+    title: "Evaluation tracking started",
+    message: "Your demo account passed the pre-checks. The evaluation timer and automated tracking are now active.",
+  });
   await writeAuditLog({
-    actorUserId,
-    action: "EVAL_ATTEMPT_CHECKED",
+    actorUserId: params.actorUserId,
+    action: "EVAL_ACCOUNT_LINKED",
     entityType: "evaluation_attempt",
-    entityId: attemptId,
-    metadata: { action: "LINK_ACCOUNT", tradingAccountId },
+    entityId: params.attemptId,
+    metadata: {
+      tradingAccountId: params.tradingAccountId,
+      verifiedStartingBalance: startingBalance,
+      accountWasMarkedForEvaluation: account.account_usage !== "EVALUATION",
+    },
   });
   return mapAttempt(data as Record<string, unknown>);
 }
 
 export async function adminRunEvaluationCheck(
   attemptId: string,
-  actorUserId: string
+  actorUserId: string | null
 ): Promise<{ result: CheckResult; attempt: EvaluationAttemptDto }> {
   const checkResult = await evaluateAttempt(attemptId);
   const supabase = createAdminClient();
@@ -275,6 +442,7 @@ export async function adminRunEvaluationCheck(
     patch.status = "PASSED";
     patch.passed_at = new Date().toISOString();
     patch.pass_reason = checkResult.reason;
+    patch.funding_status = "PENDING_REVIEW";
     statusAfter = "PASSED";
   } else if (checkResult.result === "FAILED") {
     patch.status = "FAILED";
@@ -296,7 +464,7 @@ export async function adminRunEvaluationCheck(
       .from("evaluation_attempts")
       .update(patch)
       .eq("id", attemptId)
-      .select("*, evaluation_programs(name, slug), trading_accounts(account_name)")
+      .select("*, evaluation_programs(name, slug), trading_accounts(account_name), profiles!evaluation_attempts_user_id_fkey(full_name, email)")
       .single(),
     supabase.from("evaluation_checks").insert({
       attempt_id: attemptId,
@@ -306,7 +474,7 @@ export async function adminRunEvaluationCheck(
       result: checkResult.result,
       reason: checkResult.reason,
       checked_by: actorUserId,
-      source: "ADMIN",
+      source: actorUserId ? "ADMIN" : "WORKER",
     }),
   ]);
   if (uErr) throw new Error(uErr.message);
@@ -319,6 +487,22 @@ export async function adminRunEvaluationCheck(
       title: checkResult.result === "PASSED" ? "Evaluation Passed!" : "Evaluation Failed",
       message: checkResult.reason ?? (checkResult.result === "PASSED" ? "Congratulations on passing your evaluation!" : "Your evaluation did not meet the required conditions."),
     });
+  }
+  if (checkResult.result === "PASSED" && userId) {
+    await issueCertificateForPassedAttempt(attemptId, actorUserId).catch((error) => {
+      if (!(error instanceof Error) || error.message !== "CERTIFICATE_ALREADY_EXISTS") throw error;
+    });
+    const { data: admins } = await supabase
+      .from("profiles")
+      .select("id")
+      .in("role", ["ADMIN", "SUPER_ADMIN"])
+      .eq("status", "ACTIVE");
+    await Promise.all((admins ?? []).map((admin) => createNotification({
+      userId: admin.id,
+      type: "EVAL_REVIEW",
+      title: "Evaluation passed — funding review",
+      message: "A trader passed an evaluation and is ready for a funding decision.",
+    })));
   }
 
   await writeAuditLog({
@@ -356,7 +540,11 @@ export async function adminOverrideEvaluationAttempt(
     admin_override_reason: input.reason,
   };
   const now = new Date().toISOString();
-  if (input.newStatus === "PASSED") { patch.passed_at = now; patch.pass_reason = input.reason; }
+  if (input.newStatus === "PASSED") {
+    patch.passed_at = now;
+    patch.pass_reason = input.reason;
+    patch.funding_status = "PENDING_REVIEW";
+  }
   if (input.newStatus === "FAILED") { patch.failed_at = now; patch.fail_reason = input.reason; }
   if (input.newStatus === "CANCELLED") { patch.cancelled_at = now; }
 
@@ -365,7 +553,7 @@ export async function adminOverrideEvaluationAttempt(
       .from("evaluation_attempts")
       .update(patch)
       .eq("id", attemptId)
-      .select("*, evaluation_programs(name, slug), trading_accounts(account_name)")
+      .select("*, evaluation_programs(name, slug), trading_accounts(account_name), profiles!evaluation_attempts_user_id_fkey(full_name, email)")
       .single(),
     supabase.from("evaluation_checks").insert({
       attempt_id: attemptId,
@@ -389,6 +577,11 @@ export async function adminOverrideEvaluationAttempt(
       message: input.reason,
     });
   }
+  if (userId && input.newStatus === "PASSED") {
+    await issueCertificateForPassedAttempt(attemptId, input.adminUserId).catch((error) => {
+      if (!(error instanceof Error) || error.message !== "CERTIFICATE_ALREADY_EXISTS") throw error;
+    });
+  }
 
   await writeAuditLog({
     actorUserId: input.adminUserId,
@@ -399,6 +592,55 @@ export async function adminOverrideEvaluationAttempt(
   });
 
   return mapAttempt(data as Record<string, unknown>);
+}
+
+export async function adminUpdateEvaluationFunding(
+  attemptId: string,
+  input: { status: "PENDING_REVIEW" | "FUNDED" | "DECLINED"; note?: string | null },
+  actorUserId: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+  const { data: attempt } = await supabase
+    .from("evaluation_attempts")
+    .select("id, user_id, status")
+    .eq("id", attemptId)
+    .maybeSingle();
+  if (!attempt) throw new Error("Attempt not found.");
+  if (attempt.status !== "PASSED") throw new Error("Only a passed evaluation can receive a funding decision.");
+
+  const { error } = await supabase.from("evaluation_attempts").update({
+    funding_status: input.status,
+    funding_note: input.note?.trim() || null,
+    funding_reviewed_at: new Date().toISOString(),
+    funding_reviewed_by: actorUserId,
+  }).eq("id", attemptId);
+  if (error) throw new Error(error.message);
+
+  if (input.status === "FUNDED") {
+    await supabase.from("trader_profiles").upsert({
+      user_id: attempt.user_id,
+      segment: "FUNDED",
+    }, { onConflict: "user_id" });
+  }
+  await createNotification({
+    userId: attempt.user_id,
+    type: "EVAL_REVIEW",
+    title: input.status === "FUNDED" ? "Funded status approved" : input.status === "DECLINED" ? "Funding review completed" : "Funding review pending",
+    message: input.note?.trim() || (
+      input.status === "FUNDED"
+        ? "Your passed evaluation has been approved for funded status."
+        : input.status === "DECLINED"
+          ? "Your funding review was not approved. Contact support for details."
+          : "Your passed evaluation is queued for funding review."
+    ),
+  });
+  await writeAuditLog({
+    actorUserId,
+    action: "EVAL_ATTEMPT_OVERRIDDEN",
+    entityType: "evaluation_attempt",
+    entityId: attemptId,
+    metadata: { fundingStatus: input.status, note: input.note ?? null },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -500,8 +742,14 @@ export async function startEvaluationAttempt(
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("evaluation_attempts")
-    .insert({ program_id: programId, user_id: userId, status: "PENDING" })
-    .select("*, evaluation_programs(name, slug), trading_accounts(account_name)")
+    .insert({
+      program_id: programId,
+      user_id: userId,
+      status: "PENDING",
+      provisioning_status: "ACTION_REQUIRED",
+      provisioning_error: "Create a fresh demo account, connect it under Accounts, then select it here to start tracking.",
+    })
+    .select("*, evaluation_programs(name, slug, starting_balance, demo_server_name, demo_account_type, demo_leverage, demo_broker_keywords), trading_accounts(account_name), profiles!evaluation_attempts_user_id_fkey(full_name, email)")
     .single();
   if (error) throw new Error(error.message);
 
@@ -513,7 +761,37 @@ export async function startEvaluationAttempt(
     metadata: { programId },
   });
 
+  const row = data as Record<string, unknown>;
+  const program = row.evaluation_programs as Record<string, unknown>;
+  await createNotification({
+    userId,
+    type: "EVAL_REVIEW",
+    title: "Evaluation unlocked — connect your demo account",
+    message: `${String(program.name)} is ready. Create a fresh demo account with a ${Number(program.starting_balance).toLocaleString()} starting balance, connect it under Accounts, then attach it to your evaluation.`,
+  });
   return mapAttempt(data as Record<string, unknown>);
+}
+
+export async function autoStartEligibleEvaluationsForCourse(
+  userId: string,
+  courseId: string,
+): Promise<number> {
+  const completion = await calculateAcademyCompletion(userId, courseId);
+  if (completion.progressPercent < 100) return 0;
+  const supabase = createAdminClient();
+  const { data: programs } = await supabase
+    .from("evaluation_programs")
+    .select("id")
+    .eq("required_course_id", courseId)
+    .eq("status", "PUBLISHED");
+  let started = 0;
+  for (const program of programs ?? []) {
+    const eligibility = await canStartEvaluation(userId, program.id);
+    if (!eligibility.canStart) continue;
+    await startEvaluationAttempt(userId, program.id);
+    started++;
+  }
+  return started;
 }
 
 export async function getMyEvaluationAttempts(userId: string): Promise<EvaluationAttemptDto[]> {
@@ -590,6 +868,10 @@ function mapProgram(r: Record<string, unknown>): EvaluationProgramDto {
     maxOverallDrawdownPercent: Number(r.max_overall_drawdown_percent),
     minimumTradingDays: Number(r.minimum_trading_days),
     durationDays: Number(r.duration_days),
+    demoServerName: (r.demo_server_name as string | null) ?? null,
+    demoAccountType: (r.demo_account_type as string | null) ?? null,
+    demoLeverage: Number(r.demo_leverage ?? 100),
+    demoBrokerKeywords: (r.demo_broker_keywords as string[] | null) ?? [],
     status: r.status as EvaluationProgramDto["status"],
     rules: (r.rules as Record<string, unknown>) ?? {},
     createdAt: r.created_at as string,
@@ -600,16 +882,23 @@ function mapProgram(r: Record<string, unknown>): EvaluationProgramDto {
 function mapAttempt(r: Record<string, unknown>): EvaluationAttemptDto {
   const prog = r.evaluation_programs as Record<string, unknown> | null;
   const acct = r.trading_accounts as Record<string, unknown> | null;
+  const profile = r.profiles as Record<string, unknown> | null;
   return {
     id: r.id as string,
     programId: r.program_id as string,
     programName: prog ? (prog.name as string) : "",
     programSlug: prog ? (prog.slug as string) : "",
     userId: r.user_id as string,
+    traderName: (profile?.full_name as string | null) ?? null,
+    traderEmail: (profile?.email as string | null) ?? null,
     tradingAccountId: (r.trading_account_id as string | null) ?? null,
     tradingAccountName: acct ? (acct.account_name as string) : null,
     status: r.status as string,
-    startingBalance: r.starting_balance != null ? Number(r.starting_balance) : null,
+    startingBalance: r.starting_balance != null
+      ? Number(r.starting_balance)
+      : prog?.starting_balance != null
+        ? Number(prog.starting_balance)
+        : null,
     startedAt: (r.started_at as string | null) ?? null,
     endsAt: (r.ends_at as string | null) ?? null,
     passedAt: (r.passed_at as string | null) ?? null,
@@ -621,6 +910,17 @@ function mapAttempt(r: Record<string, unknown>): EvaluationAttemptDto {
     lastCheckedAt: (r.last_checked_at as string | null) ?? null,
     adminOverrideBy: (r.admin_override_by as string | null) ?? null,
     adminOverrideReason: (r.admin_override_reason as string | null) ?? null,
+    fundingStatus: (r.funding_status as EvaluationAttemptDto["fundingStatus"]) ?? "NOT_ELIGIBLE",
+    fundingNote: (r.funding_note as string | null) ?? null,
+    provisioningStatus: (r.provisioning_status as EvaluationAttemptDto["provisioningStatus"]) ?? "NOT_STARTED",
+    provisioningError: (r.provisioning_error as string | null) ?? null,
+    programRules: prog && prog.profit_target_percent !== undefined ? {
+      profitTargetPercent: Number(prog.profit_target_percent),
+      maxDailyDrawdownPercent: Number(prog.max_daily_drawdown_percent),
+      maxOverallDrawdownPercent: Number(prog.max_overall_drawdown_percent),
+      minimumTradingDays: Number(prog.minimum_trading_days),
+      durationDays: Number(prog.duration_days),
+    } : null,
     createdAt: r.created_at as string,
   };
 }

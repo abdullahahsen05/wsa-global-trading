@@ -40,16 +40,37 @@ export interface PublicCertificateDto {
 
 function generateVerificationId(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let id = "AX-";
+  let id = "WSA-";
   for (let i = 0; i < 8; i++) {
     id += chars[Math.floor(Math.random() * chars.length)];
   }
   return id;
 }
 
+export async function getCertificateForDownload(
+  certificateId: string,
+  requesterId: string,
+  requesterIsAdmin: boolean,
+): Promise<CertificateDto | null> {
+  const supabase = createAdminClient();
+  let query = supabase
+    .from("evaluation_certificates")
+    .select("*, evaluation_programs(name), profiles(full_name, email)")
+    .eq("id", certificateId);
+  if (!requesterIsAdmin) query = query.eq("user_id", requesterId);
+  const { data, error } = await query.maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  const program = row.evaluation_programs as Record<string, unknown> | null;
+  const profile = row.profiles as Record<string, unknown> | null;
+  const holderName = (profile?.full_name as string | null) ?? (profile?.email as string | null) ?? "Trader";
+  return mapCertificate(row, holderName, (program?.name as string | null) ?? "Evaluation Program");
+}
+
 export async function issueCertificateForPassedAttempt(
   attemptId: string,
-  actorUserId: string
+  actorUserId: string | null
 ): Promise<CertificateDto> {
   const supabase = createAdminClient();
 

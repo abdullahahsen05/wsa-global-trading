@@ -123,14 +123,14 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
     case "SYNC_EVALUATION_ACCOUNT": {
       const attemptId = requireId(job, "attemptId");
       const { adminRunEvaluationCheck } = await import("@/lib/services/evaluationService");
-      const outcome = await adminRunEvaluationCheck(attemptId, actor ?? "WORKER");
+      const outcome = await adminRunEvaluationCheck(attemptId, actor);
       return { status: "SUCCESS", result: { checkResult: outcome.result.result, attemptStatus: outcome.attempt.status } };
     }
 
     case "CHECK_EVALUATION_ATTEMPT": {
       const attemptId = requireId(job, "attemptId");
       const { adminRunEvaluationCheck } = await import("@/lib/services/evaluationService");
-      const outcome = await adminRunEvaluationCheck(attemptId, actor ?? "WORKER");
+      const outcome = await adminRunEvaluationCheck(attemptId, actor);
       return { status: "SUCCESS", result: { checkResult: outcome.result.result } };
     }
 
@@ -139,7 +139,7 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
       const { data } = await supabase
         .from("evaluation_attempts")
         .select("id")
-        .eq("status", "ACTIVE")
+        .in("status", ["ACTIVE", "NEEDS_REVIEW"])
         .limit(500);
       let enqueued = 0;
       for (const a of data ?? []) {

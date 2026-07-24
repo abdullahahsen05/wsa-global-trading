@@ -63,7 +63,11 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
     maxDailyDrawdownPercent: "5",
     maxOverallDrawdownPercent: "10",
     minimumTradingDays: "5",
-    durationDays: "30",
+    durationDays: "14",
+    demoServerName: "",
+    demoAccountType: "",
+    demoLeverage: "100",
+    demoBrokerKeywords: "",
   });
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -84,6 +88,10 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
           maxOverallDrawdownPercent: Number(form.maxOverallDrawdownPercent),
           minimumTradingDays: Number(form.minimumTradingDays),
           durationDays: Number(form.durationDays),
+          demoServerName: form.demoServerName || undefined,
+          demoAccountType: form.demoAccountType || undefined,
+          demoLeverage: Number(form.demoLeverage),
+          demoBrokerKeywords: form.demoBrokerKeywords.split(",").map((value) => value.trim()).filter(Boolean),
         }),
       }),
     onSuccess: () => { setOpen(false); onCreated(); setErr(""); },
@@ -132,6 +140,16 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
               <div><label className={labelCls}>Min Trading Days</label><input type="number" className={numCls} value={form.minimumTradingDays} onChange={set("minimumTradingDays")} min="0" required /></div>
               <div><label className={labelCls}>Duration (Days)</label><input type="number" className={numCls} value={form.durationDays} onChange={set("durationDays")} min="1" required /></div>
             </div>
+            <div className="rounded-2xl border border-line bg-background p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-accent">Demo account requirements</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className={labelCls}>Server name</label><input className={fieldCls} value={form.demoServerName} onChange={set("demoServerName")} placeholder="Broker-Demo" /></div>
+                <div><label className={labelCls}>Account type</label><input className={fieldCls} value={form.demoAccountType} onChange={set("demoAccountType")} placeholder="Forex Hedged USD" /></div>
+                <div><label className={labelCls}>Leverage</label><input type="number" className={numCls} value={form.demoLeverage} onChange={set("demoLeverage")} min="1" max="5000" /></div>
+                <div><label className={labelCls}>Broker keywords</label><input className={fieldCls} value={form.demoBrokerKeywords} onChange={set("demoBrokerKeywords")} placeholder="WSA Global, broker company" /></div>
+              </div>
+              <p className="mt-3 text-xs text-muted">These requirements are shown to traders. Traders create and connect their own fresh demo account; tracking begins only after the account passes the balance and history checks.</p>
+            </div>
             {err && <p className="text-xs text-destructive">{err}</p>}
             <div className="flex justify-end gap-3 pt-2">
               <GhostButton type="button" onClick={() => setOpen(false)}>Cancel</GhostButton>
@@ -147,14 +165,44 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
 // ── Publish / Archive Dialog ──────────────────────────────────
 function UpdateStatusDialog({ program, onUpdated }: { program: EvaluationProgramDto; onUpdated: () => void }) {
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState(program.status);
+  const [form, setForm] = useState({
+    name: program.name,
+    description: program.description ?? "",
+    startingBalance: String(program.startingBalance),
+    profitTargetPercent: String(program.profitTargetPercent),
+    maxDailyDrawdownPercent: String(program.maxDailyDrawdownPercent),
+    maxOverallDrawdownPercent: String(program.maxOverallDrawdownPercent),
+    minimumTradingDays: String(program.minimumTradingDays),
+    durationDays: String(program.durationDays),
+    demoServerName: program.demoServerName ?? "",
+    demoAccountType: program.demoAccountType ?? "",
+    demoLeverage: String(program.demoLeverage),
+    demoBrokerKeywords: program.demoBrokerKeywords.join(", "),
+    status: program.status,
+  });
+  const set = (key: keyof typeof form) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
+    setForm((current) => ({ ...current, [key]: event.target.value }));
   const [err, setErr] = useState("");
   const mutation = useMutation({
     mutationFn: () =>
       apiFetch(`/api/admin/evaluations/programs/${program.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({
+          name: form.name,
+          description: form.description,
+          startingBalance: Number(form.startingBalance),
+          profitTargetPercent: Number(form.profitTargetPercent),
+          maxDailyDrawdownPercent: Number(form.maxDailyDrawdownPercent),
+          maxOverallDrawdownPercent: Number(form.maxOverallDrawdownPercent),
+          minimumTradingDays: Number(form.minimumTradingDays),
+          durationDays: Number(form.durationDays),
+          demoServerName: form.demoServerName || null,
+          demoAccountType: form.demoAccountType || null,
+          demoLeverage: Number(form.demoLeverage),
+          demoBrokerKeywords: form.demoBrokerKeywords.split(",").map((value) => value.trim()).filter(Boolean),
+          status: form.status,
+        }),
       }),
     onSuccess: () => { setOpen(false); onUpdated(); },
     onError: (e: Error) => setErr(e.message),
@@ -162,19 +210,38 @@ function UpdateStatusDialog({ program, onUpdated }: { program: EvaluationProgram
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
       <Dialog.Trigger asChild>
-        <button className="text-xs text-accent underline hover:opacity-80">Edit Status</button>
+        <button className="text-xs text-accent underline hover:opacity-80">Edit rules</button>
       </Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-xl">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%_-_2rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-line bg-surface p-6 shadow-xl">
           <div className="mb-4 flex items-center justify-between">
             <Dialog.Title className="text-sm font-semibold">{program.name}</Dialog.Title>
             <Dialog.Close className="rounded-lg p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
           </div>
           <div className="space-y-4">
+            <div><label className={labelCls}>Name</label><input className={fieldCls} value={form.name} onChange={set("name")} /></div>
+            <div><label className={labelCls}>Description</label><textarea className={textareaCls} value={form.description} onChange={set("description")} /></div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className={labelCls}>Demo balance</label><input type="number" className={numCls} value={form.startingBalance} onChange={set("startingBalance")} min="100" /></div>
+              <div><label className={labelCls}>Profit target %</label><input type="number" className={numCls} value={form.profitTargetPercent} onChange={set("profitTargetPercent")} min="0.1" step="0.1" /></div>
+              <div><label className={labelCls}>Max daily drawdown %</label><input type="number" className={numCls} value={form.maxDailyDrawdownPercent} onChange={set("maxDailyDrawdownPercent")} min="0.1" step="0.1" /></div>
+              <div><label className={labelCls}>Max overall drawdown %</label><input type="number" className={numCls} value={form.maxOverallDrawdownPercent} onChange={set("maxOverallDrawdownPercent")} min="0.1" step="0.1" /></div>
+              <div><label className={labelCls}>Minimum trading days</label><input type="number" className={numCls} value={form.minimumTradingDays} onChange={set("minimumTradingDays")} min="1" /></div>
+              <div><label className={labelCls}>Tracking days</label><input type="number" className={numCls} value={form.durationDays} onChange={set("durationDays")} min="1" /></div>
+            </div>
+            <div className="rounded-2xl border border-line bg-background p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-accent">Demo account requirements</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div><label className={labelCls}>Server name</label><input className={fieldCls} value={form.demoServerName} onChange={set("demoServerName")} /></div>
+                <div><label className={labelCls}>Account type</label><input className={fieldCls} value={form.demoAccountType} onChange={set("demoAccountType")} /></div>
+                <div><label className={labelCls}>Leverage</label><input type="number" className={numCls} value={form.demoLeverage} onChange={set("demoLeverage")} min="1" max="5000" /></div>
+                <div><label className={labelCls}>Broker keywords</label><input className={fieldCls} value={form.demoBrokerKeywords} onChange={set("demoBrokerKeywords")} /></div>
+              </div>
+            </div>
             <div>
               <label className={labelCls}>Status</label>
-              <select className={selectCls} value={status} onChange={(e) => setStatus(e.target.value as EvaluationProgramDto["status"])}>
+              <select className={selectCls} value={form.status} onChange={set("status")}>
                 <option value="DRAFT">DRAFT</option>
                 <option value="PUBLISHED">PUBLISHED</option>
                 <option value="ARCHIVED">ARCHIVED</option>
@@ -291,6 +358,92 @@ function OverrideDialog({ attempt, onOverridden }: { attempt: EvaluationAttemptD
   );
 }
 
+function AttemptDetailDialog({ attempt, onUpdated }: { attempt: EvaluationAttemptDto; onUpdated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [fundingNote, setFundingNote] = useState(attempt.fundingNote ?? "");
+  const metrics = attempt.latestMetrics as Record<string, number | string | null>;
+  const funding = useMutation({
+    mutationFn: (status: "PENDING_REVIEW" | "FUNDED" | "DECLINED") =>
+      apiFetch(`/api/admin/evaluations/attempts/${attempt.id}/funding`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, note: fundingNote || null }),
+      }),
+    onSuccess: () => onUpdated(),
+  });
+  const metric = (label: string, value: string) => (
+    <div className="rounded-xl border border-line bg-background p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-foreground">{value}</p>
+    </div>
+  );
+  return (
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger asChild>
+        <button className="text-xs font-semibold text-foreground underline decoration-accent/60 underline-offset-4">Details</button>
+      </Dialog.Trigger>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[calc(100%_-_2rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-line bg-surface p-6 shadow-2xl">
+          <div className="flex items-start justify-between gap-4 border-b border-line pb-5">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent">Evaluation control room</p>
+              <Dialog.Title className="mt-2 text-2xl font-semibold">{attempt.programName}</Dialog.Title>
+              <p className="mt-1 text-sm text-muted">{attempt.traderName || "Trader"} · {attempt.traderEmail || attempt.userId}</p>
+            </div>
+            <Dialog.Close className="rounded-full border border-line p-2 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <StatusPill tone={STATUS_TONE[attempt.status] ?? "muted"}>{attempt.status}</StatusPill>
+            <StatusPill tone={attempt.provisioningStatus === "CONNECTED" ? "lime" : attempt.provisioningStatus === "FAILED" ? "danger" : "accent"}>{attempt.provisioningStatus}</StatusPill>
+            <StatusPill tone={attempt.fundingStatus === "FUNDED" ? "lime" : attempt.fundingStatus === "DECLINED" ? "danger" : "accent"}>{attempt.fundingStatus}</StatusPill>
+          </div>
+
+          {attempt.provisioningError && (
+            <div className={`mt-4 rounded-xl border p-3 text-sm ${
+              attempt.provisioningStatus === "FAILED"
+                ? "border-danger/30 bg-danger/10 text-danger"
+                : "border-accent/30 bg-accent/5 text-foreground"
+            }`}>
+              {attempt.provisioningError}
+            </div>
+          )}
+
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {metric("Account", attempt.tradingAccountName ?? "Not connected")}
+            {metric("Starting balance", attempt.startingBalance === null ? "—" : `$${attempt.startingBalance.toLocaleString()}`)}
+            {metric("Ends", attempt.endsAt ? new Date(attempt.endsAt).toLocaleDateString() : "Not started")}
+            {metric("Profit", typeof metrics.profitPercent === "number" ? `${Number(metrics.profitPercent).toFixed(2)}%` : "Awaiting sync")}
+            {metric("Daily drawdown", typeof metrics.maxDailyDrawdownPercent === "number" ? `${Number(metrics.maxDailyDrawdownPercent).toFixed(2)}%` : "Awaiting sync")}
+            {metric("Trading days", typeof metrics.tradingDays === "number" ? String(metrics.tradingDays) : "0")}
+          </div>
+
+          {(attempt.passReason || attempt.failReason) && (
+            <div className="mt-5 rounded-xl border border-line bg-background p-4 text-sm text-muted">
+              <strong className="text-foreground">Decision:</strong> {attempt.passReason ?? attempt.failReason}
+            </div>
+          )}
+
+          {attempt.status === "PASSED" && (
+            <div className="mt-5 rounded-2xl border border-accent/30 bg-accent/5 p-4">
+              <h3 className="font-semibold text-foreground">Funding decision</h3>
+              <p className="mt-1 text-xs text-muted">The certificate is issued automatically. Funding remains an explicit admin decision.</p>
+              <textarea className={`${textareaCls} mt-3`} value={fundingNote} onChange={(event) => setFundingNote(event.target.value)} placeholder="Decision note for the trader…" />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <PrimaryButton type="button" onClick={() => funding.mutate("FUNDED")} disabled={funding.isPending}>Mark funded</PrimaryButton>
+                <GhostButton type="button" onClick={() => funding.mutate("PENDING_REVIEW")} disabled={funding.isPending}>Keep in review</GhostButton>
+                <GhostButton type="button" onClick={() => funding.mutate("DECLINED")} disabled={funding.isPending}>Decline funding</GhostButton>
+              </div>
+              {funding.isError && <p className="mt-2 text-xs text-danger">{(funding.error as Error).message}</p>}
+            </div>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 // ── Revoke Certificate Dialog ─────────────────────────────────
 function RevokeCertDialog({ cert, onRevoked }: { cert: CertificateDto; onRevoked: () => void }) {
   const [open, setOpen] = useState(false);
@@ -375,12 +528,6 @@ export default function AdminEvaluationsPage() {
     onSuccess: () => refetchAttempts(),
   });
 
-  const issueMutation = useMutation({
-    mutationFn: (attemptId: string) =>
-      apiFetch(`/api/evaluations/attempts/${attemptId}/certificate`, { method: "POST" }),
-    onSuccess: () => { void refetchAttempts(); void refetchCerts(); },
-  });
-
   const a = analytics as Record<string, unknown> | undefined;
   const tabs: Tab[] = ["programs", "attempts", "certificates", "analytics"];
 
@@ -461,20 +608,16 @@ export default function AdminEvaluationsPage() {
                   headers={["Program", "Trader", "Status", "Account", "Last Checked", "Actions"]}
                   rows={filtered.map((at) => [
                 at.programName,
-                at.userId.slice(0, 8) + "…",
+                <div key="trader"><p className="font-medium">{at.traderName || "Trader"}</p><p className="text-xs text-muted">{at.traderEmail || `${at.userId.slice(0, 8)}…`}</p></div>,
                 <StatusPill key="status" tone={STATUS_TONE[at.status] ?? "muted"}>{at.status}</StatusPill>,
                 at.tradingAccountName ?? <span key="acct" className="text-xs text-muted-foreground">Not linked</span>,
                 at.lastCheckedAt ? new Date(at.lastCheckedAt).toLocaleDateString() : "—",
                 <div key="actions" className="flex flex-wrap items-center gap-2">
+                  <AttemptDetailDialog attempt={at} onUpdated={refetchAttempts} />
                   {!at.tradingAccountId && <LinkAccountDialog attempt={at} onLinked={refetchAttempts} />}
-                  {at.status === "ACTIVE" && (
+                  {["ACTIVE", "NEEDS_REVIEW"].includes(at.status) && at.tradingAccountId && (
                     <button onClick={() => checkMutation.mutate(at.id)} disabled={checkMutation.isPending} className="text-xs text-accent underline hover:opacity-80 disabled:opacity-50">
                       {checkMutation.isPending ? "…" : "Run Check"}
-                    </button>
-                  )}
-                  {at.status === "PASSED" && (
-                    <button onClick={() => issueMutation.mutate(at.id)} disabled={issueMutation.isPending} className="text-xs text-lime-400 underline hover:opacity-80 disabled:opacity-50">
-                      Issue Cert
                     </button>
                   )}
                   {["ACTIVE", "PENDING", "NEEDS_REVIEW"].includes(at.status) && (
@@ -502,7 +645,10 @@ export default function AdminEvaluationsPage() {
                 new Date(c.issuedAt).toLocaleDateString(),
                 <StatusPill key="status" tone={STATUS_TONE[c.status] ?? "muted"}>{c.status}</StatusPill>,
                 c.status === "VALID" ? (
-                  <RevokeCertDialog key="revoke" cert={c} onRevoked={refetchCerts} />
+                  <div key="cert-actions" className="flex gap-2">
+                    <a href={`/api/evaluations/certificates/${c.id}/download`} className="text-xs text-accent underline">Download</a>
+                    <RevokeCertDialog cert={c} onRevoked={refetchCerts} />
+                  </div>
                 ) : (
                   <span key="done" className="text-xs text-muted-foreground">Revoked</span>
                 ),

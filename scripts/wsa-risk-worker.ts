@@ -80,6 +80,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
   let projectingTrades: Promise<void> | null = null;
   let tradeProjectionQueued = false;
   let lastSnapshotAt = 0;
+  let lastEvaluationCheckAt = 0;
 
   const readValues = (): LiveRiskValues => {
     const info = connection.terminalState.accountInformation ?? {};
@@ -306,6 +307,23 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
           console.warn(
             `[risk-worker] ${accountRow.id} blocked by ${result.breachedRuleNames.join(", ")}`,
           );
+        }
+        if (Date.now() - lastEvaluationCheckAt >= 30_000) {
+          lastEvaluationCheckAt = Date.now();
+          const { data: attempt } = await createAdminClient()
+            .from("evaluation_attempts")
+            .select("id")
+            .eq("trading_account_id", accountRow.id)
+            .in("status", ["ACTIVE", "NEEDS_REVIEW"])
+            .limit(1)
+            .maybeSingle();
+          if (attempt) {
+            const { adminRunEvaluationCheck } = await import("../src/lib/services/evaluationService");
+            const outcome = await adminRunEvaluationCheck(attempt.id, null);
+            if (outcome.result.result !== "NO_CHANGE") {
+              console.log(`[risk-worker] evaluation ${attempt.id}: ${outcome.result.result}`);
+            }
+          }
         }
       } while (queued && !stopping);
     })().finally(() => {
