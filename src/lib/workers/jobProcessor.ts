@@ -45,7 +45,7 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
   const actor = job.createdBy;
   const liveRiskProjectionEnabled =
     Boolean(process.env.METAAPI_TOKEN)
-    && process.env.WSA_RISK_ENGINE_ENABLED !== "false";
+    && process.env.WSA_RISK_ENGINE_ENABLED === "true";
   const liveCopyStreamEnabled =
     Boolean(process.env.METAAPI_TOKEN)
     && process.env.WSA_COPY_ENGINE_ENABLED === "true"
@@ -53,16 +53,11 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
 
   switch (job.type) {
     case "SYNC_ACCOUNT": {
-      if (liveRiskProjectionEnabled) {
-        return {
-          status: "SKIPPED",
-          errorCode: "OWNED_BY_LIVE_RISK_STREAM",
-          errorMessage: "The live risk stream already projects account snapshots and trades.",
-        };
-      }
       const accountId = requireId(job, "accountId");
-      const summary = await syncTradingAccount(accountId, actor);
-      if (summary.status === "CONNECTED") {
+      // Explicit fallback jobs run only when the live stream heartbeat is
+      // stale. Keep MetaApi sockets in the worker, never in Vercel.
+      const summary = await syncTradingAccount(accountId, actor, { force: true });
+      if (summary.status === "CONNECTED" && !summary.error) {
         return { status: "SUCCESS", result: { status: summary.status, tradesUpserted: summary.tradesUpserted, snapshotInserted: summary.snapshotInserted } };
       }
       // PENDING (timeout) or DISCONNECTED with error → retry transiently.

@@ -5,6 +5,7 @@ import {
   type LiveRiskValues,
 } from "../src/lib/services/riskEvaluationService";
 import { expireStaleTradingAccounts } from "../src/lib/services/tradingAccountLifecycleService";
+import { publicMetaApiError } from "../src/lib/broker/metaApiErrors";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,8 +26,14 @@ const liveCopyStreamEnabled =
   process.env.WSA_COPY_ENGINE_ENABLED === "true"
   && process.env.BROKER_EXECUTION_ENABLED === "true";
 const streams = new Map<string, StreamHandle>();
+const streamFailureCounts = new Map<string, number>();
+const streamRetryAfter = new Map<string, number>();
 let stopping = false;
 let nextLifecycleScanAt = 0;
+
+function retryDelayMs(failures: number): number {
+  return Math.min(5 * 60_000, 15_000 * (2 ** Math.min(Math.max(failures - 1, 0), 5)));
+}
 
 function utcDayStart(): Date {
   const value = new Date();
@@ -452,6 +459,8 @@ async function reconcileStreams() {
     if (!active.has(accountId)) {
       await stream.close();
       streams.delete(accountId);
+      streamFailureCounts.delete(accountId);
+      streamRetryAfter.delete(accountId);
     }
   }
   for (const accountRow of active.values()) {
@@ -460,15 +469,29 @@ async function reconcileStreams() {
       await stream.evaluateNow();
       continue;
     }
+    if ((streamRetryAfter.get(accountRow.id) ?? 0) > Date.now()) {
+      continue;
+    }
     try {
       console.log(`[risk-worker] connecting account ${accountRow.id}`);
       streams.set(accountRow.id, await openRiskStream(accountRow));
+      streamFailureCounts.delete(accountRow.id);
+      streamRetryAfter.delete(accountRow.id);
     } catch (error) {
+      const failures = (streamFailureCounts.get(accountRow.id) ?? 0) + 1;
+      const retryAt = Date.now() + retryDelayMs(failures);
+      streamFailureCounts.set(accountRow.id, failures);
+      streamRetryAfter.set(accountRow.id, retryAt);
+      const diagnosticMessage = error instanceof Error ? error.message : "unknown error";
+      const publicMessage = publicMetaApiError(error);
       console.error(
-        `[risk-worker] stream failed for ${accountRow.id}: ${
-          error instanceof Error ? error.message : "unknown error"
-        }`,
+        `[risk-worker] stream failed for ${accountRow.id}; retrying at ${new Date(retryAt).toISOString()}: ${diagnosticMessage}`,
       );
+      await supabase
+        .from("trading_accounts")
+        .update({ sync_error: publicMessage })
+        .eq("id", accountRow.id)
+        .in("status", ["CONNECTED", "RESTRICTED"]);
     }
   }
 }
@@ -477,6 +500,8 @@ async function shutdown() {
   stopping = true;
   await Promise.allSettled([...streams.values()].map((stream) => stream.close()));
   streams.clear();
+  streamFailureCounts.clear();
+  streamRetryAfter.clear();
 }
 
 async function main() {

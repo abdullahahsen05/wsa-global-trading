@@ -68,20 +68,18 @@ function TradesContent() {
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Sync failed");
 
-      type SyncResultItem = { tradesUpserted?: number; openPositions?: number; error?: string };
+      type SyncResultItem = {
+        mode?: "LIVE" | "QUEUED";
+        message?: string;
+      };
       const results: SyncResultItem[] = json.data?.results ?? [];
-      const totalTrades = results.reduce((sum, r) => sum + (r.tradesUpserted ?? 0), 0);
-      const totalOpen = results.reduce((sum, r) => sum + (r.openPositions ?? 0), 0);
-      const anyError = results.find(r => r.error);
-
-      if (anyError) {
-        setSyncResult({ type: "error", text: anyError.error ?? "Unknown sync error" });
-      } else {
-        setSyncResult({
-          type: "success",
-          text: `Synced ${totalOpen} open position${totalOpen !== 1 ? "s" : ""} and ${totalTrades} trade record${totalTrades !== 1 ? "s" : ""}.`,
-        });
-      }
+      const queued = results.filter((result) => result.mode === "QUEUED").length;
+      setSyncResult({
+        type: "success",
+        text: queued
+          ? `${queued} account${queued === 1 ? "" : "s"} queued for broker synchronization. This ledger updates automatically.`
+          : "Live trade synchronization is active. The latest ledger data has been loaded.",
+      });
       await queryClient.invalidateQueries({ queryKey: ["trades"] });
     } catch (err) {
       setSyncResult({ type: "error", text: err instanceof Error ? err.message : "Sync failed" });

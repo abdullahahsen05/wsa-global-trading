@@ -8,6 +8,7 @@ import { writeAuditLog } from '@/lib/services/auditService';
 import { evaluateAndPersistRiskEvents } from '@/lib/services/riskEvaluationService';
 import { createNotification } from '@/lib/services/notificationService';
 import { resolveAccountLifecycleStatus } from '@/lib/accounts/lifecycle';
+import { publicMetaApiError } from '@/lib/broker/metaApiErrors';
 
 // MetaAPI can return dates as Date objects, ISO strings, or Unix timestamps
 // depending on the build variant. Always use this helper.
@@ -152,7 +153,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function liveRiskProjectionEnabled(): boolean {
   return Boolean(process.env.METAAPI_TOKEN)
-    && process.env.WSA_RISK_ENGINE_ENABLED !== 'false';
+    && process.env.WSA_RISK_ENGINE_ENABLED === 'true';
 }
 
 function readString(value: unknown): string | undefined {
@@ -507,10 +508,11 @@ async function runMetaApiSync(params: {
 
   } catch (error) {
     const rawMsg = error instanceof Error ? error.message : String(error);
-    const safeMsg = sanitizeMessage(rawMsg, credentials);
+    const diagnosticMessage = sanitizeMessage(rawMsg, credentials);
+    const safeMsg = publicMetaApiError(diagnosticMessage);
     console.error('[SYNC_ERROR]', {
       tradingAccountId: accountId,
-      message: safeMsg,
+      message: diagnosticMessage,
     });
     const preservedConnectedStatus = await markFailed(
       supabase,
@@ -546,6 +548,7 @@ async function runMetaApiSync(params: {
 export async function syncTradingAccount(
   accountId: string,
   actorUserId: string | null,
+  options?: { force?: boolean },
 ): Promise<SyncSummary> {
   const supabase = createAdminClient();
 
@@ -571,6 +574,7 @@ export async function syncTradingAccount(
 
   if (
     liveRiskProjectionEnabled()
+    && !options?.force
     && (account.status === 'CONNECTED' || account.status === 'RESTRICTED')
   ) {
     await supabase
@@ -1054,8 +1058,9 @@ export async function refreshAccountTrades(
       return { accountId, providerAccountId: metaAccount.id, snapshotInserted: true, openPositions: positions.length, tradesUpserted, balance, equity, currency };
 
     } catch (error) {
-      const msg = (error instanceof Error ? error.message : String(error)).slice(0, 400);
-      console.error('[REFRESH_ERROR]', { tradingAccountId: accountId, message: msg });
+      const diagnosticMessage = (error instanceof Error ? error.message : String(error)).slice(0, 400);
+      const msg = publicMetaApiError(diagnosticMessage);
+      console.error('[REFRESH_ERROR]', { tradingAccountId: accountId, message: diagnosticMessage });
       await supabase.from('trading_accounts').update({ sync_error: msg }).eq('id', accountId);
       return { accountId, providerAccountId: account.provider_account_id, snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: msg };
 

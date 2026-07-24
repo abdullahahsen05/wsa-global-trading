@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 import { jsonFail, jsonOk } from '@/lib/api/envelope';
 import { requireTrader, AuthError } from '@/lib/auth/session';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { refreshAccountTrades } from '@/lib/services/brokerSyncService';
+import { enqueueJob } from '@/lib/services/backgroundJobService';
 import { z } from 'zod';
 
 const bodySchema = z.object({
@@ -29,12 +29,14 @@ export async function POST(request: Request) {
       body = {};
     }
 
-    // Fetch the trader's accounts that have a MetaAPI provider_account_id.
-    // We select extra columns so logs can show exactly what account will be synced.
+    // Vercel must not create long-lived MetaApi websocket sessions. The AWS
+    // stream worker owns real-time projection; a stale account gets a bounded
+    // worker-side fallback job instead.
     let accountQuery = supabase
       .from('trading_accounts')
       .select('id, status, provider_account_id, last_synced_at')
       .eq('user_id', user.id)
+      .in('status', ['CONNECTED', 'RESTRICTED'])
       .not('provider_account_id', 'is', null);
 
     if (body.accountId) {
@@ -68,12 +70,45 @@ export async function POST(request: Request) {
     }
 
     const results = [];
+    const liveCutoff = Date.now() - 90_000;
     for (const account of accounts) {
-      const summary = await refreshAccountTrades(account.id, user.id);
-      results.push(summary);
+      const lastSyncedAt = account.last_synced_at
+        ? new Date(account.last_synced_at).getTime()
+        : 0;
+      if (Number.isFinite(lastSyncedAt) && lastSyncedAt >= liveCutoff) {
+        results.push({
+          accountId: account.id,
+          mode: 'LIVE',
+          lastSyncedAt: account.last_synced_at,
+          message: 'Live synchronization is active. The ledger has been refreshed.',
+        });
+        continue;
+      }
+
+      const job = await enqueueJob({
+        type: 'SYNC_ACCOUNT',
+        payload: { accountId: account.id },
+        uniqueKey: `SYNC_ACCOUNT:${account.id}`,
+        createdBy: user.id,
+        priority: 50,
+      });
+      results.push({
+        accountId: account.id,
+        mode: 'QUEUED',
+        jobStatus: job.status,
+        lastSyncedAt: account.last_synced_at,
+        message: 'Broker synchronization was queued. Trades will appear automatically after the worker reconnects.',
+      });
     }
 
-    return jsonOk({ results });
+    const queued = results.some((result) => result.mode === 'QUEUED');
+    return jsonOk({
+      results,
+      automatic: true,
+      message: queued
+        ? 'Some accounts were stale and have been queued for background synchronization.'
+        : 'Live trade synchronization is active.',
+    }, { status: queued ? 202 : 200 });
 
   } catch (err) {
     if (err instanceof AuthError) return jsonFail(err.code, err.message, err.statusCode);

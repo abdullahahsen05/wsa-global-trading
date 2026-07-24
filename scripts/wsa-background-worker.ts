@@ -20,7 +20,7 @@ const staleMinutes = Math.max(5, Number.parseInt(process.env.WORKER_STALE_JOB_MI
 const maxJobs = Math.min(Math.max(Number.parseInt(process.env.WORKER_MAX_JOBS_PER_RUN ?? "5", 10) || 5, 1), 20);
 const riskStreamOwnsAccountProjection =
   Boolean(process.env.METAAPI_TOKEN)
-  && process.env.WSA_RISK_ENGINE_ENABLED !== "false";
+  && process.env.WSA_RISK_ENGINE_ENABLED === "true";
 const recurringAccountSyncEnabled =
   process.env.WSA_BACKGROUND_ACCOUNT_SYNC_ENABLED === "true"
   || !riskStreamOwnsAccountProjection;
