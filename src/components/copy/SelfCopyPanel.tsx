@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Play, Repeat, Trash2 } from "lucide-react";
+import { Repeat, Trash2 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { SelectField, TextField } from "@/components/app/FormFields";
 import {
@@ -19,7 +19,7 @@ interface SelfCopyRelationship {
   sourceStatus: string;
   followerAccountName: string;
   followerStatus: string;
-  status: "SIMULATION" | "PAUSED";
+  status: "LIVE" | "PAUSED";
   copySettings: {
     copyMode: "BALANCE_RATIO" | "LOT_MULTIPLIER" | "FIXED_LOT";
     maxLot: number | null;
@@ -61,12 +61,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
         body: input.body ? JSON.stringify(input.body) : undefined,
       }),
     onSuccess: async (data, input) => {
-      setNotice({
-        tone: "success",
-        text: input.label === "Simulation"
-          ? String(data.message ?? "Simulation completed without broker execution.")
-          : `${input.label} completed.`,
-      });
+      setNotice({ tone: "success", text: String(data.message ?? `${input.label} completed.`) });
       await queryClient.invalidateQueries({ queryKey: ["self-copy-relationships"] });
     },
     onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
@@ -110,7 +105,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
         <div>
           <h2 className="text-lg font-semibold text-foreground">Self Copy</h2>
           <p className="mt-1 text-sm leading-6 text-muted">
-            Copy a synced trade from one of your accounts to another in simulation mode. Live broker execution remains disabled.
+            Copy real positions between your connected accounts. Opens, changes, partial closes, and full closes are synchronized; copied strategy trades can continue through this chain.
           </p>
         </div>
       </div>
@@ -127,7 +122,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
 
       <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_1.3fr]">
         <form className="space-y-4 rounded-2xl border border-line bg-background p-4" onSubmit={create}>
-          <h3 className="font-semibold text-foreground">Create simulation setup</h3>
+          <h3 className="font-semibold text-foreground">Create live self-copy setup</h3>
           <div className="grid gap-4 sm:grid-cols-2">
             <SelectField label="Source account" value={sourceAccountId} onChange={(event) => setSourceAccountId(event.target.value)}>
               <option value="">Select source…</option>
@@ -166,7 +161,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
             type="submit"
             disabled={action.isPending || !sourceAccountId || !followerAccountId || sourceAccountId === followerAccountId}
           >
-            Save simulation setup
+            Enable live self-copy
           </PrimaryButton>
           {eligibleAccounts.length < 2 ? (
             <p className="text-xs text-muted">Connect or sync at least two of your own accounts to create self-copy.</p>
@@ -175,7 +170,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
 
         <div>
           {(relationships.data?.relationships.length ?? 0) === 0 ? (
-            <EmptyState title="No self-copy setups" description="Your simulation-only account relationships will appear here." />
+            <EmptyState title="No self-copy setups" description="Your live account-to-account relationships will appear here." />
           ) : (
             <div className="space-y-3">
               {(relationships.data?.relationships ?? []).map((relationship) => (
@@ -191,34 +186,22 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
                         {relationship.copySettings.reverseCopy ? " · reversed" : ""}
                       </p>
                     </div>
-                    <StatusPill tone={relationship.status === "SIMULATION" ? "accent" : "muted"}>
+                    <StatusPill tone={relationship.status === "LIVE" ? "lime" : "muted"}>
                       {relationship.status}
                     </StatusPill>
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
                     <GhostButton
                       type="button"
-                      disabled={action.isPending || relationship.status !== "SIMULATION"}
-                      onClick={() => action.mutate({
-                        url: `/api/copy-trading/self-copy/${relationship.id}/simulate`,
-                        method: "POST",
-                        label: "Simulation",
-                      })}
-                    >
-                      <Play className="mr-2 inline-block h-4 w-4" />
-                      Run safe simulation
-                    </GhostButton>
-                    <GhostButton
-                      type="button"
                       disabled={action.isPending}
                       onClick={() => action.mutate({
                         url: `/api/copy-trading/self-copy/${relationship.id}`,
                         method: "PATCH",
-                        body: { status: relationship.status === "SIMULATION" ? "PAUSED" : "SIMULATION" },
-                        label: relationship.status === "SIMULATION" ? "Pause" : "Resume",
+                        body: { status: relationship.status === "LIVE" ? "PAUSED" : "LIVE" },
+                        label: relationship.status === "LIVE" ? "Pause" : "Resume",
                       })}
                     >
-                      {relationship.status === "SIMULATION" ? "Pause" : "Resume"}
+                      {relationship.status === "LIVE" ? "Pause" : "Resume"}
                     </GhostButton>
                     <GhostButton
                       type="button"

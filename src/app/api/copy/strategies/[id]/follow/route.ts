@@ -42,16 +42,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       parsed.data.followerAccountId,
       id,
     );
-    if (entitlements.length === 0) {
+    const entitledTier = entitlements.find((entry) => entry.tier === parsed.data.tier);
+    if (!entitledTier) {
       return jsonFail(
         "COPY_ENTITLEMENT_REQUIRED",
-        "Purchase this strategy's monthly subscription for the selected account before following it.",
+        `Purchase this strategy's ${parsed.data.tier === "PREMIUM" ? "Premium / Fast" : "Standard"} monthly subscription for the selected account before following it.`,
         403,
       );
     }
 
     const result = await followStrategy(trader.id, id, {
       followerAccountId: parsed.data.followerAccountId,
+      tier: parsed.data.tier,
       scalingMode: parsed.data.scalingMode,
       riskMultiplier: parsed.data.riskMultiplier,
       fixedLot: parsed.data.fixedLot,

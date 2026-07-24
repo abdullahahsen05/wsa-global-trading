@@ -41,7 +41,8 @@ export default function AdminCopyPage() {
     name: "",
     description: "",
     masterAccountId: "",
-    monthlyPrice: "10",
+    standardMonthlyPrice: "10",
+    premiumMonthlyPrice: "15",
     currency: "USD",
   });
 
@@ -69,7 +70,8 @@ export default function AdminCopyPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...strategyForm,
-        monthlyPrice: Number(strategyForm.monthlyPrice),
+        standardMonthlyPrice: Number(strategyForm.standardMonthlyPrice),
+        premiumMonthlyPrice: Number(strategyForm.premiumMonthlyPrice),
         riskMultiplier: 1,
         defaultScalingMode: "EQUITY_PROPORTIONAL",
       }),
@@ -77,7 +79,7 @@ export default function AdminCopyPage() {
     onSuccess: () => {
       refresh();
       setStrategyOpen(false);
-      setStrategyForm({ name: "", description: "", masterAccountId: "", monthlyPrice: "10", currency: "USD" });
+      setStrategyForm({ name: "", description: "", masterAccountId: "", standardMonthlyPrice: "10", premiumMonthlyPrice: "15", currency: "USD" });
       setNotice({ tone: "ok", text: "Draft strategy created. Publish it only after its master account is connected." });
     },
     onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
@@ -152,7 +154,12 @@ export default function AdminCopyPage() {
           {strategies.map((strategy) => (
             <div key={strategy.id} className="grid gap-4 rounded-2xl border border-line bg-background p-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
               <div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-foreground">{strategy.name}</p><StatusPill tone={strategy.engineStatus === "LIVE" ? "lime" : strategy.engineStatus === "ERROR" ? "danger" : "accent"}>{strategy.engineStatus}</StatusPill></div><p className="mt-1 text-sm text-muted">Master: {strategy.masterAccountName ?? "Unknown"} · {strategy.followerCount} follower(s)</p>{strategy.engineError ? <p className="mt-2 text-xs text-danger">{strategy.engineError}</p> : null}</div>
-              <p className="font-semibold text-foreground">{formatMoney({ amount: strategy.monthlyPrice, currency: strategy.currency })}<span className="text-xs font-normal text-muted"> / month</span></p>
+              <p className="font-semibold text-foreground">
+                {formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} standard
+                <span className="text-xs font-normal text-muted"> / </span>
+                {formatMoney({ amount: strategy.premiumMonthlyPrice, currency: strategy.currency })} premium
+              </p>
+              <p className="mt-1 text-xs text-muted">Dispatch targets: {strategy.standardDelayMs / 1000}s standard · {strategy.premiumDelayMs / 1000}s premium</p>
               <div className="flex gap-2">
                 {strategy.engineStatus !== "LIVE" && strategy.status !== "ARCHIVED" ? <PrimaryButton type="button" disabled={strategyAction.isPending} onClick={() => strategyAction.mutate({ id: strategy.id, action: "publish" })}><Repeat className="mr-2 inline h-4 w-4" />Publish live</PrimaryButton> : null}
                 {strategy.engineStatus === "LIVE" ? <GhostButton type="button" disabled={strategyAction.isPending} onClick={() => window.confirm("Archive this strategy and close its copied follower positions?") && strategyAction.mutate({ id: strategy.id, action: "archive" })}>Archive & close</GhostButton> : null}
@@ -189,7 +196,12 @@ export default function AdminCopyPage() {
         <Field label="Strategy name" value={strategyForm.name} onChange={(value) => setStrategyForm((current) => ({ ...current, name: value }))} />
         <Field label="Description" value={strategyForm.description} onChange={(value) => setStrategyForm((current) => ({ ...current, description: value }))} />
         <label className="space-y-2 text-sm font-semibold text-foreground">Master account<select className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm" value={strategyForm.masterAccountId} onChange={(event) => setStrategyForm((current) => ({ ...current, masterAccountId: event.target.value }))}><option value="">Select connected master...</option>{connectedMasters.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName}</option>)}</select></label>
-        <div className="grid grid-cols-2 gap-3"><Field label="Monthly price" type="number" value={strategyForm.monthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, monthlyPrice: value }))} /><Field label="Currency" value={strategyForm.currency} onChange={(value) => setStrategyForm((current) => ({ ...current, currency: value.toUpperCase() }))} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Standard monthly price" type="number" value={strategyForm.standardMonthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, standardMonthlyPrice: value }))} />
+          <Field label="Premium / fast monthly price" type="number" value={strategyForm.premiumMonthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, premiumMonthlyPrice: value }))} />
+        </div>
+        <Field label="Currency" value={strategyForm.currency} onChange={(value) => setStrategyForm((current) => ({ ...current, currency: value.toUpperCase() }))} />
+        <p className="text-xs leading-5 text-muted">Standard dispatches at about 2.5 seconds; Premium/Fast targets 250 ms. Broker and network latency are additional.</p>
         <PrimaryButton type="button" disabled={createStrategy.isPending || !strategyForm.masterAccountId} onClick={() => createStrategy.mutate()}>{createStrategy.isPending ? "Creating..." : "Create draft"}</PrimaryButton>
       </SimpleDialog>
     </WorkspacePage>

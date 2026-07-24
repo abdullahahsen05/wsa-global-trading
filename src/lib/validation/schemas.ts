@@ -233,7 +233,8 @@ export const copyStrategyCreateSchema = z.object({
   maxOpenCopiedTrades: z.number().int().min(0).max(10000).optional().nullable(),
   symbolAllowlist: upperStringArray.optional().nullable(),
   symbolBlocklist: upperStringArray.optional().nullable(),
-  monthlyPrice: z.number().positive().max(100000),
+  standardMonthlyPrice: z.number().positive().max(100000),
+  premiumMonthlyPrice: z.number().positive().max(100000),
   currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).default("USD"),
 });
 
@@ -250,6 +251,8 @@ export const copyStrategyUpdateSchema = z
     maxOpenCopiedTrades: z.number().int().min(0).max(10000).optional().nullable(),
     symbolAllowlist: upperStringArray.optional().nullable(),
     symbolBlocklist: upperStringArray.optional().nullable(),
+    standardMonthlyPrice: z.number().positive().max(100000).optional(),
+    premiumMonthlyPrice: z.number().positive().max(100000).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "No changes provided" });
 
@@ -287,6 +290,7 @@ export const copyAccountRuleSchema = z.object({
 
 export const copyFollowSchema = z.object({
   followerAccountId: z.string().uuid(),
+  tier: z.enum(["NORMAL", "PREMIUM"]),
   consentAccepted: z.literal(true),
   scalingMode: scalingModeEnum.optional(),
   riskMultiplier: z.number().positive().max(100).optional(),
@@ -367,7 +371,7 @@ export const selfCopyCreateSchema = z.object({
 
 export const selfCopyUpdateSchema = z
   .object({
-    status: z.enum(["SIMULATION", "PAUSED", "ARCHIVED"]).optional(),
+    status: z.enum(["LIVE", "PAUSED", "ARCHIVED"]).optional(),
     copySettings: copyFollowerSettingsSchema.optional(),
   })
   .refine((value) => value.status !== undefined || value.copySettings !== undefined, {

@@ -7,8 +7,6 @@ import {
   listSelfCopyRelationships,
 } from "@/lib/services/selfCopyService";
 import {
-  expireStaleEntitlements,
-  getActiveCopyEntitlements,
   getPlatformSubscriptionAccess,
 } from "@/lib/services/billingService";
 
@@ -29,23 +27,11 @@ export async function POST(request: Request) {
     if (!parsed.success) {
       return jsonFail("VALIDATION_ERROR", parsed.error.issues.map((issue) => issue.message).join(", "), 400);
     }
-    await expireStaleEntitlements().catch(() => {});
     const platformAccess = await getPlatformSubscriptionAccess(trader.id);
     if (platformAccess.status !== "ACTIVE") {
       return jsonFail(
         "PLATFORM_SUBSCRIPTION_REQUIRED",
         "Activate your platform subscription before creating self-copy.",
-        403,
-      );
-    }
-    const entitlements = await getActiveCopyEntitlements(
-      trader.id,
-      parsed.data.followerAccountId,
-    );
-    if (entitlements.length === 0) {
-      return jsonFail(
-        "COPY_ENTITLEMENT_REQUIRED",
-        "The follower account needs an active copy tier before creating self-copy.",
         403,
       );
     }

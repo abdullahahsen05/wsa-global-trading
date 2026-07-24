@@ -215,6 +215,12 @@ interface StrategyRow {
   engine_error: string | null;
   engine_heartbeat_at: string | null;
   monthly_price: number | string;
+  standard_monthly_price: number | string;
+  premium_monthly_price: number | string;
+  standard_billing_product_id: string | null;
+  premium_billing_product_id: string | null;
+  standard_delay_ms: number;
+  premium_delay_ms: number;
   currency: string;
   billing_product_id: string | null;
   published_at: string | null;
@@ -246,6 +252,16 @@ function mapStrategy(
     engineError: row.engine_error,
     engineHeartbeatAt: row.engine_heartbeat_at,
     monthlyPrice: Number(row.monthly_price),
+    standardMonthlyPrice: Number(row.standard_monthly_price),
+    premiumMonthlyPrice: Number(row.premium_monthly_price),
+    standardBillingProductCode: row.standard_billing_product_id
+      ? `COPY_STRATEGY_${row.id.replaceAll("-", "").toUpperCase()}_STANDARD`
+      : null,
+    premiumBillingProductCode: row.premium_billing_product_id
+      ? `COPY_STRATEGY_${row.id.replaceAll("-", "").toUpperCase()}_PREMIUM`
+      : null,
+    standardDelayMs: row.standard_delay_ms,
+    premiumDelayMs: row.premium_delay_ms,
     currency: row.currency,
     billingProductCode: row.billing_product_id
       ? `COPY_STRATEGY_${row.id.replaceAll("-", "").toUpperCase()}`
@@ -256,7 +272,7 @@ function mapStrategy(
 }
 
 const STRATEGY_COLS =
-  "id, name, description, master_account_id, status, mode, live_enabled, risk_multiplier, default_scaling_mode, max_follower_lot, max_open_copied_trades, symbol_allowlist, symbol_blocklist, engine_status, engine_error, engine_heartbeat_at, monthly_price, currency, billing_product_id, published_at, created_at";
+  "id, name, description, master_account_id, status, mode, live_enabled, risk_multiplier, default_scaling_mode, max_follower_lot, max_open_copied_trades, symbol_allowlist, symbol_blocklist, engine_status, engine_error, engine_heartbeat_at, monthly_price, standard_monthly_price, premium_monthly_price, standard_billing_product_id, premium_billing_product_id, standard_delay_ms, premium_delay_ms, currency, billing_product_id, published_at, created_at";
 
 export async function listCopyStrategies(): Promise<CopyStrategyDto[]> {
   const supabase = createAdminClient();
@@ -307,7 +323,8 @@ export async function createCopyStrategy(
     maxOpenCopiedTrades?: number | null;
     symbolAllowlist?: string[] | null;
     symbolBlocklist?: string[] | null;
-    monthlyPrice: number;
+    standardMonthlyPrice: number;
+    premiumMonthlyPrice: number;
     currency: string;
   },
   actorUserId: string,
@@ -335,7 +352,9 @@ export async function createCopyStrategy(
       max_open_copied_trades: input.maxOpenCopiedTrades ?? null,
       symbol_allowlist: input.symbolAllowlist ?? null,
       symbol_blocklist: input.symbolBlocklist ?? null,
-      monthly_price: input.monthlyPrice,
+      monthly_price: input.standardMonthlyPrice,
+      standard_monthly_price: input.standardMonthlyPrice,
+      premium_monthly_price: input.premiumMonthlyPrice,
       currency: input.currency,
       mode: "LIVE",
       live_enabled: false,
@@ -1280,7 +1299,9 @@ export async function executeCopyForEvent(eventId: string, actorUserId: string |
     .in("id", accountIds);
   const statusByAccount = new Map((accountRows ?? []).map((a) => [a.id, a.status as string]));
 
-  await inParallelBatches(followers, 12, async (f) => {
+  const executeFollower = async (
+    f: Awaited<ReturnType<typeof loadActiveFollowers>>[number],
+  ) => {
     const followerSymbol = mapFollowerSymbol(ev.symbol, f.symbol_mapping);
     const followerSide = reverseFollowerSide(ev.side, f.reverse_copy);
     const baseLog = {
@@ -1536,7 +1557,27 @@ export async function executeCopyForEvent(eventId: string, actorUserId: string |
       });
       summary.failed++;
     }
-  });
+  };
+
+  const premiumFollowers = followers.filter((f) => f.tier === "PREMIUM");
+  const standardFollowers = followers.filter((f) => f.tier !== "PREMIUM");
+  const premiumDelay = Math.max(0, strategy.premium_delay_ms);
+  const standardDelay = Math.max(premiumDelay, strategy.standard_delay_ms);
+
+  await Promise.all([
+    premiumFollowers.length
+      ? (async () => {
+          if (premiumDelay > 0) await new Promise((resolve) => setTimeout(resolve, premiumDelay));
+          await inParallelBatches(premiumFollowers, 12, executeFollower);
+        })()
+      : Promise.resolve(),
+    standardFollowers.length
+      ? (async () => {
+          if (standardDelay > 0) await new Promise((resolve) => setTimeout(resolve, standardDelay));
+          await inParallelBatches(standardFollowers, 12, executeFollower);
+        })()
+      : Promise.resolve(),
+  ]);
 
   return summary;
 }
@@ -1567,6 +1608,12 @@ export interface TraderStrategyDto {
   riskMultiplier: number;
   defaultScalingMode: ScalingMode;
   monthlyPrice: number;
+  standardMonthlyPrice: number;
+  premiumMonthlyPrice: number;
+  standardBillingProductCode: string;
+  premiumBillingProductCode: string;
+  standardDelayMs: number;
+  premiumDelayMs: number;
   currency: string;
   billingProductCode: string;
   engineStatus: "LIVE";
@@ -1576,11 +1623,12 @@ export async function listActiveStrategiesForTrader(): Promise<TraderStrategyDto
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("copy_strategies")
-    .select("id, name, description, mode, risk_multiplier, default_scaling_mode, monthly_price, currency, engine_status, billing_product_id")
+    .select("id, name, description, mode, risk_multiplier, default_scaling_mode, monthly_price, standard_monthly_price, premium_monthly_price, standard_billing_product_id, premium_billing_product_id, standard_delay_ms, premium_delay_ms, currency, engine_status, billing_product_id")
     .eq("status", "ACTIVE")
     .eq("live_enabled", true)
     .eq("engine_status", "LIVE")
-    .not("billing_product_id", "is", null)
+    .not("standard_billing_product_id", "is", null)
+    .not("premium_billing_product_id", "is", null)
     .order("created_at", { ascending: false })
     .limit(200);
   return (data ?? []).map((s) => ({
@@ -1591,6 +1639,12 @@ export async function listActiveStrategiesForTrader(): Promise<TraderStrategyDto
     riskMultiplier: Number(s.risk_multiplier),
     defaultScalingMode: s.default_scaling_mode as ScalingMode,
     monthlyPrice: Number(s.monthly_price),
+    standardMonthlyPrice: Number(s.standard_monthly_price),
+    premiumMonthlyPrice: Number(s.premium_monthly_price),
+    standardBillingProductCode: `COPY_STRATEGY_${s.id.replaceAll("-", "").toUpperCase()}_STANDARD`,
+    premiumBillingProductCode: `COPY_STRATEGY_${s.id.replaceAll("-", "").toUpperCase()}_PREMIUM`,
+    standardDelayMs: s.standard_delay_ms,
+    premiumDelayMs: s.premium_delay_ms,
     currency: s.currency,
     billingProductCode: `COPY_STRATEGY_${s.id.replaceAll("-", "").toUpperCase()}`,
     engineStatus: "LIVE" as const,
@@ -1602,7 +1656,7 @@ export async function listMySubscriptions(traderUserId: string): Promise<CopyFol
   const { data, error } = await supabase
     .from("copy_strategy_followers")
     .select(
-      "id, strategy_id, follower_account_id, trader_id, status, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at, copy_strategies(name), trading_accounts!follower_account_id(account_name)",
+      "id, strategy_id, follower_account_id, trader_id, status, tier, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at, copy_strategies(name), trading_accounts!follower_account_id(account_name)",
     )
     .eq("trader_id", traderUserId)
     .order("created_at", { ascending: false })
@@ -1655,6 +1709,7 @@ export async function followStrategy(
   strategyId: string,
   input: {
     followerAccountId: string;
+    tier: "NORMAL" | "PREMIUM";
     scalingMode?: ScalingMode;
     riskMultiplier?: number;
     fixedLot?: number;
@@ -1694,6 +1749,7 @@ export async function followStrategy(
         strategy_id: strategyId,
         follower_account_id: input.followerAccountId,
         trader_id: traderUserId,
+        tier: input.tier,
         status: "ACTIVE",
         scaling_mode: input.scalingMode ?? null,
         risk_multiplier: input.riskMultiplier ?? null,

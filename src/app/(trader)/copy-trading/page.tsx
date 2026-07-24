@@ -34,8 +34,9 @@ export default function CopyTradingPage() {
 function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSummaryDto }) {
   const queryClient = useQueryClient();
   const [accountByStrategy, setAccountByStrategy] = useState<Record<string, string>>({});
-  const [checkout, setCheckout] = useState<{ strategy: TraderStrategyDto; accountId: string } | null>(null);
-  const [follow, setFollow] = useState<{ strategy: TraderStrategyDto; accountId: string } | null>(null);
+  const [tierByStrategy, setTierByStrategy] = useState<Record<string, "NORMAL" | "PREMIUM">>({});
+  const [checkout, setCheckout] = useState<{ strategy: TraderStrategyDto; accountId: string; tier: "NORMAL" | "PREMIUM" } | null>(null);
+  const [follow, setFollow] = useState<{ strategy: TraderStrategyDto; accountId: string; tier: "NORMAL" | "PREMIUM" } | null>(null);
   const [consent, setConsent] = useState(false);
   const [notice, setNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
@@ -63,7 +64,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
       return api(`/api/copy/strategies/${follow.strategy.id}/follow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ followerAccountId: follow.accountId, consentAccepted: true }),
+        body: JSON.stringify({ followerAccountId: follow.accountId, tier: follow.tier, consentAccepted: true }),
       });
     },
     onSuccess: () => { refresh(); setFollow(null); setConsent(false); setNotice({ tone: "ok", text: "WSA live copying is active. New master trades, changes, and closes will be synchronized automatically." }); },
@@ -86,14 +87,25 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
       <div className="grid gap-4 xl:grid-cols-2">
         {strategies.map((strategy) => {
           const accountId = accountByStrategy[strategy.id] ?? connectedAccounts[0]?.accountId ?? "";
+          const tier = tierByStrategy[strategy.id] ?? "NORMAL";
           const access = entitlementMap.get(`${strategy.id}:${accountId}`);
           const activeFollower = subscriptions.find((subscription) => subscription.strategyId === strategy.id && subscription.followerAccountId === accountId && subscription.status !== "REVOKED");
           return <Panel key={strategy.id} className="flex h-full flex-col">
             <div className="flex items-start justify-between gap-3"><div><div className="flex items-center gap-2"><Repeat className="h-4 w-4 text-lime" /><h2 className="text-lg font-semibold text-foreground">{strategy.name}</h2></div><p className="mt-2 text-sm leading-6 text-muted">{strategy.description || "Live WSA strategy."}</p></div><StatusPill tone="lime">LIVE</StatusPill></div>
-            <div className="mt-5 grid grid-cols-2 gap-3 rounded-2xl border border-line bg-background p-4"><div><p className="text-xs uppercase tracking-widest text-muted">Subscription</p><p className="mt-1 font-semibold text-foreground">{formatMoney({ amount: strategy.monthlyPrice, currency: strategy.currency })} / month</p></div><div><p className="text-xs uppercase tracking-widest text-muted">Scaling</p><p className="mt-1 font-semibold text-foreground">{strategy.defaultScalingMode.replaceAll("_", " ")}</p></div></div>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              {(["NORMAL", "PREMIUM"] as const).map((option) => {
+                const premium = option === "PREMIUM";
+                const selected = tier === option;
+                return <button key={option} type="button" onClick={() => setTierByStrategy((current) => ({ ...current, [strategy.id]: option }))} className={`rounded-2xl border p-4 text-left transition ${selected ? "border-accent bg-accent/10" : "border-line bg-background hover:border-accent/40"}`}>
+                  <p className="text-xs uppercase tracking-widest text-muted">{premium ? "Premium / Fast" : "Standard"}</p>
+                  <p className="mt-1 font-semibold text-foreground">{formatMoney({ amount: premium ? strategy.premiumMonthlyPrice : strategy.standardMonthlyPrice, currency: strategy.currency })} / month</p>
+                  <p className="mt-2 text-xs text-muted">Dispatch target: {premium ? `${strategy.premiumDelayMs} ms` : `${strategy.standardDelayMs / 1000}s`}</p>
+                </button>;
+              })}
+            </div>
             <label className="mt-4 space-y-2 text-sm font-semibold text-foreground">Follower account<select className="h-12 w-full rounded-xl border border-line bg-background px-3 text-sm" value={accountId} onChange={(event) => setAccountByStrategy((current) => ({ ...current, [strategy.id]: event.target.value }))}><option value="">Select connected account...</option>{connectedAccounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName} · {account.brokerName}</option>)}</select></label>
             <div className="mt-auto flex flex-wrap gap-2 pt-5">
-              {!accountId ? <p className="text-sm text-accent">Connect a trading account before subscribing.</p> : activeFollower ? <><StatusPill tone={activeFollower.engineStatus === "LIVE" ? "lime" : activeFollower.engineStatus === "ERROR" ? "danger" : "accent"}>{activeFollower.engineStatus}</StatusPill>{activeFollower.status === "ACTIVE" ? <GhostButton type="button" onClick={() => updateMutation.mutate({ id: activeFollower.id, status: "PAUSED" })}>Pause new trades</GhostButton> : <PrimaryButton type="button" onClick={() => updateMutation.mutate({ id: activeFollower.id, status: "ACTIVE" })}>Resume</PrimaryButton>}<GhostButton type="button" onClick={() => window.confirm("Stop following and gracefully close copied positions when the master closes them?") && updateMutation.mutate({ id: activeFollower.id, status: "REVOKED" })}>Stop & close gracefully</GhostButton></> : access?.status === "ACTIVE" ? <PrimaryButton type="button" onClick={() => { setFollow({ strategy, accountId }); setConsent(false); }}>Start live copying</PrimaryButton> : <PrimaryButton type="button" onClick={() => setCheckout({ strategy, accountId })}>Subscribe monthly</PrimaryButton>}
+              {!accountId ? <p className="text-sm text-accent">Connect a trading account before subscribing.</p> : activeFollower ? <><StatusPill tone={activeFollower.engineStatus === "LIVE" ? "lime" : activeFollower.engineStatus === "ERROR" ? "danger" : "accent"}>{activeFollower.engineStatus}</StatusPill><StatusPill tone={activeFollower.tier === "PREMIUM" ? "accent" : "muted"}>{activeFollower.tier}</StatusPill>{activeFollower.status === "ACTIVE" ? <GhostButton type="button" onClick={() => updateMutation.mutate({ id: activeFollower.id, status: "PAUSED" })}>Pause new trades</GhostButton> : <PrimaryButton type="button" onClick={() => updateMutation.mutate({ id: activeFollower.id, status: "ACTIVE" })}>Resume</PrimaryButton>}<GhostButton type="button" onClick={() => window.confirm("Stop following and gracefully close copied positions when the master closes them?") && updateMutation.mutate({ id: activeFollower.id, status: "REVOKED" })}>Stop & close gracefully</GhostButton></> : access?.status === "ACTIVE" ? <PrimaryButton type="button" onClick={() => { setFollow({ strategy, accountId, tier: access.tier === "PREMIUM" ? "PREMIUM" : "NORMAL" }); setConsent(false); }}>Start live copying</PrimaryButton> : <PrimaryButton type="button" onClick={() => setCheckout({ strategy, accountId, tier })}>Subscribe {tier === "PREMIUM" ? "Premium" : "Standard"}</PrimaryButton>}
             </div>
           </Panel>;
         })}
@@ -104,7 +116,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
       <CopyExecutionLog logs={copyLogs} loading={copyLogsLoading} />
     </WorkspacePage>
 
-    {checkout ? <BillingCheckoutModal open onClose={() => setCheckout(null)} product={{ code: checkout.strategy.billingProductCode, name: checkout.strategy.name, amount: checkout.strategy.monthlyPrice, currency: checkout.strategy.currency, billingInterval: "MONTHLY", description: `Monthly live copy access for ${checkout.strategy.name} on the selected account.` }} tradingAccountId={checkout.accountId} copyStrategyId={checkout.strategy.id} /> : null}
+    {checkout ? <BillingCheckoutModal open onClose={() => setCheckout(null)} product={{ code: checkout.tier === "PREMIUM" ? checkout.strategy.premiumBillingProductCode : checkout.strategy.standardBillingProductCode, name: `${checkout.strategy.name} · ${checkout.tier === "PREMIUM" ? "Premium / Fast" : "Standard"}`, amount: checkout.tier === "PREMIUM" ? checkout.strategy.premiumMonthlyPrice : checkout.strategy.standardMonthlyPrice, currency: checkout.strategy.currency, billingInterval: "MONTHLY", description: `Monthly ${checkout.tier === "PREMIUM" ? "premium fast" : "standard"} live copy access for ${checkout.strategy.name} on the selected account.` }} tradingAccountId={checkout.accountId} copyStrategyId={checkout.strategy.id} /> : null}
 
     {follow ? <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4"><div className="w-full max-w-md rounded-3xl border border-line bg-panel p-6"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-accent" /><h2 className="text-xl font-semibold text-foreground">Confirm live copying</h2></div><p className="mt-3 text-sm leading-6 text-muted">This authorizes the WSA engine to place, modify, and close trades from <strong className="text-foreground">{follow.strategy.name}</strong> on your selected account. Master closes will close the corresponding follower positions.</p><label className="mt-4 flex items-start gap-3 rounded-xl border border-line bg-background p-3 text-sm text-muted"><input type="checkbox" className="mt-1" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I understand that this is live trading and can cause financial loss.</span></label><div className="mt-5 flex justify-end gap-2"><GhostButton type="button" onClick={() => setFollow(null)}>Cancel</GhostButton><PrimaryButton type="button" disabled={!consent || followMutation.isPending} onClick={() => followMutation.mutate()}>{followMutation.isPending ? "Connecting..." : "Start live copying"}</PrimaryButton></div></div></div> : null}
   </>;

@@ -9,6 +9,10 @@ import { getStripe, ensureStripeCustomer } from "@/lib/stripe/stripeClient";
 import { getStripePriceId, getStripeCheckoutMode } from "@/lib/stripe/stripeProducts";
 import { writeAuditLog } from "@/lib/services/auditService";
 
+function copyTierForProductCode(code: string): "NORMAL" | "PREMIUM" {
+  return code === "COPY_ULTRA_FAST" || code.endsWith("_PREMIUM") ? "PREMIUM" : "NORMAL";
+}
+
 // ─── Public DTOs ──────────────────────────────────────────────────────────────
 
 export interface BillingProductDto {
@@ -938,7 +942,7 @@ async function ensurePaidOrderProvisioned(
         trading_account_id: order.trading_account_id,
         strategy_id: order.copy_strategy_id,
         payment_order_id: order.id,
-        tier: order.tier ?? (product.code === "COPY_ULTRA_FAST" ? "PREMIUM" : "NORMAL"),
+        tier: order.tier ?? copyTierForProductCode(product.code),
         status: decision.status,
         amount: order.amount,
         currency: order.currency,
@@ -1072,7 +1076,7 @@ export async function createCheckoutSession(params: CreateCheckoutParams): Promi
       params.copyStrategyId
         ? supabase
             .from("copy_strategies")
-            .select("id, billing_product_id, status, live_enabled, engine_status")
+            .select("id, billing_product_id, standard_billing_product_id, premium_billing_product_id, status, live_enabled, engine_status")
             .eq("id", params.copyStrategyId)
             .maybeSingle()
         : Promise.resolve({ data: null }),
@@ -1083,11 +1087,14 @@ export async function createCheckoutSession(params: CreateCheckoutParams): Promi
     }
     if (params.copyStrategyId) {
       const strategy = strategyResult.data;
-      if (!strategy || strategy.billing_product_id !== product.id || strategy.status !== "ACTIVE" || !strategy.live_enabled || strategy.engine_status !== "LIVE") {
+      const strategyProductIds = strategy
+        ? [strategy.billing_product_id, strategy.standard_billing_product_id, strategy.premium_billing_product_id]
+        : [];
+      if (!strategy || !strategyProductIds.includes(product.id) || strategy.status !== "ACTIVE" || !strategy.live_enabled || strategy.engine_status !== "LIVE") {
         throw new Error("This copy strategy is not available for live subscriptions");
       }
     }
-    params.tier = product.code === "COPY_ULTRA_FAST" ? "PREMIUM" : "NORMAL";
+    params.tier = copyTierForProductCode(product.code);
   }
   const runtimeMode = getBillingRuntimeMode({ BILLING_PROVIDER: process.env.BILLING_PROVIDER });
 
@@ -1376,7 +1383,7 @@ export async function handlePaymentSucceeded(intentId: string): Promise<void> {
       user_id: order.user_id,
       trading_account_id: order.trading_account_id ?? null,
       payment_order_id: order.id,
-      tier: order.tier ?? (product.code === "COPY_ULTRA_FAST" ? "PREMIUM" : "NORMAL"),
+      tier: order.tier ?? copyTierForProductCode(product.code),
       status: "PENDING_APPROVAL",
       amount: order.amount,
       currency: order.currency,

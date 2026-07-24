@@ -65,6 +65,12 @@ export interface CopyStrategyDto {
   engineError: string | null;
   engineHeartbeatAt: string | null;
   monthlyPrice: number;
+  standardMonthlyPrice: number;
+  premiumMonthlyPrice: number;
+  standardBillingProductCode: string | null;
+  premiumBillingProductCode: string | null;
+  standardDelayMs: number;
+  premiumDelayMs: number;
   currency: string;
   billingProductCode: string | null;
   publishedAt: string | null;

@@ -9,8 +9,12 @@ type StrategyRecord = {
   name: string;
   master_account_id: string;
   monthly_price: number | string;
+  standard_monthly_price: number | string;
+  premium_monthly_price: number | string;
   currency: string;
   billing_product_id: string | null;
+  standard_billing_product_id: string | null;
+  premium_billing_product_id: string | null;
 };
 
 export class WsaCopyEngineConfigurationError extends Error {
@@ -20,19 +24,25 @@ export class WsaCopyEngineConfigurationError extends Error {
   }
 }
 
-function strategyProductCode(strategyId: string) {
-  return `COPY_STRATEGY_${strategyId.replaceAll("-", "").toUpperCase()}`;
+function strategyProductCode(strategyId: string, tier: "STANDARD" | "PREMIUM") {
+  return `COPY_STRATEGY_${strategyId.replaceAll("-", "").toUpperCase()}_${tier}`;
 }
 
-async function ensureStrategyBillingProduct(strategy: StrategyRecord): Promise<string> {
+async function ensureStrategyBillingProduct(
+  strategy: StrategyRecord,
+  tier: "STANDARD" | "PREMIUM",
+): Promise<string> {
   const supabase = createAdminClient();
+  const amount = tier === "PREMIUM"
+    ? Number(strategy.premium_monthly_price)
+    : Number(strategy.standard_monthly_price);
   const { data, error } = await supabase
     .from("billing_products")
     .upsert({
-      code: strategyProductCode(strategy.id),
-      name: `${strategy.name} Copy Strategy`,
+      code: strategyProductCode(strategy.id, tier),
+      name: `${strategy.name} ${tier === "PREMIUM" ? "Premium Fast" : "Standard"} Copy Strategy`,
       type: "COPY_ACCOUNT",
-      amount: Number(strategy.monthly_price),
+      amount,
       currency: strategy.currency,
       billing_interval: "MONTHLY",
       active: true,
@@ -58,7 +68,7 @@ export async function publishWsaStrategy(strategyId: string, actorUserId: string
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("copy_strategies")
-    .select("id, name, master_account_id, monthly_price, currency, billing_product_id")
+    .select("id, name, master_account_id, monthly_price, standard_monthly_price, premium_monthly_price, currency, billing_product_id, standard_billing_product_id, premium_billing_product_id")
     .eq("id", strategyId)
     .maybeSingle();
   if (!data) throw new Error("Copy strategy was not found.");
@@ -81,10 +91,15 @@ export async function publishWsaStrategy(strategyId: string, actorUserId: string
     );
   }
 
-  const billingProductId = await ensureStrategyBillingProduct(strategy);
+  const [standardBillingProductId, premiumBillingProductId] = await Promise.all([
+    ensureStrategyBillingProduct(strategy, "STANDARD"),
+    ensureStrategyBillingProduct(strategy, "PREMIUM"),
+  ]);
   const publishedAt = new Date().toISOString();
   const { error } = await supabase.from("copy_strategies").update({
-    billing_product_id: billingProductId,
+    billing_product_id: standardBillingProductId,
+    standard_billing_product_id: standardBillingProductId,
+    premium_billing_product_id: premiumBillingProductId,
     status: "ACTIVE",
     mode: "LIVE",
     live_enabled: true,
@@ -108,7 +123,7 @@ export async function archiveWsaStrategy(strategyId: string, actorUserId: string
   const supabase = createAdminClient();
   const { data: strategy } = await supabase
     .from("copy_strategies")
-    .select("id, billing_product_id")
+    .select("id, billing_product_id, standard_billing_product_id, premium_billing_product_id")
     .eq("id", strategyId)
     .maybeSingle();
   if (!strategy) throw new Error("Copy strategy was not found.");
@@ -119,8 +134,13 @@ export async function archiveWsaStrategy(strategyId: string, actorUserId: string
     engine_status: "DRAINING",
     engine_error: null,
   }).eq("id", strategyId);
-  if (strategy.billing_product_id) {
-    await supabase.from("billing_products").update({ active: false }).eq("id", strategy.billing_product_id);
+  const productIds = [
+    strategy.billing_product_id,
+    strategy.standard_billing_product_id,
+    strategy.premium_billing_product_id,
+  ].filter(Boolean) as string[];
+  if (productIds.length) {
+    await supabase.from("billing_products").update({ active: false }).in("id", productIds);
   }
   await enqueueJob({
     type: "CLOSE_COPY_STRATEGY",

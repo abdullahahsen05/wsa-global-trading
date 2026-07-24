@@ -1,6 +1,7 @@
 import { createAdminClient } from "../src/lib/supabase/admin";
 import { enqueueJob } from "../src/lib/services/backgroundJobService";
 import { runWorkerOnce } from "../src/lib/workers/jobProcessor";
+import { executeSelfCopyPositionEvent } from "../src/lib/services/selfCopyService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -17,10 +18,15 @@ type StreamHandle = {
   reconcile(): Promise<void>;
   close(): Promise<void>;
 };
+type LiveSelfCopySource = {
+  source_account_id: string;
+  trading_accounts: { provider_account_id: string | null } | null;
+};
 
-const pollMs = Math.max(1_000, Number.parseInt(process.env.WSA_COPY_POLL_MS ?? "3000", 10) || 3_000);
+const pollMs = Math.max(500, Number.parseInt(process.env.WSA_COPY_POLL_MS ?? "1000", 10) || 1_000);
 const workerId = `wsa-copy-${process.pid}`;
 const streams = new Map<string, StreamHandle>();
+const selfCopyStreams = new Map<string, StreamHandle>();
 let stopping = false;
 
 function iso(value?: Date | string) {
@@ -156,6 +162,126 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
   };
 }
 
+async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHandle> {
+  const providerAccountId = source.trading_accounts?.provider_account_id;
+  if (!providerAccountId) throw new Error("Self-copy source has no MetaApi provider account.");
+  const sdk = await import("metaapi.cloud-sdk/node") as unknown as {
+    default: new (authToken: string) => {
+      metatraderAccountApi: { getAccount(id: string): Promise<any> }; close(): void;
+    };
+    SynchronizationListener: new () => any;
+  };
+  const api = new sdk.default(process.env.METAAPI_TOKEN!);
+  const account = await api.metatraderAccountApi.getAccount(providerAccountId);
+  if (account.state !== "DEPLOYED") {
+    await account.deploy();
+    await account.waitDeployed(120, 1_000);
+  }
+  await account.waitConnected(120, 1_000);
+  const connection = account.getStreamingConnection();
+  const positions = new Map<string, Position>();
+  let ready = false;
+  let queue = Promise.resolve();
+
+  const dispatch = (eventType: "OPEN" | "MODIFY" | "CLOSE", position: Position, previous?: Position) => {
+    queue = queue.then(async () => {
+      const outcome = await executeSelfCopyPositionEvent({
+        sourceAccountId: source.source_account_id,
+        eventType,
+        sourcePositionId: String(position.id),
+        symbol: position.symbol,
+        side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
+        volume: Number(position.volume ?? 0),
+        previousVolume: previous ? Number(previous.volume ?? 0) : null,
+        stopLoss: position.stopLoss ?? null,
+        takeProfit: position.takeProfit ?? null,
+      });
+      if (outcome.attempted || outcome.failed) {
+        console.log(`[self-copy] ${eventType} ${position.symbol}: ${outcome.success} succeeded, ${outcome.failed} failed, ${outcome.skipped} skipped`);
+      }
+    }).catch((error) => {
+      console.error(`[self-copy] ${eventType} failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    });
+    return queue;
+  };
+
+  class SelfCopyListener extends sdk.SynchronizationListener {
+    async onPositionsReplaced(_instanceIndex: string, current: Position[]) {
+      positions.clear();
+      for (const position of current) positions.set(String(position.id), position);
+    }
+    async onPositionUpdated(_instanceIndex: string, position: Position) {
+      const key = String(position.id);
+      const previous = positions.get(key);
+      positions.set(key, position);
+      if (!ready) return;
+      if (!previous) await dispatch("OPEN", position);
+      else if (changed(previous, position)) await dispatch("MODIFY", position, previous);
+    }
+    async onPositionRemoved(_instanceIndex: string, positionId: string) {
+      const previous = positions.get(String(positionId));
+      positions.delete(String(positionId));
+      if (ready && previous) await dispatch("CLOSE", previous);
+    }
+  }
+
+  const listener = new SelfCopyListener();
+  connection.addSynchronizationListener(listener);
+  await connection.connect();
+  await connection.waitSynchronized({ timeoutInSeconds: 120 });
+  for (const position of (connection.terminalState.positions ?? []) as Position[]) {
+    positions.set(String(position.id), position);
+  }
+  ready = true;
+
+  // Recover opens and closes missed while the worker was offline.
+  for (const position of positions.values()) await dispatch("OPEN", position);
+  const { data: openLinks } = await createAdminClient()
+    .from("self_copy_trade_links")
+    .select("source_position_id, symbol, side, copied_volume")
+    .eq("source_account_id", source.source_account_id)
+    .eq("status", "OPEN");
+  const uniqueMissing = new Map(
+    (openLinks ?? [])
+      .filter((link) => !positions.has(String(link.source_position_id)))
+      .map((link) => [String(link.source_position_id), link]),
+  );
+  for (const link of uniqueMissing.values()) {
+    await dispatch("CLOSE", {
+      id: link.source_position_id,
+      type: link.side === "SELL" ? "POSITION_TYPE_SELL" : "POSITION_TYPE_BUY",
+      symbol: link.symbol,
+      volume: Number(link.copied_volume ?? 0),
+      openPrice: 0,
+    });
+  }
+
+  return {
+    async reconcile() {
+      const current = new Map<string, Position>();
+      for (const position of (connection.terminalState.positions ?? []) as Position[]) {
+        const key = String(position.id);
+        const previous = positions.get(key);
+        current.set(key, position);
+        if (!previous) await dispatch("OPEN", position);
+        else if (changed(previous, position)) await dispatch("MODIFY", position, previous);
+      }
+      for (const [key, previous] of positions) {
+        if (!current.has(key)) await dispatch("CLOSE", previous);
+      }
+      positions.clear();
+      for (const [key, position] of current) positions.set(key, position);
+    },
+    async close() {
+      ready = false;
+      await queue;
+      connection.removeSynchronizationListener(listener);
+      await connection.close();
+      api.close();
+    },
+  };
+}
+
 async function reconcileStreams() {
   const supabase = createAdminClient();
   const { data, error } = await supabase
@@ -183,12 +309,43 @@ async function reconcileStreams() {
       await supabase.from("copy_strategies").update({ engine_status: "ERROR", engine_error: message }).eq("id", strategy.id);
     }
   }
+
+  const { data: relationshipRows, error: relationshipError } = await supabase
+    .from("self_copy_relationships")
+    .select("source_account_id, trading_accounts!source_account_id(provider_account_id)")
+    .eq("status", "LIVE")
+    .limit(1000);
+  if (relationshipError) throw new Error(`Live self-copy sources could not be loaded: ${relationshipError.message}`);
+  const activeSources = new Map<string, LiveSelfCopySource>();
+  for (const row of relationshipRows ?? []) {
+    const source = row as unknown as LiveSelfCopySource;
+    activeSources.set(source.source_account_id, source);
+  }
+  for (const [sourceAccountId, handle] of selfCopyStreams) {
+    if (!activeSources.has(sourceAccountId)) {
+      await handle.close();
+      selfCopyStreams.delete(sourceAccountId);
+    }
+  }
+  for (const source of activeSources.values()) {
+    if (selfCopyStreams.has(source.source_account_id)) {
+      await selfCopyStreams.get(source.source_account_id)!.reconcile();
+      continue;
+    }
+    try {
+      selfCopyStreams.set(source.source_account_id, await openSelfCopyStream(source));
+    } catch (error) {
+      console.error(`[self-copy] source stream failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  }
 }
 
 async function shutdown() {
   stopping = true;
   await Promise.allSettled([...streams.values()].map((stream) => stream.close()));
+  await Promise.allSettled([...selfCopyStreams.values()].map((stream) => stream.close()));
   streams.clear();
+  selfCopyStreams.clear();
 }
 
 async function main() {
