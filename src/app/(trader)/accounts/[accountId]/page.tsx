@@ -7,7 +7,7 @@ import { BrokerConnectPanel } from "@/components/accounts/BrokerConnectPanel";
 import { requireAuth } from "@/lib/auth/session";
 import { getPlatformSubscriptionAccess } from "@/lib/services/billingService";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
-import type { TraderAccountSummary, TradeDto, EquityPoint } from "@/lib/domain/types";
+import type { TraderAccountSummary, TradeDto } from "@/lib/domain/types";
 
 async function fetchAccount(accountId: string): Promise<TraderAccountSummary | null> {
   try {
@@ -31,23 +31,6 @@ async function fetchTrades(accountId: string): Promise<TradeDto[]> {
     const cookieStore = await cookies();
     const res = await fetch(
       `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/trades?accountId=${accountId}`,
-      {
-        headers: { Cookie: cookieStore.toString() },
-        cache: "no-store",
-      },
-    );
-    const json = await res.json();
-    return json.ok ? json.data : [];
-  } catch {
-    return [];
-  }
-}
-
-async function fetchEquityCurve(accountId: string): Promise<EquityPoint[]> {
-  try {
-    const cookieStore = await cookies();
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/analytics/equity-curve?accountId=${accountId}`,
       {
         headers: { Cookie: cookieStore.toString() },
         cache: "no-store",
@@ -84,15 +67,12 @@ export default async function AccountDetailPage({
   }
 
   const { accountId } = await params;
-  const [account, accountTrades, equityCurveData] = await Promise.all([
+  const [account, accountTrades] = await Promise.all([
     fetchAccount(accountId),
     fetchTrades(accountId),
-    fetchEquityCurve(accountId),
   ]);
 
   if (!account) notFound();
-
-  const latestSnapshots = equityCurveData.slice(-7).reverse();
 
   return (
     <WorkspacePage
@@ -125,7 +105,7 @@ export default async function AccountDetailPage({
         <BrokerConnectPanel accountId={accountId} />
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[0.62fr_0.38fr]">
+      <div className="mt-5">
         <Panel>
           <h2 className="text-lg font-semibold text-foreground">Recent trades</h2>
           <div className="mt-4">
@@ -143,21 +123,6 @@ export default async function AccountDetailPage({
                 trade.closedAt ? new Date(trade.closedAt).toLocaleString() : "—",
               ])}
             />
-          </div>
-        </Panel>
-        <Panel>
-          <h2 className="text-lg font-semibold text-foreground">Snapshot feed</h2>
-          <div className="mt-4 space-y-3">
-            {latestSnapshots.length > 0 ? (
-              latestSnapshots.map((snapshot) => (
-                <div key={snapshot.capturedAt} className="flex items-center justify-between rounded-[4px] border border-line bg-background p-3 text-sm">
-                  <span className="text-muted">{new Date(snapshot.capturedAt).toLocaleString()}</span>
-                  <span className="font-semibold text-accent-2">${snapshot.equity.toLocaleString()}</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted">No snapshots available yet.</p>
-            )}
           </div>
         </Panel>
       </div>

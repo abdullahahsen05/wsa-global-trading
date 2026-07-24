@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Loader2,
+  MessageSquare,
   ScreenShare,
   ScreenShareOff,
   Send,
-  Sparkles,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import {
@@ -314,7 +314,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             onClick={() => setAssistantOpen((open) => !open)}
             className="absolute bottom-4 right-4 inline-flex min-h-11 items-center gap-2 rounded-[5px] border border-accent/40 bg-background/95 px-4 text-sm font-semibold text-accent transition hover:bg-panel"
           >
-            <Sparkles className="h-4 w-4" />
+            <MessageSquare className="h-4 w-4" />
             {ASK_ASSISTANT_LABEL}
           </button>
         </div>

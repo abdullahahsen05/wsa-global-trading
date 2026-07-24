@@ -7,8 +7,8 @@ import {
   Bot,
   CandlestickChart,
   Gauge,
+  MessageSquare,
   Repeat,
-  Sparkles,
   WalletCards,
 } from "lucide-react";
 import {
@@ -24,7 +24,7 @@ const featureCards = [
   { title: "Trading Dashboard", description: "Live KPI strip, equity snapshots, and session-aware performance tracking.", icon: Gauge },
   { title: "MT5 Accounts", description: "Connect accounts, review status, and track broker-linked account performance.", icon: WalletCards },
   { title: "Copy Trading", description: "Activate per-account copy tiers after subscription approval and entitlement setup.", icon: Repeat },
-  { title: "AI Assistant", description: "Get trading guidance, risk context, and chart-aware workflow assistance.", icon: Sparkles },
+  { title: "AI Assistant", description: "Get trading guidance, risk context, and chart-aware workflow assistance.", icon: MessageSquare },
   { title: "Professional Terminal", description: "Use the institutional terminal layout and professional trading workflow surface.", icon: CandlestickChart },
   { title: "Analytics", description: "Review equity trends, drawdown pressure, and trade performance summaries.", icon: BarChart3 },
   { title: "Marketplace", description: "Browse bots and EAs, purchase access, and manage owned trading tools.", icon: Bot },

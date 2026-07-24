@@ -5,6 +5,7 @@ import {
   CandlestickChart,
   LayoutDashboard,
   ListChecks,
+  MessageSquare,
   Repeat,
   Sparkles,
   WalletCards,
@@ -59,7 +60,7 @@ const DEMO_SECTIONS: DemoSectionConfig[] = [
     description: "Mock account-aware prompts, chart analysis layout, and AI workflow previews.",
     href: "/demo/ai",
     group: "workspace",
-    icon: Sparkles,
+    icon: MessageSquare,
   },
   {
     slug: "copy-trading",

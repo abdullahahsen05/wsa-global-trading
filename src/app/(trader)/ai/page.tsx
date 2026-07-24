@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Loader2, Send, Sparkles, Trash2 } from "lucide-react";
+import { Loader2, MessageSquare, Send, Trash2 } from "lucide-react";
 import {
   EmptyState,
   GhostButton,
@@ -252,7 +252,7 @@ function AiAssistantContent() {
           <div className="flex items-center justify-between gap-2 border-b border-line pb-4">
             <div className="flex items-center gap-2">
               <span className="grid h-9 w-9 place-items-center rounded-[4px] bg-accent/10 text-accent">
-                <Sparkles className="h-4 w-4" />
+                <MessageSquare className="h-4 w-4" />
               </span>
               <div>
                 <p className="text-sm font-semibold text-foreground">WSA Assistant</p>
