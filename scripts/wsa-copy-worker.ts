@@ -100,6 +100,21 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
   const connection = account.getStreamingConnection();
   const positions = new Map<string, Position>();
   let ready = false;
+  let lastActivityPersistedAt = 0;
+
+  const persistMasterActivity = async () => {
+    const now = Date.now();
+    if (now - lastActivityPersistedAt < 30_000) return;
+    lastActivityPersistedAt = now;
+    const { error } = await createAdminClient()
+      .from("trading_accounts")
+      .update({ last_synced_at: new Date(now).toISOString(), sync_error: null })
+      .eq("id", strategy.master_account_id)
+      .in("status", ["CONNECTED", "RESTRICTED"]);
+    if (error) {
+      console.error(`[copy-worker] master activity update failed for ${strategy.master_account_id}: ${error.message}`);
+    }
+  };
 
   class MasterListener extends sdk.SynchronizationListener {
     async onPositionsReplaced(_instanceIndex: string, current: Position[]) {
@@ -135,6 +150,7 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
   for (const position of synchronizedPositions) {
     await persistEvent(strategy, "OPEN", position);
   }
+  await persistMasterActivity();
   await createAdminClient().from("copy_strategies").update({
     engine_status: "LIVE", engine_error: null, engine_heartbeat_at: new Date().toISOString(),
   }).eq("id", strategy.id);
@@ -154,6 +170,7 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
       }
       positions.clear();
       for (const [key, position] of current) positions.set(key, position);
+      await persistMasterActivity();
     },
     async close() {
       ready = false;
