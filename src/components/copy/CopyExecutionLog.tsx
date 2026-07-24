@@ -1,4 +1,8 @@
-import { Activity, TrendingDown, TrendingUp } from "lucide-react";
+"use client";
+
+import { Activity, Search, TrendingDown, TrendingUp } from "lucide-react";
+import { useMemo, useState } from "react";
+import { SearchField } from "@/components/app/FormFields";
 import { DataTable, Panel, StatusPill } from "@/components/app/WorkspaceUI";
 import type { CopyLogDto } from "@/lib/copy/types";
 
@@ -14,10 +18,30 @@ function displayLot(log: CopyLogDto) {
 }
 
 export function CopyExecutionLog({ logs, loading }: { logs: CopyLogDto[]; loading: boolean }) {
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<"ALL" | CopyLogDto["status"]>("ALL");
   const successful = logs.filter((log) => log.status === "SUCCESS").length;
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredLogs = useMemo(
+    () => logs.filter((log) => {
+      if (status !== "ALL" && log.status !== status) return false;
+      if (!normalizedSearch) return true;
+      return [
+        log.strategyName,
+        log.symbol ?? "",
+        log.side ?? "",
+        log.action,
+        log.status,
+        log.errorCode ?? "",
+        log.errorMessage ?? "",
+        log.brokerOrderId ?? "",
+      ].some((entry) => entry.toLowerCase().includes(normalizedSearch));
+    }),
+    [logs, normalizedSearch, status],
+  );
 
   return (
-    <Panel className="mt-5 overflow-hidden p-0">
+    <Panel className="overflow-hidden p-0">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line px-5 py-5">
         <div className="flex items-start gap-3">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[4px] border border-lime/25 bg-lime/10 text-lime">
@@ -25,7 +49,7 @@ export function CopyExecutionLog({ logs, loading }: { logs: CopyLogDto[]; loadin
           </div>
           <div>
             <h2 className="text-lg font-semibold text-foreground">Copy execution log</h2>
-            <p className="mt-1 text-sm text-muted">Orders attempted by the WSA engine for your follower accounts.</p>
+            <p className="mt-1 text-sm text-muted">Search up to 300 recent strategy-copy attempts for your follower accounts.</p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-muted">
@@ -35,15 +59,47 @@ export function CopyExecutionLog({ logs, loading }: { logs: CopyLogDto[]; loadin
         </div>
       </div>
 
+      {!loading && logs.length ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-background/40 px-5 py-3">
+          <div className="flex max-w-full flex-wrap gap-2">
+            {(["ALL", "SUCCESS", "SKIPPED", "FAILED", "PENDING", "RETRYING"] as const).map((option) => {
+              const count = option === "ALL" ? logs.length : logs.filter((log) => log.status === option).length;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  aria-pressed={status === option}
+                  onClick={() => setStatus(option)}
+                  className={`btn-dark h-9 px-3 text-xs ${status === option ? "btn-active" : ""}`}
+                >
+                  {option === "ALL" ? "All" : option.charAt(0) + option.slice(1).toLowerCase()} ({count})
+                </button>
+              );
+            })}
+          </div>
+          <div className="relative w-full sm:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <SearchField
+              aria-label="Search copy execution log"
+              placeholder="Search strategy, symbol, result"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-9 pl-9"
+            />
+          </div>
+        </div>
+      ) : null}
+
       {loading ? (
-        <p className="px-5 py-8 text-sm text-muted">Loading copy activity…</p>
-      ) : logs.length ? (
+        <p className="px-5 py-8 text-sm text-muted">Loading copy activity...</p>
+      ) : filteredLogs.length ? (
         <DataTable
           headers={["Strategy", "Trade", "Action", "Lot", "Result", "Time"]}
           paginated
-          initialPageSize={10}
-          maxBodyHeight="520px"
-          rows={logs.map((log) => [
+          initialPageSize={20}
+          pageSizeOptions={[20, 50, 100]}
+          maxBodyHeight="560px"
+          rows={filteredLogs.map((log) => [
             <div key="strategy">
               <p className="font-semibold text-foreground">{log.strategyName}</p>
               <p className="mt-1 text-xs text-muted">WSA live strategy</p>
@@ -64,8 +120,12 @@ export function CopyExecutionLog({ logs, loading }: { logs: CopyLogDto[]; loadin
         />
       ) : (
         <div className="px-5 py-9">
-          <p className="font-semibold text-foreground">No copied trades yet</p>
-          <p className="mt-1 text-sm text-muted">When an active strategy places, changes, or closes a follower trade, the result will appear here.</p>
+          <p className="font-semibold text-foreground">{logs.length ? "No matching copy events" : "No copied trades yet"}</p>
+          <p className="mt-1 text-sm text-muted">
+            {logs.length
+              ? "Adjust the search or result filter."
+              : "When an active strategy places, changes, or closes a follower trade, the result will appear here."}
+          </p>
         </div>
       )}
     </Panel>

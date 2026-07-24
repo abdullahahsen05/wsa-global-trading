@@ -32,10 +32,13 @@ declare module 'lucide-react' {
 
   // Icons used in AURIX — components
   export const AlertTriangle: LucideIcon
+  export const ArrowRight: LucideIcon
   export const ArrowLeft: LucideIcon
   export const Mail: LucideIcon
   export const CalendarPlus: LucideIcon
   export const CheckCircle2: LucideIcon
+  export const Check: LucideIcon
+  export const ChevronDown: LucideIcon
   export const ChevronRight: LucideIcon
   export const Crosshair: LucideIcon
   export const Download: LucideIcon
@@ -75,6 +78,9 @@ declare module 'lucide-react' {
   export const Loader2: LucideIcon
   export const MessageSquare: LucideIcon
   export const MessageSquarePlus: LucideIcon
+  export const Link2: LucideIcon
+  export const Network: LucideIcon
+  export const Pause: LucideIcon
   export const Pencil: LucideIcon
   export const Trash2: LucideIcon
   export const Newspaper: LucideIcon
@@ -85,6 +91,7 @@ declare module 'lucide-react' {
   export const Repeat: LucideIcon
   export const Play: LucideIcon
   export const Power: LucideIcon
+  export const Settings2: LucideIcon
   export const ShieldOff: LucideIcon
   export const Clock: LucideIcon
 }
