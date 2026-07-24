@@ -36,6 +36,7 @@ declare module 'lucide-react' {
   export const Mail: LucideIcon
   export const CalendarPlus: LucideIcon
   export const CheckCircle2: LucideIcon
+  export const ChevronRight: LucideIcon
   export const Crosshair: LucideIcon
   export const Download: LucideIcon
   export const FileSpreadsheet: LucideIcon
@@ -73,9 +74,11 @@ declare module 'lucide-react' {
   export const ImagePlus: LucideIcon
   export const Loader2: LucideIcon
   export const MessageSquare: LucideIcon
+  export const MessageSquarePlus: LucideIcon
   export const Pencil: LucideIcon
   export const Trash2: LucideIcon
   export const Newspaper: LucideIcon
+  export const UserRoundSearch: LucideIcon
 
   // Icons used in AURIX — copy trading module
   export const Copy: LucideIcon

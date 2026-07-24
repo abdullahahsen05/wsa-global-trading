@@ -3,7 +3,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, TrendingDown } from "lucide-react";
 import { motion } from "framer-motion";
-import type { Period, DashboardView } from "@/lib/domain/dashboard";
+import type { Period, DashboardView, getRiskLimitState } from "@/lib/domain/dashboard";
 import type { TradeDto } from "@/lib/domain/types";
 import { CalendarTracker } from "@/components/dashboard/CalendarTracker";
 import { OpenTradesTable } from "@/components/dashboard/OpenTradesTable";
@@ -42,41 +42,70 @@ type DashboardModeOverlayProps = {
   onPeriodChange: (period: Period) => void;
   live: LiveSnapshot;
   openTrades: TradeDto[];
-  trades: TradeDto[];
+  calendarTrades: TradeDto[];
   summary: PeriodSummary;
-  dailyLossLimit: number;
-  maxDrawdownLimit: number;
-  openTradeLimit: number;
+  currency: string;
+  dailyClosedPnl: number;
+  dailyLossLimit: number | null;
+  maxDrawdownLimit: number | null;
+  openTradeLimit: number | null;
+  openTradeCount: number;
+  riskState: ReturnType<typeof getRiskLimitState>;
   profitFactor: number;
   avgWinLoss: number;
 };
 
-function DrawdownPanel({ drawdown, riskReward }: { drawdown: number; riskReward: number }) {
+function DrawdownPanel({
+  drawdown,
+  riskReward,
+  limit,
+}: {
+  drawdown: number;
+  riskReward: number;
+  limit: number | null;
+}) {
+  const progress = limit === null ? 0 : Math.min((drawdown / limit) * 100, 100);
+  const breached = limit !== null && drawdown >= limit;
+  const nearLimit = limit !== null && drawdown >= limit * 0.8;
+  const status = breached
+    ? "Limit reached"
+    : nearLimit
+      ? "Near limit"
+      : limit === null
+        ? "No limit configured"
+        : "Within limit";
+
   return (
     <Panel className="h-full">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Risk view</p>
           <h3 className="mt-2 text-lg font-semibold text-foreground">Drawdown analytics</h3>
-          <p className="mt-1 text-sm text-muted">A compact risk readout for the current period.</p>
+          <p className="mt-1 text-sm text-muted">Live drawdown against the enabled account rules.</p>
         </div>
         <TrendingDown className="h-5 w-5 text-accent" />
       </div>
       <div className="mt-5 rounded-[4px] border border-line bg-background p-4">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Max drawdown</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Current drawdown</p>
             <p className="mt-2 text-2xl font-semibold text-foreground">{formatPercent(drawdown)}</p>
           </div>
-          <StatusPill tone={drawdown >= 5 ? "accent" : "lime"}>Controlled</StatusPill>
+          <StatusPill tone={breached ? "danger" : nearLimit ? "accent" : limit === null ? "muted" : "lime"}>
+            {status}
+          </StatusPill>
         </div>
         <div className="mt-4 h-3 overflow-hidden rounded-full border border-line bg-panel">
           <div
-            className="h-full rounded-full bg-accent transition-all"
-            style={{ width: `${Math.min((drawdown / 8) * 100, 100)}%` }}
+            className={`h-full rounded-full transition-all ${breached ? "bg-danger" : "bg-accent"}`}
+            style={{ width: `${progress}%` }}
           />
         </div>
-        <p className="mt-2 text-xs text-muted">Threshold mapped to an 8% reference band.</p>
+        <p className="mt-2 text-xs text-muted">
+          {limit === null
+            ? "No enabled drawdown rule applies to this account."
+            : `${formatPercent(drawdown)} used of the ${formatPercent(limit)} configured limit.`}
+        </p>
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div className="rounded-[4px] border border-line bg-background p-4">
@@ -85,7 +114,7 @@ function DrawdownPanel({ drawdown, riskReward }: { drawdown: number; riskReward:
         </div>
         <div className="rounded-[4px] border border-line bg-background p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Account state</p>
-          <p className="mt-2 text-xl font-semibold text-foreground">Stable</p>
+          <p className="mt-2 text-xl font-semibold text-foreground">{status}</p>
         </div>
       </div>
     </Panel>
@@ -100,14 +129,22 @@ export function DashboardModeOverlay({
   onPeriodChange,
   live,
   openTrades,
-  trades,
+  calendarTrades,
   summary,
+  currency,
+  dailyClosedPnl,
   dailyLossLimit,
   maxDrawdownLimit,
   openTradeLimit,
+  openTradeCount,
+  riskState,
   profitFactor,
   avgWinLoss,
 }: DashboardModeOverlayProps) {
+  const hasConfiguredLimits =
+    dailyLossLimit !== null ||
+    maxDrawdownLimit !== null ||
+    openTradeLimit !== null;
   const title =
     view === "CURRENT_EQUITY"
       ? "Current equity"
@@ -171,23 +208,23 @@ export function DashboardModeOverlay({
                           Updated {live.refresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                         </p>
                       </div>
-                      <StatusPill tone={live.pnl >= 0 ? "lime" : "accent"}>
-                        {live.pnl >= 0 ? "Open profit" : "Open loss"}
+                      <StatusPill tone={live.pnl > 0 ? "lime" : live.pnl < 0 ? "danger" : "muted"}>
+                        {live.pnl > 0 ? "Open profit" : live.pnl < 0 ? "Open loss" : "Flat"}
                       </StatusPill>
                     </div>
                     <div className="definition-grid mt-4 grid gap-0 md:grid-cols-3">
                       <StatTile
                         label="Account balance"
-                        value={formatMoney({ amount: live.balance, currency: "USD" })}
+                        value={formatMoney({ amount: live.balance, currency })}
                       />
                       <StatTile
                         label="Equity"
-                        value={formatMoney({ amount: live.equity, currency: "USD" })}
+                        value={formatMoney({ amount: live.equity, currency })}
                         tone="lime"
                       />
                       <StatTile
                         label="Floating PnL"
-                        value={formatMoney({ amount: live.pnl, currency: "USD" })}
+                        value={formatMoney({ amount: live.pnl, currency })}
                         tone={live.pnl >= 0 ? "accent" : "danger"}
                       />
                     </div>
@@ -198,7 +235,11 @@ export function DashboardModeOverlay({
                       />
                     </div>
                   </Panel>
-                  <DrawdownPanel drawdown={summary.drawdown} riskReward={summary.riskReward} />
+                  <DrawdownPanel
+                    drawdown={summary.drawdown}
+                    riskReward={summary.riskReward}
+                    limit={maxDrawdownLimit}
+                  />
                 </div>
               ) : null}
 
@@ -215,39 +256,67 @@ export function DashboardModeOverlay({
                           The limits panel stays inside the overlay so the main page remains short.
                         </p>
                       </div>
-                      <StatusPill tone="accent">Mock limits</StatusPill>
+                      <StatusPill
+                        tone={riskState.breached ? "danger" : hasConfiguredLimits ? "lime" : "muted"}
+                      >
+                        {riskState.breached
+                          ? "Limit reached"
+                          : hasConfiguredLimits
+                            ? "Live rules"
+                            : "No limits configured"}
+                      </StatusPill>
                     </div>
                     <div className="definition-grid mt-4 grid gap-0 md:grid-cols-3">
                       <StatTile
                         label="Daily loss limit"
-                        value={formatMoney({ amount: dailyLossLimit, currency: "USD" })}
-                        helper="Current headroom is mocked."
+                        value={
+                          dailyLossLimit === null
+                            ? "Not configured"
+                            : formatMoney({ amount: dailyLossLimit, currency })
+                        }
+                        helper={`Today's closed P&L: ${formatMoney({ amount: dailyClosedPnl, currency })}`}
                       />
                       <StatTile
                         label="Max drawdown"
-                        value={formatPercent(maxDrawdownLimit)}
-                        helper="Threshold tracked against the live snapshot."
+                        value={
+                          maxDrawdownLimit === null
+                            ? "Not configured"
+                            : formatPercent(maxDrawdownLimit)
+                        }
+                        helper={`Current drawdown: ${formatPercent(summary.drawdown)}`}
                       />
                       <StatTile
                         label="Open trade limit"
-                        value={openTradeLimit}
-                        helper={`${openTrades.length} open trades currently active.`}
+                        value={openTradeLimit ?? "Not configured"}
+                        helper={`${openTradeCount} open trades currently active.`}
                       />
                     </div>
                     <div className="definition-grid mt-5 grid gap-0 md:grid-cols-2">
                       <div className="p-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Limit headroom</p>
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Daily loss headroom</p>
                         <p className="mt-2 text-xl font-semibold text-accent-2">
-                          {formatMoney({ amount: dailyLossLimit - 1240, currency: "USD" })}
+                          {riskState.dailyLossHeadroom === null
+                            ? "Not configured"
+                            : formatMoney({ amount: riskState.dailyLossHeadroom, currency })}
                         </p>
                       </div>
                       <div className="p-4">
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Risk posture</p>
-                        <p className="mt-2 text-xl font-semibold text-foreground">Within bounds</p>
+                        <p
+                          className={`mt-2 text-xl font-semibold ${
+                            riskState.breached ? "text-danger" : "text-foreground"
+                          }`}
+                        >
+                          {riskState.breached ? "Action required" : "Within configured limits"}
+                        </p>
                       </div>
                     </div>
                   </Panel>
-                  <DrawdownPanel drawdown={summary.drawdown} riskReward={summary.riskReward} />
+                  <DrawdownPanel
+                    drawdown={summary.drawdown}
+                    riskReward={summary.riskReward}
+                    limit={maxDrawdownLimit}
+                  />
                 </div>
               ) : null}
 
@@ -281,8 +350,8 @@ export function DashboardModeOverlay({
                   <div className="definition-grid mt-5 grid gap-0 md:grid-cols-3">
                     <StatTile
                       label="Total profit"
-                      value={formatMoney({ amount: summary.totalProfit, currency: "USD" })}
-                      tone="lime"
+                      value={formatMoney({ amount: summary.totalProfit, currency })}
+                      tone={summary.totalProfit >= 0 ? "lime" : "danger"}
                     />
                     <StatTile label="Closed trades" value={summary.tradeCount} tone="accent" />
                     <StatTile label="Consistency" value={formatPercent(summary.consistency)} tone="lime" />
@@ -295,7 +364,9 @@ export function DashboardModeOverlay({
                 </Panel>
               ) : null}
 
-              {view === "CALENDAR_TRACKER" ? <CalendarTracker trades={trades} /> : null}
+              {view === "CALENDAR_TRACKER" ? (
+                <CalendarTracker trades={calendarTrades} currency={currency} />
+              ) : null}
             </div>
           </motion.div>
         </Dialog.Content>

@@ -14,6 +14,7 @@
     "seed:supabase": "tsx scripts/seed-supabase.ts",
     "seed:client-demo": "tsx scripts/seed-client-demo.ts",
     "migrate": "tsx scripts/run-migrations.ts",
+    "jobs:worker": "tsx scripts/wsa-background-worker.ts",
     "copy:worker": "tsx scripts/wsa-copy-worker.ts",
     "risk:worker": "tsx scripts/wsa-risk-worker.ts"
   },

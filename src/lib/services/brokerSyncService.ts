@@ -52,11 +52,6 @@ export interface TradeRefreshSummary {
   error?: string;
 }
 
-// 50 s gives us headroom under the default Next.js 60 s route timeout.
-// MetaAPI deploy + connect can easily take 2–5 minutes — we return "still pending"
-// and the caller can re-trigger via the sync-status endpoint.
-const SYNC_TIMEOUT_MS = 50_000;
-
 type MetaApiConstructor = new (token: string) => MetaApiClient;
 
 interface MetaApiClient {
@@ -154,6 +149,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function liveRiskProjectionEnabled(): boolean {
+  return Boolean(process.env.METAAPI_TOKEN)
+    && process.env.WSA_RISK_ENGINE_ENABLED !== 'false';
+}
+
 function readString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
@@ -230,13 +230,38 @@ async function loadMetaApi(): Promise<MetaApiConstructor> {
 async function markFailed(
   supabase: ReturnType<typeof createAdminClient>,
   accountId: string,
-  actorUserId: string | null,
   message: string,
-) {
+  previousStatus: string,
+): Promise<boolean> {
+  const normalized = message.toLowerCase();
+  const transientProviderFailure = [
+    'timeout',
+    'timed out',
+    'websocket',
+    'socket',
+    'network',
+    'econn',
+    'temporarily unavailable',
+    'not connected to broker yet',
+    'subscription',
+    'synchroniz',
+    'too many requests',
+    '429',
+  ].some((fragment) => normalized.includes(fragment));
+  const preserveConnectedStatus =
+    (previousStatus === 'CONNECTED' || previousStatus === 'RESTRICTED')
+    && transientProviderFailure;
+
   await supabase
     .from('trading_accounts')
-    .update({ status: 'DISCONNECTED', sync_error: message.slice(0, 500) })
+    .update(
+      preserveConnectedStatus
+        ? { sync_error: message.slice(0, 500) }
+        : { status: 'DISCONNECTED', sync_error: message.slice(0, 500) },
+    )
     .eq('id', accountId);
+
+  return preserveConnectedStatus;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,6 +277,7 @@ async function runMetaApiSync(params: {
   platform: 'mt4' | 'mt5';
   existingProviderAccountId: string | null;
   preserveRestricted: boolean;
+  previousStatus: string;
 }): Promise<SyncSummary> {
   const {
     token,
@@ -262,6 +288,7 @@ async function runMetaApiSync(params: {
     platform,
     existingProviderAccountId,
     preserveRestricted,
+    previousStatus,
   } = params;
 
   // '/node' subpath → dists/cjs/index.js (Node CJS bundle, no window references).
@@ -484,8 +511,26 @@ async function runMetaApiSync(params: {
       tradingAccountId: accountId,
       message: safeMsg,
     });
-    await markFailed(supabase, accountId, actorUserId, safeMsg);
-    return { accountId, status: 'DISCONNECTED', snapshotInserted: false, tradesUpserted: 0, error: safeMsg };
+    const preservedConnectedStatus = await markFailed(
+      supabase,
+      accountId,
+      safeMsg,
+      previousStatus,
+    );
+    if (preservedConnectedStatus) {
+      console.warn('[SYNC_TRANSIENT_ERROR_STATUS_PRESERVED]', {
+        tradingAccountId: accountId,
+        previousStatus,
+        message: safeMsg,
+      });
+    }
+    return {
+      accountId,
+      status: preservedConnectedStatus ? 'CONNECTED' : 'DISCONNECTED',
+      snapshotInserted: false,
+      tradesUpserted: 0,
+      error: safeMsg,
+    };
 
   } finally {
     if (connection) { try { await connection.close(); } catch { /* ignore */ } }
@@ -523,6 +568,23 @@ export async function syncTradingAccount(
     provider_account_id: account.provider_account_id,
   });
 
+  if (
+    liveRiskProjectionEnabled()
+    && (account.status === 'CONNECTED' || account.status === 'RESTRICTED')
+  ) {
+    await supabase
+      .from('trading_accounts')
+      .update({ sync_error: null })
+      .eq('id', accountId);
+    console.log('[SYNC_SKIPPED_LIVE_STREAM_OWNER]', { tradingAccountId: accountId });
+    return {
+      accountId,
+      status: 'CONNECTED',
+      snapshotInserted: false,
+      tradesUpserted: 0,
+    };
+  }
+
   // 2. Load and decrypt credentials (never logged)
   const credentials = await getDecryptedCredentials(accountId);
   if (!credentials) {
@@ -539,10 +601,12 @@ export async function syncTradingAccount(
     return { accountId, status: 'DISCONNECTED', snapshotInserted: false, tradesUpserted: 0, error: 'METAAPI_TOKEN is not configured.' };
   }
 
-  // 5. Set SYNCING in DB
+  // Keep live accounts selectable while refreshing. SYNCING is only an
+  // onboarding state; changing a connected account to SYNCING makes it vanish
+  // from connected-only trader selectors during every background refresh.
   await supabase
     .from('trading_accounts')
-    .update(account.status === 'RESTRICTED'
+    .update(account.status === 'CONNECTED' || account.status === 'RESTRICTED'
       ? { sync_error: null }
       : { status: 'SYNCING', sync_error: null })
     .eq('id', accountId);
@@ -555,12 +619,9 @@ export async function syncTradingAccount(
     metadata: { provider: credentials.provider, platform },
   });
 
-  // 6. Race MetaAPI sync against a hard timeout
-  const timeoutPromise = new Promise<'__timeout__'>((resolve) =>
-    setTimeout(() => resolve('__timeout__'), SYNC_TIMEOUT_MS)
-  );
-
-  const syncPromise = runMetaApiSync({
+  // Await the SDK operation to completion. Returning while it kept running
+  // allowed the worker to open another overlapping websocket session.
+  const result = await runMetaApiSync({
     token,
     accountId,
     supabase,
@@ -569,21 +630,9 @@ export async function syncTradingAccount(
     platform,
     existingProviderAccountId: account.provider_account_id ?? null,
     preserveRestricted: account.status === 'RESTRICTED',
+    previousStatus: account.status,
   });
 
-  const result = await Promise.race([syncPromise, timeoutPromise]);
-
-  if (result === '__timeout__') {
-    const msg =
-      'MetaApi is still deploying or synchronizing this account. This can take a few minutes; status checks will continue automatically.';
-    // Leave status as SYNCING — it may still complete in the background
-    await supabase
-      .from('trading_accounts')
-      .update({ sync_error: null })
-      .eq('id', accountId);
-    console.log('[SYNC_TIMEOUT]', { tradingAccountId: accountId });
-    return { accountId, status: 'PENDING', snapshotInserted: false, tradesUpserted: 0, pendingMessage: msg };
-  }
 
   // ── Post-sync: risk evaluation and notifications ──────────────────────────
   if (result.status === 'CONNECTED') {
@@ -732,14 +781,42 @@ export async function refreshAccountTrades(
     return { accountId, providerAccountId: '', snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: 'Account has not been synced by an admin yet. No MetaAPI account ID stored.' };
   }
 
+  if (
+    liveRiskProjectionEnabled()
+    && (account.status === 'CONNECTED' || account.status === 'RESTRICTED')
+  ) {
+    const [snapshotResult, openTradesResult] = await Promise.all([
+      supabase
+        .from('account_snapshots')
+        .select('balance, equity')
+        .eq('trading_account_id', accountId)
+        .order('captured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('trades')
+        .select('id', { count: 'exact', head: true })
+        .eq('trading_account_id', accountId)
+        .eq('status', 'OPEN'),
+    ]);
+    const snapshot = snapshotResult.data;
+    console.log('[REFRESH_SKIPPED_LIVE_STREAM_OWNER]', { tradingAccountId: accountId });
+    return {
+      accountId,
+      providerAccountId: account.provider_account_id,
+      snapshotInserted: false,
+      openPositions: openTradesResult.count ?? 0,
+      tradesUpserted: 0,
+      balance: Number(snapshot?.balance ?? 0),
+      equity: Number(snapshot?.equity ?? 0),
+      currency: 'USD',
+    };
+  }
+
   const token = process.env.METAAPI_TOKEN;
   if (!token) {
     return { accountId, providerAccountId: account.provider_account_id, snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: 'METAAPI_TOKEN is not configured.' };
   }
-
-  const timeoutPromise = new Promise<'__timeout__'>((resolve) =>
-    setTimeout(() => resolve('__timeout__'), SYNC_TIMEOUT_MS)
-  );
 
   const refreshPromise = (async (): Promise<TradeRefreshSummary> => {
     // '/node' subpath → dists/cjs/index.js (Node CJS bundle, no window references).
@@ -972,14 +1049,9 @@ export async function refreshAccountTrades(
     }
   })();
 
-  const result = await Promise.race([refreshPromise, timeoutPromise]);
-
-  if (result === '__timeout__') {
-    const msg = 'MetaAPI data refresh timed out (50 s). The connection may still be establishing. Try again in a moment.';
-    await supabase.from('trading_accounts').update({ sync_error: msg }).eq('id', accountId);
-    console.log('[REFRESH_TIMEOUT]', { tradingAccountId: accountId });
-    return { accountId, providerAccountId: account.provider_account_id, snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: msg };
-  }
+  // Do not abandon the SDK promise behind a local timeout. The abandoned
+  // refresh retained its sockets and could overlap the next manual refresh.
+  const result = await refreshPromise;
 
   if (result.snapshotInserted) {
     void evaluateAndPersistRiskEvents(accountId, actorUserId).catch((err) =>

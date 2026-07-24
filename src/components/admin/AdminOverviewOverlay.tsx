@@ -92,16 +92,16 @@ function Section({
 function MetricRail({
   activeTraders,
   connectedAccounts,
-  openRiskEvents,
   monthlyRecurringRevenue,
+  equitySnapshotCount,
 }: Pick<
   AdminOverviewOverlayProps,
-  "activeTraders" | "connectedAccounts" | "openRiskEvents" | "monthlyRecurringRevenue"
->) {
+  "activeTraders" | "connectedAccounts" | "monthlyRecurringRevenue"
+> & { equitySnapshotCount: number }) {
   const metrics = [
     { label: "Active traders", value: activeTraders, helper: "Across all programs", tone: "text-foreground" },
     { label: "Connected accounts", value: connectedAccounts, helper: "Broker-linked", tone: "text-accent-2" },
-    { label: "Open risk events", value: openRiskEvents, helper: "Needs admin review", tone: "text-danger" },
+    { label: "Equity snapshots", value: equitySnapshotCount, helper: "Persisted trend points", tone: "text-accent" },
     { label: "MRR", value: formatMoney(monthlyRecurringRevenue), helper: "Subscription records", tone: "text-accent-2" },
   ];
 
@@ -133,7 +133,6 @@ export function AdminOverviewOverlay({
   onOpenChange,
   activeTraders,
   connectedAccounts,
-  openRiskEvents,
   monthlyRecurringRevenue,
   equityCurve,
   trades,
@@ -195,8 +194,8 @@ export function AdminOverviewOverlay({
                 <MetricRail
                   activeTraders={activeTraders}
                   connectedAccounts={connectedAccounts}
-                  openRiskEvents={openRiskEvents}
                   monthlyRecurringRevenue={monthlyRecurringRevenue}
+                  equitySnapshotCount={equityCurve.length}
                 />
 
                 <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.9fr)_minmax(300px,0.8fr)]">
@@ -216,8 +215,8 @@ export function AdminOverviewOverlay({
                       {[
                         ["Closed trades", trades.filter((trade) => trade.status === "CLOSED").length, "text-foreground"],
                         ["Watchlist", traders.length, "text-foreground"],
-                        ["Risk rules", riskRules.length, "text-danger"],
-                        ["Notes", crmNotes.length, "text-accent"],
+                        ["Accounts", tradingAccounts.length, "text-accent"],
+                        ["Equity points", equityCurve.length, "text-accent-2"],
                       ].map(([label, value, tone]) => (
                         <div
                           key={String(label)}

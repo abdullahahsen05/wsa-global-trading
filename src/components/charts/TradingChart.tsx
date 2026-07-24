@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  Eye,
   Loader2,
   ScreenShare,
   ScreenShareOff,
@@ -299,13 +298,13 @@ export function TradingChart({ accountId }: { accountId?: string }) {
         </div>
       </div>
 
-      <div className="grid items-stretch gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1.8fr)_minmax(300px,0.7fr)]">
-        <div className="relative">
+      <div className="px-5 py-5">
+        <div className="relative w-full">
           <div ref={chartRegionRef}>
             <TradingViewAdvancedChart
               symbol={tvSymbol}
               interval={tvInterval}
-              height="520px"
+              height="560px"
               theme="dark"
               allowSymbolChange={false}
             />
@@ -318,43 +317,6 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             <Sparkles className="h-4 w-4" />
             {ASK_ASSISTANT_LABEL}
           </button>
-        </div>
-
-        <div className="invisible-scrollbar flex min-h-0 flex-col overflow-y-auto border border-line bg-background">
-          <div className="border-b border-line p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Data source</p>
-            <div className="mt-3 flex items-center gap-3">
-              <span className="inline-flex h-3 w-3 rounded-full bg-accent" />
-              <div>
-                <p className="text-sm font-semibold text-foreground">TradingView</p>
-                <p className="text-xs text-muted">Live market data via embedded widget.</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="border-b border-line p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">{AI_ASSISTANT_NAME} chart vision</p>
-            <div className="mt-3 flex items-start gap-3">
-              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-[4px] bg-accent/10 text-accent">
-                <Eye className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-foreground">{visionStatus}</p>
-                <p className="mt-1 text-xs leading-5 text-muted">
-                  {chartShared
-                    ? `${AI_ASSISTANT_NAME} captures only this chart region when you ask.`
-                    : `No trend is claimed until ${AI_ASSISTANT_NAME} receives a chart frame.`}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Chart controls</p>
-            <p className="mt-3 text-sm leading-6 text-muted">
-              Symbol is locked to XAUUSD so the chart and {AI_ASSISTANT_NAME} stay aligned. Use the timeframe controls above.
-            </p>
-          </div>
         </div>
       </div>
 

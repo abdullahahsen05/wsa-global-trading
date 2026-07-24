@@ -16,6 +16,7 @@ interface SnapshotRow {
   equity: number
   floating_pnl: number
   drawdown_percent: number
+  captured_at?: string
 }
 
 export function mapAccountToDto(
@@ -43,6 +44,6 @@ export function mapAccountToDto(
     floatingPnl: { amount: floatingPnl, currency },
     openTradeCount,
     drawdownPercent: drawdown,
-    updatedAt: account.updated_at,
+    updatedAt: snapshot?.captured_at ?? account.updated_at,
   }
 }

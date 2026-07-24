@@ -7,6 +7,7 @@ import { AlertTriangle, Bell, CheckCircle2, Info, Menu, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { navItems } from "@/components/app/navigation";
 import type { UserRole, TraderAccountSummary, NotificationDto } from "@/lib/domain/types";
+import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 function relativeTime(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
@@ -42,6 +43,7 @@ export function Topbar({
   const queryClient = useQueryClient();
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
 
   const { data: tradingAccounts = [] } = useQuery<TraderAccountSummary[]>({
     queryKey: ["trading-accounts", role],
@@ -52,7 +54,19 @@ export function Topbar({
       return json.data;
     },
     enabled: role === "TRADER",
+    staleTime: 0,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
+  const connectedAccounts = tradingAccounts.filter(
+    (account) => account.status === "CONNECTED",
+  );
+  const effectiveSelectedAccountId = connectedAccounts.some(
+    (account) => account.accountId === selectedAccountId,
+  )
+    ? selectedAccountId
+    : connectedAccounts[0]?.accountId ?? null;
 
   const { data: notifData } = useQuery<{ notifications: NotificationDto[]; unreadCount: number }>({
     queryKey: ["notifications"],
@@ -127,6 +141,18 @@ export function Topbar({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [notificationsOpen]);
+
+  useEffect(() => {
+    if (role !== "TRADER") return;
+    if (selectedAccountId !== effectiveSelectedAccountId) {
+      setSelectedAccountId(effectiveSelectedAccountId);
+    }
+  }, [
+    effectiveSelectedAccountId,
+    role,
+    selectedAccountId,
+    setSelectedAccountId,
+  ]);
 
   return (
     <header className="sticky top-0 z-20 min-h-16 border-b border-line bg-panel px-4 py-3 lg:px-7">
@@ -245,12 +271,14 @@ export function Topbar({
             <select
               aria-label="Select one of your trading accounts"
               className="h-10 max-w-[260px] rounded-[5px] border border-line bg-panel-strong px-3 text-sm font-semibold text-foreground outline-none focus:border-accent"
-              disabled={tradingAccounts.length === 0}
+              value={effectiveSelectedAccountId ?? ""}
+              onChange={(event) => setSelectedAccountId(event.target.value || null)}
+              disabled={connectedAccounts.length === 0}
             >
-              {tradingAccounts.length === 0 ? (
+              {connectedAccounts.length === 0 ? (
                 <option>No connected accounts</option>
               ) : (
-                tradingAccounts.map((account) => (
+                connectedAccounts.map((account) => (
                   <option key={account.accountId} value={account.accountId}>
                     {account.accountName}
                   </option>

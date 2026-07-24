@@ -46,12 +46,12 @@ function dateKey(date: Date) {
   ).padStart(2, "0")}`;
 }
 
-function compactMoney(amount: number) {
+function compactMoney(amount: number, currency: string) {
   const absolute = Math.abs(amount);
   const formatted =
     absolute >= 1000
       ? `${(absolute / 1000).toFixed(absolute >= 10000 ? 1 : 2)}k`
-      : formatMoney({ amount: absolute, currency: "USD" });
+      : formatMoney({ amount: absolute, currency });
 
   return amount < 0 ? `-${formatted}` : formatted;
 }
@@ -136,7 +136,13 @@ function percent(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
-export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
+export function CalendarTracker({
+  trades,
+  currency,
+}: {
+  trades: TradeDto[];
+  currency: string;
+}) {
   const closedTrades = useMemo(
     () => trades.filter((trade) => trade.status === "CLOSED"),
     [trades],
@@ -227,7 +233,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
         : `${selectedYear}`;
     const text =
       mode === "MONTH"
-        ? `${focusLabel}: ${compactMoney(monthSummary.totalProfit)} profit, ${monthSummary.tradeCount} trades, ${percent(
+        ? `${focusLabel}: ${compactMoney(monthSummary.totalProfit, currency)} profit, ${monthSummary.tradeCount} trades, ${percent(
             monthSummary.winRate,
           )} win rate`
         : `${focusLabel} overview: ${closedTrades.length} closed trades across ${monthSummaryMapSize(
@@ -257,7 +263,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <StatusPill tone="muted">{shareStatus === "copied" ? "Copied" : "Mock data"}</StatusPill>
+          <StatusPill tone="muted">{shareStatus === "copied" ? "Copied" : "Live ledger"}</StatusPill>
           <StatusPill tone="lime">{mode === "MONTH" ? "Month view" : "Year view"}</StatusPill>
         </div>
       </div>
@@ -396,7 +402,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                     {summary ? (
                       <>
                         <p className={`text-lg font-semibold ${amountClass}`}>
-                          {compactMoney(summary.profit)}
+                          {compactMoney(summary.profit, currency)}
                         </p>
                         <p className="text-xs font-medium text-muted">
                           {summary.tradeCount} trade{summary.tradeCount === 1 ? "" : "s"}
@@ -429,7 +435,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
               </p>
               {selectedDay?.summary ? (
                 <p className="mt-2 text-sm text-muted">
-                  {selectedDay.summary.tradeCount} trades, {compactMoney(selectedDay.summary.profit)} net,
+                  {selectedDay.summary.tradeCount} trades, {compactMoney(selectedDay.summary.profit, currency)} net,
                   {` `}{percent((selectedDay.summary.wins / Math.max(selectedDay.summary.tradeCount, 1)) * 100)} win rate
                 </p>
               ) : (
@@ -452,7 +458,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                       monthSummary.totalProfit >= 0 ? "text-accent" : "text-danger"
                     }`}
                   >
-                    {compactMoney(monthSummary.totalProfit)}
+                    {compactMoney(monthSummary.totalProfit, currency)}
                   </p>
                 </div>
                 <div>
@@ -503,7 +509,7 @@ export function CalendarTracker({ trades }: { trades: TradeDto[] }) {
                     </span>
                   </div>
                   <p className={`mt-4 text-2xl font-semibold ${profit >= 0 ? "text-accent" : "text-danger"}`}>
-                    {compactMoney(profit)}
+                    {compactMoney(profit, currency)}
                   </p>
                   <div className="mt-3 flex items-center justify-between text-xs font-medium text-muted">
                     <span>{percent(winRate)} win rate</span>

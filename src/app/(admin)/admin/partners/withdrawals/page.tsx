@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type FormEvent } from "react";
+import { Search } from "lucide-react";
 import {
   DataTable,
   EmptyState,
@@ -41,6 +42,8 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 export default function AdminPartnerWithdrawalsPage() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<"ALL" | PartnerWithdrawalStatus>("ALL");
+  const [requestSearch, setRequestSearch] = useState("");
+  const [partnerSearch, setPartnerSearch] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [selectedPartnerId, setSelectedPartnerId] = useState("");
   const [adminNote, setAdminNote] = useState("");
@@ -52,21 +55,68 @@ export default function AdminPartnerWithdrawalsPage() {
   const [notice, setNotice] = useState("");
 
   const withdrawals = useQuery<{ withdrawals: PartnerWithdrawalDto[] }>({
-    queryKey: ["admin-withdrawals", filter],
-    queryFn: () => api(`/api/admin/partners/withdrawals${filter === "ALL" ? "" : `?status=${filter}`}`),
+    queryKey: ["admin-withdrawals"],
+    queryFn: () => api("/api/admin/partners/withdrawals"),
   });
   const ledgers = useQuery<{ ledgers: PartnerFinancialLedgerDto[] }>({
     queryKey: ["admin-partner-financial-ledgers"],
     queryFn: () => api("/api/admin/partners/financial-ledgers"),
   });
-  const rows = withdrawals.data?.withdrawals ?? [];
-  const selected = rows.find((row) => row.id === selectedId);
-  const selectedLedger = useMemo(
+  const allRows = useMemo(
+    () => withdrawals.data?.withdrawals ?? [],
+    [withdrawals.data?.withdrawals],
+  );
+  const normalizedRequestSearch = requestSearch.trim().toLowerCase();
+  const rows = useMemo(
+    () => allRows.filter((row) => {
+      if (filter !== "ALL" && row.status !== filter) return false;
+      if (!normalizedRequestSearch) return true;
+      return [
+        row.partnerName,
+        row.partnerEmail,
+        row.payoutMethod,
+        row.payoutReference,
+        row.id,
+      ].some((value) => value?.toLowerCase().includes(normalizedRequestSearch));
+    }),
+    [allRows, filter, normalizedRequestSearch],
+  );
+  const selected = allRows.find((row) => row.id === selectedId);
+  const statusCounts = useMemo(
+    () => ({
+      ALL: allRows.length,
+      PENDING_REVIEW: allRows.filter((row) => row.status === "PENDING_REVIEW").length,
+      APPROVED: allRows.filter((row) => row.status === "APPROVED").length,
+      PAID: allRows.filter((row) => row.status === "PAID").length,
+      REJECTED: allRows.filter((row) => row.status === "REJECTED").length,
+    }),
+    [allRows],
+  );
+  const ledgerRows = useMemo(
+    () => ledgers.data?.ledgers ?? [],
+    [ledgers.data?.ledgers],
+  );
+  const normalizedPartnerSearch = partnerSearch.trim().toLowerCase();
+  const visiblePartnerLedgers = useMemo(
+    () => ledgerRows.filter((ledger) =>
+      !normalizedPartnerSearch
+      || [ledger.partnerName, ledger.partnerEmail, ledger.referralCode]
+        .some((value) => value?.toLowerCase().includes(normalizedPartnerSearch)),
+    ),
+    [ledgerRows, normalizedPartnerSearch],
+  );
+  const selectedLedgerSummary = useMemo(
     () => ledgers.data?.ledgers.find((ledger) => ledger.partnerId === (selectedPartnerId || selected?.partnerId))
       ?? ledgers.data?.ledgers[0]
       ?? null,
     [ledgers.data, selectedPartnerId, selected],
   );
+  const ledgerDetail = useQuery<{ ledgers: PartnerFinancialLedgerDto[] }>({
+    queryKey: ["admin-partner-financial-ledgers", selectedLedgerSummary?.partnerId, "detail"],
+    queryFn: () => api(`/api/admin/partners/financial-ledgers?partnerId=${selectedLedgerSummary?.partnerId}`),
+    enabled: Boolean(selectedLedgerSummary?.partnerId),
+  });
+  const selectedLedger = ledgerDetail.data?.ledgers[0] ?? selectedLedgerSummary;
 
   async function refresh() {
     await Promise.all([
@@ -129,27 +179,52 @@ export default function AdminPartnerWithdrawalsPage() {
       title="Partner financial control"
       description="Review commission and rebate ledgers, locked items, and withdrawal settlement from one server-calculated view."
     >
-      <FilterChipRow
-        chips={(["ALL", "PENDING_REVIEW", "APPROVED", "PAID", "REJECTED"] as const).map((status) => ({
-          label: status.replaceAll("_", " "),
-          active: filter === status,
-          onClick: () => setFilter(status),
-        }))}
+      <InlineStatusStrip
+        items={[
+          { label: "Requests", value: statusCounts.ALL },
+          { label: "Pending review", value: statusCounts.PENDING_REVIEW, tone: "accent" },
+          { label: "Approved", value: statusCounts.APPROVED, tone: "lime" },
+          { label: "Paid", value: statusCounts.PAID, tone: "lime" },
+          { label: "Partner wallets", value: ledgerRows.length },
+        ]}
       />
+
+      <div className="mt-5 flex flex-col gap-3 border-y border-line py-4 xl:flex-row xl:items-center xl:justify-between">
+        <FilterChipRow
+          chips={(["ALL", "PENDING_REVIEW", "APPROVED", "PAID", "REJECTED"] as const).map((status) => ({
+            label: `${status.replaceAll("_", " ")} (${statusCounts[status]})`,
+            active: filter === status,
+            onClick: () => setFilter(status),
+          }))}
+        />
+        <label className="relative block w-full xl:max-w-sm">
+          <span className="sr-only">Search withdrawal requests</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+          <input
+            value={requestSearch}
+            onChange={(event) => setRequestSearch(event.target.value)}
+            placeholder="Search partner, method, reference..."
+            className="h-11 w-full rounded-[4px] border border-line bg-panel pl-10 pr-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted focus:border-accent"
+          />
+        </label>
+      </div>
       {notice ? <p className="mt-4 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">{notice}</p> : null}
       {error ? <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
 
-      <div className="mt-5 grid items-stretch gap-5 xl:h-[620px] xl:grid-cols-3">
-        <Panel className="invisible-scrollbar min-h-0 min-w-0 w-full overflow-auto xl:col-span-2 xl:h-full">
+      <div className={`mt-5 grid items-start gap-5 ${selected ? "xl:grid-cols-3" : ""}`}>
+        <Panel className={`min-w-0 w-full overflow-hidden ${selected ? "xl:col-span-2" : ""}`}>
           {withdrawals.isLoading ? (
             <p className="text-sm text-muted">Loading…</p>
           ) : rows.length === 0 ? (
             <EmptyState title="No requests" description="No withdrawal requests match this filter." />
           ) : (
             <DataTable
+              initialPageSize={10}
+              pageSizeOptions={[10, 20, 50]}
+              maxBodyHeight="520px"
               headers={["Partner", "Requested", "Available balance", "Method", "Included items", "Status", ""]}
               rows={rows.map((row) => {
-                const partnerLedger = ledgers.data?.ledgers.find(
+                const partnerLedger = ledgerRows.find(
                   (ledger) => ledger.partnerId === row.partnerId,
                 );
                 return [
@@ -192,7 +267,7 @@ export default function AdminPartnerWithdrawalsPage() {
           )}
         </Panel>
 
-        <Panel className="invisible-scrollbar min-h-0 min-w-0 w-full overflow-y-auto xl:h-full">
+        <Panel className={selected ? "min-w-0 w-full xl:sticky xl:top-24" : "hidden"}>
           <h2 className="text-lg font-semibold text-foreground">Review request</h2>
           {!selected ? (
             <p className="mt-3 text-sm text-muted">Select a request to inspect its locked ledger items and payout reference.</p>
@@ -259,13 +334,19 @@ export default function AdminPartnerWithdrawalsPage() {
             <h2 className="text-lg font-semibold text-foreground">Partner commission and rebate ledger</h2>
             <p className="mt-1 text-sm text-muted">All balances below are calculated from server-side ledger rows and withdrawal allocations.</p>
           </div>
-          <div className="min-w-[260px]">
+          <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-auto xl:min-w-[600px]">
+            <TextField
+              label="Find partner"
+              value={partnerSearch}
+              onChange={(event) => setPartnerSearch(event.target.value)}
+              placeholder="Name, email, or referral code"
+            />
             <SelectField
-              label="Partner"
+              label={`Partner (${visiblePartnerLedgers.length})`}
               value={selectedLedger?.partnerId ?? ""}
               onChange={(event) => setSelectedPartnerId(event.target.value)}
             >
-              {(ledgers.data?.ledgers ?? []).map((ledger) => (
+              {visiblePartnerLedgers.map((ledger) => (
                 <option key={ledger.partnerId} value={ledger.partnerId}>{ledger.partnerName} · {ledger.partnerEmail}</option>
               ))}
             </SelectField>
@@ -288,12 +369,23 @@ export default function AdminPartnerWithdrawalsPage() {
                 { label: "Locked", value: formatMoney({ amount: selectedLedger.lockedWithdrawalAmount, currency: selectedLedger.currency }), tone: "accent" },
               ]} />
             </div>
-            <div className="mt-5 grid items-stretch gap-5 xl:h-[520px] xl:grid-cols-3">
-              <div className="invisible-scrollbar min-h-0 min-w-0 overflow-auto xl:col-span-2 xl:h-full">
-                {selectedLedger.items.length === 0 ? (
+            <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
+              <div className="min-w-0 xl:col-span-2">
+                {ledgerDetail.isFetching ? (
+                  <p className="rounded-[4px] border border-line bg-background px-4 py-5 text-sm text-muted">
+                    Loading the selected partner&apos;s full ledger...
+                  </p>
+                ) : ledgerDetail.isError ? (
+                  <p className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-5 text-sm text-danger">
+                    The selected partner&apos;s ledger could not be loaded.
+                  </p>
+                ) : selectedLedger.items.length === 0 ? (
                   <EmptyState title="No ledger entries" description="Commissions and rebates for this partner will appear here." />
                 ) : (
                   <DataTable
+                    initialPageSize={10}
+                    pageSizeOptions={[10, 20, 50]}
+                    maxBodyHeight="460px"
                     headers={["Date", "Type", "Source", "Amount", "Status", "Order reference"]}
                     rows={selectedLedger.items.map((item) => [
                       <span key="date" className="text-xs text-muted">{new Date(item.createdAt).toLocaleDateString()}</span>,
@@ -306,7 +398,7 @@ export default function AdminPartnerWithdrawalsPage() {
                   />
                 )}
               </div>
-              <form onSubmit={createRebate} className="invisible-scrollbar flex min-h-0 w-full flex-col gap-4 overflow-y-auto rounded-[4px] border border-line bg-background p-4 xl:h-full">
+              <form onSubmit={createRebate} className="flex w-full flex-col gap-4 rounded-[4px] border border-line bg-background p-4 xl:sticky xl:top-24">
                 <h3 className="font-semibold text-foreground">Add rebate entry</h3>
                 <TextField label={`Amount (${selectedLedger.currency})`} type="number" min="0.01" step="0.01" required value={rebateAmount} onChange={(event) => setRebateAmount(event.target.value)} />
                 <SelectField label="Initial status" value={rebateStatus} onChange={(event) => setRebateStatus(event.target.value as typeof rebateStatus)}>
@@ -314,7 +406,7 @@ export default function AdminPartnerWithdrawalsPage() {
                   <option value="APPROVED">Approved and withdrawable</option>
                 </SelectField>
                 <TextField label="Description" maxLength={500} value={rebateDescription} onChange={(event) => setRebateDescription(event.target.value)} placeholder="Reason or payment context" />
-                <PrimaryButton type="submit" disabled={rebate.isPending || !rebateAmount} className="mt-auto w-full">
+                <PrimaryButton type="submit" disabled={rebate.isPending || !rebateAmount} className="w-full">
                   {rebate.isPending ? "Creating…" : "Create rebate"}
                 </PrimaryButton>
               </form>

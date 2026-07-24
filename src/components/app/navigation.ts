@@ -1,9 +1,7 @@
 import type { ComponentType } from "react";
 import {
-  Activity,
   BadgeDollarSign,
   BarChart3,
-  Bell,
   BookOpenCheck,
   Bot,
   CalendarClock,
@@ -48,11 +46,10 @@ export const navItems: NavItem[] = [
   { href: "/reports", label: "Reports", role: "TRADER", icon: BookOpenCheck },
   { href: "/settings", label: "Settings", role: "TRADER", icon: Settings },
   { href: "/admin", label: "Overview", role: "ADMIN", icon: Gauge },
-  { href: "/admin/users", label: "Users", role: "ADMIN", icon: Users },
-  { href: "/admin/traders", label: "Traders", role: "ADMIN", icon: Activity },
+  { href: "/admin/users", label: "Users & Access", role: "ADMIN", icon: Users },
   { href: "/admin/accounts", label: "Supervision", role: "ADMIN", icon: WalletCards },
   { href: "/admin/brokers", label: "Broker Catalog", role: "ADMIN", icon: WalletCards },
-  { href: "/admin/crm", label: "CRM", role: "ADMIN", icon: Bell },
+  { href: "/admin/crm", label: "Trader CRM", role: "ADMIN", icon: MessageSquare },
   { href: "/admin/contact-requests", label: "Contact Requests", role: "ADMIN", icon: MessageSquare },
   { href: "/admin/risk", label: "Risk Rules", role: "ADMIN", icon: ShieldAlert },
   { href: "/admin/copy", label: "Copy Trading", role: "ADMIN", icon: Copy },

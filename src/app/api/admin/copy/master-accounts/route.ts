@@ -15,7 +15,7 @@ export async function GET() {
     const admin = await requireAdmin();
     const { data, error } = await createAdminClient()
       .from("trading_accounts")
-      .select("id, account_name, broker_name, broker_server, broker_platform, status, provider_account_id, last_synced_at")
+      .select("id, account_name, broker_name, broker_server, broker_platform, status, provider_account_id, last_synced_at, currency")
       .eq("user_id", admin.id)
       .eq("account_usage", "COPY_MASTER")
       .order("created_at", { ascending: false });
@@ -29,6 +29,7 @@ export async function GET() {
       status: row.status,
       providerAccountId: row.provider_account_id,
       lastSyncedAt: row.last_synced_at,
+      currency: row.currency,
     })));
   } catch (error) {
     if (error instanceof AuthError) return jsonFail(error.code, error.message, error.statusCode);

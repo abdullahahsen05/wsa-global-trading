@@ -47,6 +47,20 @@ start(
     : [resolve("node_modules/next/dist/bin/next"), "dev", "--webpack"],
 );
 
+if (runWorkers && process.env.WSA_BACKGROUND_WORKER_ENABLED !== "false") {
+  start("WSA background jobs worker", [
+    resolve("node_modules/tsx/dist/cli.mjs"),
+    resolve("scripts/wsa-background-worker.ts"),
+  ]);
+  console.log("[dev] WSA background jobs worker enabled.");
+} else {
+  console.warn(
+    production
+      ? "[dev] WSA background jobs worker is disabled."
+      : "[dev] WSA background jobs worker is disabled in development. Set WSA_DEV_WORKERS=true to enable it.",
+  );
+}
+
 if (
   runWorkers &&
   process.env.WSA_COPY_ENGINE_ENABLED === "true" &&

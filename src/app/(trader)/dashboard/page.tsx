@@ -20,14 +20,22 @@ import {
 import {
   computePeriodStats,
   filterClosedTradesForPeriod,
+  getEffectiveRiskLimit,
+  getRiskLimitState,
   type DashboardView,
   type Period,
   type PeriodStats,
 } from "@/lib/domain/dashboard";
-import type { TraderAccountSummary, TradeDto, RiskRuleDto } from "@/lib/domain/types";
+import type {
+  AnalyticsSummary,
+  TraderAccountSummary,
+  TradeDto,
+  RiskRuleDto,
+} from "@/lib/domain/types";
 import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 import { getAccountDisplayIdentity } from "@/lib/domain/accountIdentity";
+import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 type SessionUser = { id: string; name: string; email: string };
 
@@ -101,7 +109,7 @@ function TraderDashboardContent() {
   const [activeOverlay, setActiveOverlay] = useState<DashboardView | null>(null);
   const [statsNow, setStatsNow] = useState(() => new Date());
   const [subModalOpen, setSubModalOpen] = useState(false);
-  const [accountIndex, setAccountIndex] = useState(0);
+  const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
 
   const { data: sessionUser } = useQuery<SessionUser>({
     queryKey: ["session"],
@@ -133,25 +141,43 @@ function TraderDashboardContent() {
 
   // Fetch trading accounts
   const { data: accounts = [], isLoading } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts"],
+    queryKey: ["trading-accounts", "TRADER"],
     queryFn: async () => {
       const res = await fetch("/api/trading-accounts");
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
       return json.data;
     },
-    staleTime: 30_000,
-    refetchInterval: 60_000,
+    staleTime: 0,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
-  const baseAccount = accounts[Math.min(accountIndex, Math.max(accounts.length - 1, 0))] ?? accounts[0];
+  const connectedAccounts = useMemo(
+    () => accounts.filter((account) => account.status === "CONNECTED"),
+    [accounts],
+  );
+  const baseAccount =
+    connectedAccounts.find((account) => account.accountId === selectedAccountId) ??
+    connectedAccounts[0];
+
+  useEffect(() => {
+    const effectiveAccountId = baseAccount?.accountId ?? null;
+    if (effectiveAccountId !== selectedAccountId) {
+      setSelectedAccountId(effectiveAccountId);
+    }
+  }, [baseAccount?.accountId, selectedAccountId, setSelectedAccountId]);
 
   // Keep the selected account's ledger current. Supabase Realtime invalidates
   // this query immediately; polling is the fallback if a realtime socket drops.
   const { data: trades = [] } = useQuery<TradeDto[]>({
     queryKey: ["trades", baseAccount?.accountId],
     queryFn: async () => {
-      const params = new URLSearchParams({ accountId: baseAccount!.accountId });
+      const params = new URLSearchParams({
+        accountId: baseAccount!.accountId,
+        limit: "500",
+      });
       const res = await fetch(`/api/trades?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load trades");
@@ -160,20 +186,90 @@ function TraderDashboardContent() {
     enabled: Boolean(baseAccount?.accountId),
     staleTime: 0,
     refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+  });
+
+  const { data: calendarTrades = trades } = useQuery<TradeDto[]>({
+    queryKey: ["trades", "calendar", baseAccount?.accountId],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        accountId: baseAccount!.accountId,
+        status: "CLOSED",
+        limit: "10000",
+      });
+      const res = await fetch(`/api/trades?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load trade calendar");
+      return json.data;
+    },
+    enabled:
+      Boolean(baseAccount?.accountId) && activeOverlay === "CALENDAR_TRACKER",
+    staleTime: 0,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
   });
 
   // Fetch risk rules
   const { data: riskRules = [] } = useQuery<RiskRuleDto[]>({
-    queryKey: ["risk-rules"],
+    queryKey: ["risk-rules", baseAccount?.accountId],
     queryFn: async () => {
-      const res = await fetch("/api/risk/rules");
+      const params = new URLSearchParams({ accountId: baseAccount!.accountId });
+      const res = await fetch(`/api/risk/rules?${params.toString()}`, {
+        cache: "no-store",
+      });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load risk rules");
       return json.data;
     },
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: false,
+    enabled: Boolean(baseAccount?.accountId),
+    staleTime: 0,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+  });
+
+  const { data: analyticsSummary } = useQuery<AnalyticsSummary>({
+    queryKey: ["analytics-summary", baseAccount?.accountId, selectedPeriod],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        accountId: baseAccount!.accountId,
+        period: selectedPeriod,
+      });
+      const res = await fetch(`/api/analytics/summary?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load performance summary");
+      return json.data;
+    },
+    enabled: Boolean(baseAccount?.accountId),
+    staleTime: 0,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+  });
+
+  const { data: dailyAnalyticsSummary } = useQuery<AnalyticsSummary>({
+    queryKey: ["analytics-summary", baseAccount?.accountId, "DAILY"],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        accountId: baseAccount!.accountId,
+        period: "DAILY",
+      });
+      const res = await fetch(`/api/analytics/summary?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load daily performance");
+      return json.data;
+    },
+    enabled: Boolean(baseAccount?.accountId) && selectedPeriod !== "DAILY",
+    staleTime: 0,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 
   // Subscribe to realtime updates
@@ -189,7 +285,9 @@ function TraderDashboardContent() {
       balance: baseAccount?.balance.amount ?? 0,
       equity: baseAccount?.equity.amount ?? 0,
       pnl: baseAccount?.floatingPnl.amount ?? 0,
-      refresh: statsNow,
+      refresh: baseAccount?.updatedAt
+        ? new Date(baseAccount.updatedAt)
+        : statsNow,
     }),
     [baseAccount, statsNow],
   );
@@ -199,21 +297,78 @@ function TraderDashboardContent() {
     () => filterClosedTradesForPeriod(trades, selectedPeriod, statsNow),
     [trades, selectedPeriod, statsNow],
   );
-  const periodStats = useMemo<PeriodStats>(
+  const localPeriodStats = useMemo<PeriodStats>(
     () => computePeriodStats(trades, selectedPeriod, statsNow),
     [trades, selectedPeriod, statsNow],
   );
-  const dailyLossLimit = riskRules.find((rule) => rule.metric === "DAILY_LOSS")?.threshold ?? 2500;
-  const maxDrawdownLimit = riskRules.find((rule) => rule.metric === "MAX_DRAWDOWN")?.threshold ?? 5;
-  const openTradeLimit = riskRules.find((rule) => rule.metric === "OPEN_TRADES")?.threshold ?? 5;
+  const localDailyStats = useMemo(
+    () => computePeriodStats(trades, "DAILY", statsNow),
+    [trades, statsNow],
+  );
+  const periodStats = useMemo<PeriodStats>(
+    () =>
+      analyticsSummary
+        ? {
+            totalProfit: analyticsSummary.totalProfit.amount,
+            winRate: analyticsSummary.winRatePercent,
+            tradeCount: analyticsSummary.tradeCount,
+            riskReward: analyticsSummary.riskRewardRatio,
+          }
+        : localPeriodStats,
+    [analyticsSummary, localPeriodStats],
+  );
+  const dailyClosedPnl =
+    (selectedPeriod === "DAILY"
+      ? analyticsSummary?.totalProfit.amount
+      : dailyAnalyticsSummary?.totalProfit.amount) ?? localDailyStats.totalProfit;
+  const riskLimits = useMemo(
+    () => ({
+      dailyLoss: getEffectiveRiskLimit(
+        riskRules,
+        "DAILY_LOSS",
+        baseAccount?.accountId ?? "",
+      ),
+      maxDrawdown: getEffectiveRiskLimit(
+        riskRules,
+        "MAX_DRAWDOWN",
+        baseAccount?.accountId ?? "",
+      ),
+      openTrades: getEffectiveRiskLimit(
+        riskRules,
+        "OPEN_TRADES",
+        baseAccount?.accountId ?? "",
+      ),
+    }),
+    [baseAccount?.accountId, riskRules],
+  );
 
-  const periodProfitFactor = useMemo(() => calculateProfitFactor(periodTrades), [periodTrades]);
-  const periodAvgWinLoss = useMemo(() => calculateAverageWinLossRatio(periodTrades), [periodTrades]);
-  const periodConsistency = useMemo(() => calculateConsistencyScore(periodTrades), [periodTrades]);
-  const hasClosedTrades = periodTrades.length > 0;
+  const localProfitFactor = useMemo(() => calculateProfitFactor(periodTrades), [periodTrades]);
+  const localAvgWinLoss = useMemo(() => calculateAverageWinLossRatio(periodTrades), [periodTrades]);
+  const localConsistency = useMemo(() => calculateConsistencyScore(periodTrades), [periodTrades]);
+  const periodProfitFactor = analyticsSummary?.profitFactor ?? localProfitFactor;
+  const periodAvgWinLoss = analyticsSummary?.riskRewardRatio ?? localAvgWinLoss;
+  const periodConsistency = analyticsSummary?.consistencyScore ?? localConsistency;
+  const hasClosedTrades = periodStats.tradeCount > 0;
   const pnlPositive = live.pnl >= 0;
-  const pnlPrefix = pnlPositive ? "↑" : "↓";
+  const pnlPrefix = live.pnl > 0 ? "↑" : live.pnl < 0 ? "↓" : "—";
   const accountDrawdown = baseAccount?.drawdownPercent ?? 0;
+  const accountOpenTradeCount = baseAccount?.openTradeCount ?? openTrades.length;
+  const riskState = useMemo(
+    () =>
+      getRiskLimitState({
+        dailyClosedPnl,
+        drawdownPercent: accountDrawdown,
+        openTradeCount: accountOpenTradeCount,
+        limits: riskLimits,
+      }),
+    [
+      accountDrawdown,
+      accountOpenTradeCount,
+      dailyClosedPnl,
+      riskLimits,
+    ],
+  );
+  const accountCurrency = baseAccount?.balance.currency ?? "USD";
   const accountIdentity = getAccountDisplayIdentity(baseAccount);
   const currentHour = new Date().getHours();
   const overlayPeriodStats = useMemo(
@@ -258,29 +413,39 @@ function TraderDashboardContent() {
   const kpiItems = [
     {
       label: "Balance",
-      value: formatMoney({ amount: live.balance, currency: "USD" }),
+      value: formatMoney({ amount: live.balance, currency: accountCurrency }),
       helper: "Current account balance",
       tone: "accent" as const,
-      status: "Good",
+      status: baseAccount?.status ?? "Unavailable",
       statusTone: "lime" as const,
       sparkline: [],
     },
     {
       label: "Equity",
-      value: formatMoney({ amount: live.equity, currency: "USD" }),
+      value: formatMoney({ amount: live.equity, currency: accountCurrency }),
       helper: "Net equity including open trades",
       tone: "lime" as const,
-      status: "Excellent",
-      statusTone: "lime" as const,
+      status: `Drawdown ${formatPercent(accountDrawdown)}`,
+      statusTone: riskState.drawdownBreached ? ("danger" as const) : ("lime" as const),
       sparkline: [],
     },
     {
       label: "Floating PnL",
-      value: `${pnlPrefix} ${formatMoney({ amount: Math.abs(live.pnl), currency: "USD" })}`,
-      helper: pnlPositive ? "Unrealised gain on open positions" : "Unrealised loss on open positions",
+      value: `${pnlPrefix} ${formatMoney({ amount: Math.abs(live.pnl), currency: accountCurrency })}`,
+      helper:
+        live.pnl > 0
+          ? "Unrealised gain on open positions"
+          : live.pnl < 0
+            ? "Unrealised loss on open positions"
+            : "No unrealised profit or loss",
       tone: pnlPositive ? ("lime" as const) : ("danger" as const),
-      status: pnlPositive ? "Good" : "Average",
-      statusTone: pnlPositive ? ("lime" as const) : ("muted" as const),
+      status: live.pnl > 0 ? "Open profit" : live.pnl < 0 ? "Open loss" : "Flat",
+      statusTone:
+        live.pnl > 0
+          ? ("lime" as const)
+          : live.pnl < 0
+            ? ("danger" as const)
+            : ("muted" as const),
       sparkline: [],
     },
   ];
@@ -306,7 +471,9 @@ function TraderDashboardContent() {
     },
     {
       label: "Performance Score",
-      value: `${Math.min(99, Math.round((periodStats.winRate * 0.8 + periodProfitFactor * 10) / 1.1))}`,
+      value: hasClosedTrades
+        ? `${Math.min(99, Math.round((periodStats.winRate * 0.8 + periodProfitFactor * 10) / 1.1))}`
+        : "—",
       helper: "Composite score from your period results",
       tone: "accent" as const,
     },
@@ -320,19 +487,6 @@ function TraderDashboardContent() {
       description="Equity, risk, and performance across your connected accounts."
       action={
         <PageActionGroup>
-          {accounts.length > 1 ? (
-            <select
-              value={accountIndex}
-              onChange={(e) => setAccountIndex(Number(e.target.value))}
-              className="h-9 rounded-[4px] border border-line bg-background px-3 text-xs font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
-            >
-              {accounts.map((a, i) => (
-                <option key={a.accountId} value={i}>
-                  {a.accountName}
-                </option>
-              ))}
-            </select>
-          ) : null}
           {dashboardTabs.map((tab) => {
             const active = selectedView === tab.id;
             return (
@@ -381,7 +535,7 @@ function TraderDashboardContent() {
       )}
 
       {/* Empty state for traders with no connected accounts */}
-      {!isLoading && accounts.length === 0 ? (
+      {!isLoading && connectedAccounts.length === 0 ? (
         <div className="mt-10 flex flex-col items-center justify-center gap-5 text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-full border border-line bg-panel">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -447,7 +601,7 @@ function TraderDashboardContent() {
                         : "border-line bg-background text-muted hover:text-foreground"
                     }`}
                   >
-                    {period === "DAILY" ? "Today" : period === "WEEKLY" ? "7 days" : "30 days"}
+                    {period === "DAILY" ? "Today" : period === "WEEKLY" ? "7 days" : "This month"}
                   </button>
                 ))}
               </div>
@@ -467,11 +621,15 @@ function TraderDashboardContent() {
             onPeriodChange={setSelectedPeriod}
             live={live}
             openTrades={openTrades}
-            trades={trades}
+            calendarTrades={calendarTrades}
             summary={overlayPeriodStats}
-            dailyLossLimit={dailyLossLimit}
-            maxDrawdownLimit={maxDrawdownLimit}
-            openTradeLimit={openTradeLimit}
+            currency={accountCurrency}
+            dailyClosedPnl={dailyClosedPnl}
+            dailyLossLimit={riskLimits.dailyLoss}
+            maxDrawdownLimit={riskLimits.maxDrawdown}
+            openTradeLimit={riskLimits.openTrades}
+            openTradeCount={accountOpenTradeCount}
+            riskState={riskState}
             profitFactor={periodProfitFactor}
             avgWinLoss={periodAvgWinLoss}
           />

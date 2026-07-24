@@ -16,7 +16,7 @@ import {
   WorkspacePage,
 } from "@/components/app/WorkspaceUI";
 import { SelectField } from "@/components/app/FormFields";
-import type { TraderAccountSummary } from "@/lib/domain/types";
+import type { AdminTradingAccountSummary } from "@/lib/domain/types";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 
 const STATUS_TONE: Record<string, "lime" | "accent" | "danger" | "muted"> = {
@@ -56,7 +56,7 @@ export default function AdminAccountsPage() {
     brokerName: "",
   });
 
-  const { data: accounts = [], isLoading } = useQuery<TraderAccountSummary[]>({
+  const { data: accounts = [], isLoading } = useQuery<AdminTradingAccountSummary[]>({
     queryKey: ["admin-accounts"],
     queryFn: async () => {
       const res = await fetch("/api/admin/accounts");
@@ -69,6 +69,10 @@ export default function AdminAccountsPage() {
   const filteredAccounts = accounts.filter(
     (account) => statusFilter === "ALL" || account.status === statusFilter,
   );
+  const brokerOptions = [...new Set(accounts.map((account) => account.brokerName))]
+    .sort((left, right) => left.localeCompare(right))
+    .map((broker) => ({ value: broker, label: broker }));
+  const traderCount = new Set(accounts.map((account) => account.traderId)).size;
   const effectiveSelectedId = selectedId || accounts[0]?.accountId || "";
   const selectedAccount =
     filteredAccounts.find((account) => account.accountId === effectiveSelectedId) ??
@@ -169,7 +173,7 @@ export default function AdminAccountsPage() {
     <WorkspacePage
       eyebrow="Admin"
       title="Account supervision"
-      description="Overlay-first directory for broker-linked accounts, drawdown review, and queue-based verification."
+      description="Search every broker-linked account by trader, connection state, broker, or server."
       action={
         <PageActionGroup>
           <GhostButton type="button" onClick={() => setSearchOpen(true)}>
@@ -224,19 +228,16 @@ export default function AdminAccountsPage() {
       <InlineStatusStrip
         items={[
           { label: "Accounts", value: isLoading ? "..." : accounts.length },
+          { label: "Traders", value: isLoading ? "..." : traderCount },
           {
             label: "Connected",
             value: accounts.filter((a) => a.status === "CONNECTED").length,
             tone: "lime",
           },
           {
-            label: "Pending",
-            value: accounts.filter((a) => a.status === "PENDING").length,
+            label: "Needs attention",
+            value: accounts.filter((a) => ["PENDING", "DISCONNECTED", "RESTRICTED"].includes(a.status)).length,
             tone: "accent",
-          },
-          {
-            label: "Inactive",
-            value: accounts.filter((a) => a.status === "INACTIVE").length,
           },
           {
             label: "Open trades",
@@ -319,7 +320,12 @@ export default function AdminAccountsPage() {
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Selected account</p>
                 <h2 className="mt-2 text-lg font-semibold text-foreground">{selectedAccount.accountName}</h2>
-                <p className="mt-1 text-sm text-muted">{selectedAccount.brokerName}</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{selectedAccount.traderName}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {[selectedAccount.traderEmail, selectedAccount.brokerName, selectedAccount.serverName]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
               </div>
               <StatusPill tone={STATUS_TONE[selectedAccount.status] ?? "muted"}>
                 {selectedAccount.status}
@@ -401,19 +407,20 @@ export default function AdminAccountsPage() {
         </div>
       ) : null}
 
-      <DirectorySearchOverlay<TraderAccountSummary>
+      <DirectorySearchOverlay<AdminTradingAccountSummary>
         open={searchOpen}
         onOpenChange={setSearchOpen}
-        title="Find accounts"
-        description="Search and filters stay in the overlay so the supervision page remains minimal."
+        title="Account directory"
+        description={`Browse ${accounts.length} accounts across ${traderCount} traders. Results are paginated for fast review.`}
         items={accounts}
         selectedId={selectedAccount?.accountId ?? ""}
         onSelect={(id) => {
+          setStatusFilter("ALL");
           setSelectedId(id);
           setSearchOpen(false);
         }}
         searchLabel="Search accounts"
-        searchPlaceholder="Search by account or broker"
+        searchPlaceholder="Account, trader, email, broker, or server"
         filters={[
           {
             key: "status",
@@ -427,6 +434,14 @@ export default function AdminAccountsPage() {
               { value: "INACTIVE", label: "Inactive" },
             ],
           },
+          {
+            key: "broker",
+            label: "Broker",
+            options: [
+              { value: "ALL", label: "All brokers" },
+              ...brokerOptions,
+            ],
+          },
         ]}
         emptyTitle="No accounts match"
         emptyDescription="Adjust the search term or status filter."
@@ -436,18 +451,23 @@ export default function AdminAccountsPage() {
           const matchesQuery =
             search.length === 0 ||
             account.accountName.toLowerCase().includes(search) ||
-            account.brokerName.toLowerCase().includes(search);
+            account.traderName.toLowerCase().includes(search) ||
+            account.traderEmail.toLowerCase().includes(search) ||
+            account.brokerName.toLowerCase().includes(search) ||
+            account.serverName?.toLowerCase().includes(search) === true;
           const matchesStatus = state.filters.status === "ALL" || account.status === state.filters.status;
-          return matchesQuery && matchesStatus;
+          const matchesBroker = state.filters.broker === "ALL" || account.brokerName === state.filters.broker;
+          return matchesQuery && matchesStatus && matchesBroker;
         }}
         renderRow={(account) => (
           <>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-foreground">{account.accountName}</p>
-                <p className="mt-1 truncate text-xs text-muted">{account.brokerName}</p>
+                <p className="mt-1 truncate text-xs font-semibold text-foreground">{account.traderName}</p>
+                <p className="mt-1 truncate text-xs text-muted">{account.traderEmail || "No profile email"}</p>
                 <p className="mt-1 truncate text-xs text-muted">
-                  {[account.platform, account.serverName].filter(Boolean).join(" · ") || "Details pending"}
+                  {[account.brokerName, account.platform, account.serverName].filter(Boolean).join(" · ") || "Details pending"}
                 </p>
               </div>
               <StatusPill tone={STATUS_TONE[account.status] ?? "muted"}>{account.status}</StatusPill>
@@ -468,9 +488,10 @@ export default function AdminAccountsPage() {
               <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Account preview</p>
                 <h3 className="mt-2 text-lg font-semibold text-foreground">{account.accountName}</h3>
-                <p className="mt-1 text-sm text-muted">{account.brokerName}</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{account.traderName}</p>
+                <p className="mt-1 text-xs text-muted">{account.traderEmail || "No profile email"}</p>
                 <p className="mt-1 text-xs text-muted">
-                  {[account.platform, account.serverName].filter(Boolean).join(" · ") || "Details pending"}
+                  {[account.brokerName, account.platform, account.serverName].filter(Boolean).join(" · ") || "Details pending"}
                 </p>
               </div>
               <StatusPill tone={STATUS_TONE[account.status] ?? "muted"}>{account.status}</StatusPill>

@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { computePeriodStats } from "@/lib/domain/dashboard";
-import type { TradeDto } from "@/lib/domain/types";
+import {
+  computePeriodStats,
+  getEffectiveRiskLimit,
+  getRiskLimitState,
+} from "@/lib/domain/dashboard";
+import type { RiskRuleDto, TradeDto } from "@/lib/domain/types";
 
 const usd = (amount: number) => ({ amount, currency: "USD" });
 
@@ -59,7 +63,7 @@ describe("computePeriodStats", () => {
     });
   });
 
-  test("MONTHLY includes the last thirty days and excludes thirty-one-day-old trades", () => {
+  test("MONTHLY includes trades from the current calendar month", () => {
     expect(computePeriodStats(trades, "MONTHLY")).toMatchObject({
       totalProfit: 170,
       tradeCount: 4,
@@ -83,6 +87,59 @@ describe("computePeriodStats", () => {
     expect(computePeriodStats([trade("closed", 20, "2026-05-30T12:00:00.000Z"), trade("open", 999, null, "OPEN")], "DAILY")).toMatchObject({
       totalProfit: 20,
       tradeCount: 1,
+    });
+  });
+});
+
+describe("dashboard risk limits", () => {
+  const rule = (
+    id: string,
+    metric: RiskRuleDto["metric"],
+    threshold: number,
+    accountId: string | null,
+    enabled = true,
+  ): RiskRuleDto => ({
+    id,
+    accountId,
+    scope: accountId ? "ACCOUNT" : "PLATFORM",
+    name: id,
+    severity: "WARNING",
+    action: "LIMIT",
+    metric,
+    threshold,
+    enabled,
+  });
+
+  test("uses the strictest enabled rule that applies to the selected account", () => {
+    const rules = [
+      rule("platform", "MAX_DRAWDOWN", 8, null),
+      rule("selected", "MAX_DRAWDOWN", 5, "account-1"),
+      rule("other", "MAX_DRAWDOWN", 3, "account-2"),
+      rule("disabled", "MAX_DRAWDOWN", 2, "account-1", false),
+    ];
+
+    expect(getEffectiveRiskLimit(rules, "MAX_DRAWDOWN", "account-1")).toBe(5);
+  });
+
+  test("returns no configured value instead of inventing a default", () => {
+    expect(getEffectiveRiskLimit([], "DAILY_LOSS", "account-1")).toBeNull();
+  });
+
+  test("calculates live headroom and breach state from actual usage", () => {
+    expect(
+      getRiskLimitState({
+        dailyClosedPnl: -750,
+        drawdownPercent: 4,
+        openTradeCount: 5,
+        limits: { dailyLoss: 1000, maxDrawdown: 5, openTrades: 5 },
+      }),
+    ).toEqual({
+      dailyLossUsed: 750,
+      dailyLossHeadroom: 250,
+      dailyLossBreached: false,
+      drawdownBreached: false,
+      openTradesBreached: true,
+      breached: true,
     });
   });
 });

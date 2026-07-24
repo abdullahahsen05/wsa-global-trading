@@ -1,325 +1,580 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { EmptyState, GhostButton, InlineStatusStrip, Panel, StatusPill, WorkspacePage } from "@/components/app/WorkspaceUI";
-import { CrmOverlay } from "@/components/crm/CrmOverlay";
-import { NoteEditorDialog } from "@/components/crm/NoteEditorDialog";
-import type { CrmContact, CrmNoteItem, CrmRoleFilter, CrmSegmentFilter, CrmTab } from "@/components/crm/crmTypes";
-import type { TraderProfileDto, CrmNoteDto } from "@/lib/domain/types";
+import * as Dialog from "@radix-ui/react-dialog";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronRight, MessageSquarePlus, Search, UserRoundSearch, X } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  EmptyState,
+  GhostButton,
+  Panel,
+  PrimaryButton,
+  StatusPill,
+  WorkspacePage,
+  controlClassName,
+  selectClassName,
+  textareaClassName,
+} from "@/components/app/WorkspaceUI";
+import type {
+  CrmNoteDto,
+  RiskSeverity,
+  TraderCrmDirectoryDto,
+  TraderCrmItemDto,
+} from "@/lib/domain/types";
+import { formatMoney } from "@/lib/utils/format";
 
-const crmTabs: Array<{ key: CrmTab; label: string }> = [
-  { key: "CONTACT_DIRECTORY", label: "Contacts" },
-  { key: "PROFILE_DETAIL", label: "Profile" },
-  { key: "BILLING", label: "Billing" },
-  { key: "ACTIVITY", label: "Activity" },
-];
+type SegmentFilter = "ALL" | "EVALUATION" | "FUNDED" | "AT_RISK" | "VIP";
+type StatusFilter = "ALL" | "ACTIVE" | "SUSPENDED" | "PENDING";
+type SortOption = "NEWEST" | "OLDEST";
+type PartnerOption = {
+  userId: string;
+  name: string;
+  email: string;
+  partnerStatus: string;
+};
 
-function tabButtonClass(active: boolean) {
-  return `h-10 shrink-0 border-b-2 px-1 text-sm font-medium transition-colors ${
-    active ? "border-accent text-foreground" : "border-transparent text-muted hover:text-foreground"
-  }`;
+function useDebouncedValue(value: string, delay = 300): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+  return debounced;
 }
 
-function traderToContact(trader: TraderProfileDto): CrmContact {
-  return {
-    id: trader.traderId,
-    name: trader.name,
-    email: trader.email,
-    role: "TRADER",
-    segment: trader.segment,
-    status: trader.segment === "AT_RISK" ? "AT_RISK" : "ACTIVE",
-    team: "Funding desk",
-    accountIds: [],
-    assignedTraders: [],
-    subscription: trader.segment === "FUNDED" ? "Funded Pro" : "Evaluation",
-    lastActivityAt: trader.lastActivityAt,
-    tags: trader.segment === "AT_RISK" ? ["Monitoring", "Needs review"] : ["Top performer"],
-  };
+async function readApi<T>(response: Response): Promise<T> {
+  const json = await response.json();
+  if (!json.ok) throw new Error(json.error?.message ?? "Request failed");
+  return json.data as T;
 }
 
-function noteToItem(note: CrmNoteDto): CrmNoteItem {
-  return {
-    id: note.id,
-    authorName: note.authorName,
-    note: note.note,
-    createdAt: note.createdAt,
-  };
+function statusTone(status: TraderCrmItemDto["profileStatus"]): "lime" | "accent" | "danger" {
+  if (status === "ACTIVE") return "lime";
+  if (status === "SUSPENDED") return "danger";
+  return "accent";
+}
+
+function riskTone(severity: RiskSeverity | null): "lime" | "accent" | "danger" {
+  if (severity === "CRITICAL") return "danger";
+  if (severity === "WARNING" || severity === "INFO") return "accent";
+  return "lime";
+}
+
+function equityLabel(trader: TraderCrmItemDto): string {
+  if (trader.totalEquity) return formatMoney(trader.totalEquity);
+  const accountsWithEquity = trader.accounts.filter((account) => account.equity);
+  const currencies = new Set(accountsWithEquity.map((account) => account.currency));
+  if (currencies.size > 1) return "Multiple currencies";
+  if (accountsWithEquity.length > 0) return "Incomplete sync";
+  return "Not synced";
+}
+
+function dateLabel(value: string | null, includeTime = false): string {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
+  return includeTime ? date.toLocaleString() : date.toLocaleDateString();
 }
 
 export default function AdminCrmPage() {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [segment, setSegment] = useState<SegmentFilter>("ALL");
+  const [profileStatus, setProfileStatus] = useState<StatusFilter>("ALL");
+  const [partnerId, setPartnerId] = useState("");
+  const [sort, setSort] = useState<SortOption>("NEWEST");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [selectedId, setSelectedId] = useState("");
-  const [query, setQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState<CrmRoleFilter>("ALL");
-  const [segmentFilter, setSegmentFilter] = useState<CrmSegmentFilter>("ALL");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [activeOverlay, setActiveOverlay] = useState<CrmTab | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
-  const [feedbackMessage, setFeedbackMessage] = useState("");
-  const pageSize = 10;
+  const [noteText, setNoteText] = useState("");
+  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const debouncedSearch = useDebouncedValue(search);
 
-  const { data: traders = [] } = useQuery<TraderProfileDto[]>({
-    queryKey: ["crm-traders"],
+  const directoryQuery = useQuery<TraderCrmDirectoryDto>({
+    queryKey: [
+      "crm-traders-directory",
+      page,
+      pageSize,
+      debouncedSearch,
+      segment,
+      profileStatus,
+      partnerId,
+      sort,
+    ],
+    placeholderData: keepPreviousData,
     queryFn: async () => {
-      const res = await fetch("/api/crm/traders");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load traders");
-      return json.data;
+      const params = new URLSearchParams({
+        view: "directory",
+        page: String(page),
+        pageSize: String(pageSize),
+        search: debouncedSearch,
+        segment,
+        status: profileStatus,
+        partnerId,
+        sort,
+      });
+      return readApi<TraderCrmDirectoryDto>(await fetch(`/api/crm/traders?${params}`));
     },
   });
 
-  const { data: crmNotesRaw = [] } = useQuery<CrmNoteDto[]>({
-    queryKey: ["crm-notes"],
-    queryFn: async () => {
-      const res = await fetch("/api/crm/notes");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load CRM notes");
-      return json.data;
-    },
+  const partnersQuery = useQuery<PartnerOption[]>({
+    queryKey: ["admin-partner-options"],
+    queryFn: async () => readApi<PartnerOption[]>(await fetch("/api/admin/partners")),
   });
 
-  const crmContacts: CrmContact[] = useMemo(() => traders.map(traderToContact), [traders]);
-  const crmNotes: CrmNoteItem[] = useMemo(() => crmNotesRaw.map(noteToItem), [crmNotesRaw]);
+  const traders = directoryQuery.data?.items ?? [];
+  const selectedTrader =
+    traders.find((trader) => trader.traderId === selectedId) ??
+    traders[0] ??
+    null;
 
-  const effectiveSelectedId = selectedId || crmContacts[0]?.id || "";
+  const notesQuery = useQuery<CrmNoteDto[]>({
+    queryKey: ["crm-notes", selectedTrader?.traderId],
+    enabled: Boolean(selectedTrader),
+    queryFn: async () =>
+      readApi<CrmNoteDto[]>(
+        await fetch(`/api/crm/notes?traderId=${encodeURIComponent(selectedTrader!.traderId)}`),
+      ),
+  });
 
-  const filteredContacts = useMemo(() => {
-    const search = query.trim().toLowerCase();
-    return crmContacts.filter((contact) => {
-      const matchesQuery =
-        search.length === 0 ||
-        contact.name.toLowerCase().includes(search) ||
-        contact.email.toLowerCase().includes(search) ||
-        contact.team.toLowerCase().includes(search);
-      const matchesRole = roleFilter === "ALL" || contact.role === roleFilter;
-      const matchesSegment = segmentFilter === "ALL" || contact.segment === segmentFilter;
-      return matchesQuery && matchesRole && matchesSegment;
-    });
-  }, [query, roleFilter, segmentFilter, crmContacts]);
+  const noteMutation = useMutation({
+    mutationFn: async ({ traderId, note }: { traderId: string; note: string }) =>
+      readApi<CrmNoteDto>(await fetch("/api/crm/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ traderId, note }),
+      })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["crm-notes", selectedTrader?.traderId] });
+      void queryClient.invalidateQueries({ queryKey: ["crm-traders-directory"] });
+      setNoteText("");
+      setNoteOpen(false);
+      setNotice({ type: "success", text: "CRM note saved." });
+    },
+    onError: (error: Error) => setNotice({ type: "error", text: error.message }),
+  });
 
-  const totalContacts = filteredContacts.length;
-  const totalPages = Math.max(1, Math.ceil(totalContacts / pageSize));
-  const currentPageSafe = Math.min(currentPage, totalPages);
-  const startIndex = (currentPageSafe - 1) * pageSize;
-  const visibleContacts = filteredContacts.slice(startIndex, startIndex + pageSize);
+  const submitNote = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const note = noteText.trim();
+    if (!selectedTrader || !note) return;
+    setNotice(null);
+    noteMutation.mutate({ traderId: selectedTrader.traderId, note });
+  };
 
-  const selectedContact = filteredContacts.find((contact) => contact.id === effectiveSelectedId) ?? null;
-  const selectedNotes: CrmNoteItem[] = selectedContact
-    ? crmNotes.filter((note) => {
-        // CrmNoteDto has traderId, CrmNoteItem we mapped doesn't carry it
-        // We need to find from raw notes
-        const rawNote = crmNotesRaw.find((n) => n.id === note.id);
-        return rawNote?.traderId === selectedContact.id;
-      })
-    : [];
-  const recentNotes = selectedNotes.slice(0, 3);
+  const directory = directoryQuery.data;
+  const counts = directory?.counts;
+  const pagination = directory?.pagination;
+  const notes = notesQuery.data ?? [];
+  const partners = useMemo(
+    () => (partnersQuery.data ?? []).filter((partner) => partner.partnerStatus === "ACTIVE"),
+    [partnersQuery.data],
+  );
 
   return (
     <WorkspacePage
       eyebrow="Admin console"
-      title="CRM"
-      description="Centralized management system for all traders and platform users."
+      title="Trader CRM"
+      description="Search traders, inspect real account and risk data, and maintain a single communication history."
     >
-      <div className="invisible-scrollbar overflow-x-auto border-b border-line">
-        <div className="flex min-w-max gap-7">
-          {crmTabs.map((tab) => {
-            const active = activeOverlay === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setActiveOverlay(tab.key)}
-                className={tabButtonClass(active)}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
+      <div className="grid grid-cols-2 border-l border-t border-line bg-panel md:grid-cols-3 2xl:grid-cols-6">
+        {[
+          { label: "Trader profiles", value: counts?.total ?? "—", tone: "text-foreground" },
+          { label: "Funded", value: counts?.funded ?? "—", tone: "text-accent-2" },
+          { label: "Evaluation", value: counts?.evaluation ?? "—", tone: "text-foreground" },
+          { label: "At risk", value: counts?.atRisk ?? "—", tone: counts?.atRisk ? "text-danger" : "text-foreground" },
+          { label: "Open risk events", value: counts?.openRiskEvents ?? "—", tone: counts?.openRiskEvents ? "text-accent" : "text-foreground" },
+          { label: "Active subscriptions", value: counts?.activeSubscriptions ?? "—", tone: "text-accent-2" },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className="flex min-w-0 items-center justify-between gap-3 border-b border-r border-line px-4 py-4"
+          >
+            <p className="min-w-0 text-[11px] font-semibold uppercase leading-5 tracking-[0.15em] text-muted">
+              {item.label}
+            </p>
+            <p className={`shrink-0 text-base font-semibold ${item.tone}`}>{item.value}</p>
+          </div>
+        ))}
       </div>
 
-      <InlineStatusStrip
-        items={[
-          { label: "Profiles", value: crmContacts.length },
-          {
-            label: "Traders",
-            value: crmContacts.filter((contact) => contact.role === "TRADER").length,
-            tone: "lime",
-          },
-          {
-            label: "Platform users",
-            value: crmContacts.filter((contact) => contact.role === "PLATFORM_USER").length,
-            tone: "accent",
-          },
-          { label: "Active subscriptions", value: crmContacts.filter((c) => c.segment === "FUNDED").length, tone: "lime" },
-        ]}
-      />
-
-      {feedbackMessage ? (
-        <div className="mt-5 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm font-medium text-accent">
-          {feedbackMessage}
+      {notice ? (
+        <div className={`mt-5 border px-4 py-3 text-sm font-medium ${
+          notice.type === "success"
+            ? "border-accent/30 bg-accent/10 text-accent"
+            : "border-danger/30 bg-danger/10 text-danger"
+        }`}>
+          {notice.text}
         </div>
       ) : null}
 
-      <div className="mt-5 grid items-stretch gap-4 lg:h-[420px] lg:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
-        <Panel className="invisible-scrollbar min-h-0 overflow-y-auto lg:h-full">
-          {selectedContact ? (
-            <>
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Selected profile</p>
-                  <h3 className="mt-2 text-xl font-semibold text-foreground">{selectedContact.name}</h3>
-                  <p className="mt-1 text-sm leading-6 text-muted">{selectedContact.email}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusPill tone={selectedContact.status === "AT_RISK" ? "danger" : "lime"}>
-                    {selectedContact.status === "AT_RISK" ? "At risk" : "Active"}
-                  </StatusPill>
-                  <StatusPill tone={selectedContact.role === "TRADER" ? "lime" : "accent"}>
-                    {selectedContact.role === "TRADER" ? "Trader" : "Platform user"}
-                  </StatusPill>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-0 overflow-hidden rounded-[4px] border-l border-t border-line sm:grid-cols-2 xl:grid-cols-4">
-                <div className="border-b border-r border-line bg-background px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Segment</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.segment}</p>
-                </div>
-                <div className="border-b border-r border-line bg-background px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Team</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.team}</p>
-                </div>
-                <div className="border-b border-r border-line bg-background px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Linked accounts</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.accountIds.length}</p>
-                </div>
-                <div className="border-b border-r border-line bg-background px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Subscription</p>
-                  <p className="mt-1 text-sm font-semibold text-foreground">{selectedContact.subscription}</p>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {selectedContact.tags.map((tag) => (
-                  <span key={tag} className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-muted">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-
-              <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-                <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted">
-                  Last active - {new Date(selectedContact.lastActivityAt).toLocaleString()}
-                </p>
-                <GhostButton type="button" onClick={() => setActiveOverlay("PROFILE_DETAIL")}>
-                  Open full profile
-                </GhostButton>
-              </div>
-            </>
-          ) : (
-            <EmptyState
-              title="Select a profile"
-              description="Choose a contact from the directory to show the CRM preview."
-              action={
-                <GhostButton type="button" onClick={() => setActiveOverlay("CONTACT_DIRECTORY")}>
-                  Open directory
-                </GhostButton>
-              }
+      <Panel className="mt-5">
+        <div className="grid gap-3 xl:grid-cols-[minmax(280px,1fr)_repeat(5,minmax(145px,auto))]">
+          <label className="relative block">
+            <span className="sr-only">Search traders</span>
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setPage(1);
+              }}
+              placeholder="Name, email, account or broker"
+              className={`${controlClassName} pl-11`}
             />
+          </label>
+          <label>
+            <span className="sr-only">Filter by segment</span>
+            <select value={segment} onChange={(event) => {
+              setSegment(event.target.value as SegmentFilter);
+              setPage(1);
+            }} className={selectClassName}>
+              <option value="ALL">All segments</option>
+              <option value="EVALUATION">Evaluation</option>
+              <option value="FUNDED">Funded</option>
+              <option value="AT_RISK">At risk</option>
+              <option value="VIP">VIP</option>
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">Filter by access status</span>
+            <select
+              value={profileStatus}
+              onChange={(event) => {
+                setProfileStatus(event.target.value as StatusFilter);
+                setPage(1);
+              }}
+              className={selectClassName}
+            >
+              <option value="ALL">All access states</option>
+              <option value="ACTIVE">Active</option>
+              <option value="PENDING">Pending</option>
+              <option value="SUSPENDED">Suspended</option>
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">Filter by partner</span>
+            <select value={partnerId} onChange={(event) => {
+              setPartnerId(event.target.value);
+              setPage(1);
+            }} className={selectClassName}>
+              <option value="">All partners</option>
+              {partners.map((partner) => (
+                <option key={partner.userId} value={partner.userId}>{partner.name}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">Sort traders</span>
+            <select value={sort} onChange={(event) => {
+              setSort(event.target.value as SortOption);
+              setPage(1);
+            }} className={selectClassName}>
+              <option value="NEWEST">Newest first</option>
+              <option value="OLDEST">Oldest first</option>
+            </select>
+          </label>
+          <label>
+            <span className="sr-only">Rows per page</span>
+            <select value={pageSize} onChange={(event) => {
+              setPageSize(Number(event.target.value));
+              setPage(1);
+            }} className={selectClassName}>
+              <option value={25}>25 rows</option>
+              <option value={50}>50 rows</option>
+              <option value={100}>100 rows</option>
+            </select>
+          </label>
+        </div>
+      </Panel>
+
+      <div className="mt-5 grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,1.65fr)_minmax(390px,0.75fr)]">
+        <Panel className="min-w-0 p-0">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+            <div>
+              <h2 className="font-semibold text-foreground">Trader directory</h2>
+              <p className="mt-1 text-xs text-muted">
+                {pagination ? `${pagination.total} matching traders` : "Loading directory…"}
+              </p>
+            </div>
+            {directoryQuery.isFetching ? <span className="text-xs text-muted">Refreshing…</span> : null}
+          </div>
+
+          {directoryQuery.isLoading ? (
+            <div className="space-y-2 p-5">
+              {Array.from({ length: 6 }, (_, index) => (
+                <div key={index} className="h-14 animate-pulse border border-line bg-background" />
+              ))}
+            </div>
+          ) : directoryQuery.isError ? (
+            <div className="p-5 text-sm text-danger">
+              {directoryQuery.error instanceof Error
+                ? directoryQuery.error.message
+                : "The trader directory could not be loaded."}
+            </div>
+          ) : traders.length === 0 ? (
+            <div className="p-5">
+              <EmptyState
+                icon={UserRoundSearch}
+                title="No matching traders"
+                description="Adjust the search or CRM filters to widen the directory."
+              />
+            </div>
+          ) : (
+            <div className="invisible-scrollbar overflow-x-auto">
+              <table className="w-full min-w-[1180px] text-left text-sm">
+                <thead className="bg-panel-strong text-[11px] uppercase tracking-[0.12em] text-muted">
+                  <tr>
+                    <th className="px-4 py-3">Trader</th>
+                    <th className="px-4 py-3">Segment</th>
+                    <th className="px-4 py-3">Accounts</th>
+                    <th className="px-4 py-3">Equity</th>
+                    <th className="px-4 py-3">Risk</th>
+                    <th className="px-4 py-3">Evaluation</th>
+                    <th className="px-4 py-3">Subscription</th>
+                    <th className="px-4 py-3">Last account update</th>
+                    <th className="w-12 px-4 py-3"><span className="sr-only">Open</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {traders.map((trader) => {
+                    const active = trader.traderId === selectedTrader?.traderId;
+                    return (
+                      <tr
+                        key={trader.traderId}
+                        className={active ? "bg-accent/[0.07]" : "transition-colors hover:bg-white/[0.025]"}
+                      >
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            className="max-w-[260px] text-left"
+                            onClick={() => setSelectedId(trader.traderId)}
+                          >
+                            <span className="block truncate font-semibold text-foreground">{trader.name}</span>
+                            <span className="mt-0.5 block truncate text-xs text-muted">{trader.email}</span>
+                          </button>
+                        </td>
+                        <td className="px-4 py-3"><StatusPill tone={trader.segment === "AT_RISK" ? "danger" : "muted"}>{trader.segment}</StatusPill></td>
+                        <td className="whitespace-nowrap px-4 py-3 text-muted">{trader.connectedAccountCount} / {trader.accounts.length} connected</td>
+                        <td className="whitespace-nowrap px-4 py-3 font-semibold text-foreground">{equityLabel(trader)}</td>
+                        <td className="px-4 py-3">
+                          <StatusPill tone={riskTone(trader.highestRiskSeverity)}>
+                            {trader.openRiskEventCount ? `${trader.openRiskEventCount} open` : "Clear"}
+                          </StatusPill>
+                        </td>
+                        <td className="px-4 py-3 text-muted">{trader.evaluationStatus ?? "—"}</td>
+                        <td className="px-4 py-3">
+                          {trader.subscription ? (
+                            <div className="max-w-[180px]">
+                              <p className="truncate text-foreground">{trader.subscription.name}</p>
+                              <p className="mt-0.5 text-xs text-muted">{trader.subscription.status}</p>
+                            </div>
+                          ) : "—"}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-3 text-muted">{dateLabel(trader.lastActivityAt, true)}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            aria-label={`Open ${trader.name}`}
+                            onClick={() => setSelectedId(trader.traderId)}
+                            className="grid h-8 w-8 place-items-center border border-line text-muted hover:border-accent/40 hover:text-foreground"
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
+
+          {pagination && pagination.totalPages > 1 ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-xs text-muted">
+              <span>
+                Showing {(pagination.page - 1) * pagination.pageSize + 1}–
+                {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
+              </span>
+              <div className="flex items-center gap-2">
+                <GhostButton type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
+                  Previous
+                </GhostButton>
+                <span className="px-2 font-semibold text-foreground">{pagination.page} / {pagination.totalPages}</span>
+                <GhostButton
+                  type="button"
+                  disabled={page >= pagination.totalPages}
+                  onClick={() => setPage((value) => Math.min(pagination.totalPages, value + 1))}
+                >
+                  Next
+                </GhostButton>
+              </div>
+            </div>
+          ) : null}
         </Panel>
 
-        <Panel className="flex min-h-0 flex-col overflow-hidden lg:h-full">
-          {selectedContact ? (
+        <Panel className="min-w-0 2xl:sticky 2xl:top-5 2xl:max-h-[calc(100vh-120px)] 2xl:overflow-y-auto">
+          {selectedTrader ? (
             <>
-              <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Recent activity</p>
-                  <h3 className="mt-2 text-xl font-semibold text-foreground">{selectedContact.name}</h3>
-                  <p className="mt-1 text-sm leading-6 text-muted">Latest notes and CRM updates.</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Trader profile</p>
+                  <h2 className="mt-2 truncate text-xl font-semibold text-foreground">{selectedTrader.name}</h2>
+                  <p className="mt-1 truncate text-sm text-muted">{selectedTrader.email}</p>
                 </div>
-                <GhostButton type="button" onClick={() => setActiveOverlay("ACTIVITY")}>
-                  Open activity
-                </GhostButton>
+                <StatusPill tone={statusTone(selectedTrader.profileStatus)}>{selectedTrader.profileStatus}</StatusPill>
               </div>
 
-              <div className="invisible-scrollbar mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto">
-                {recentNotes.length === 0 ? (
-                  <div className="border-t border-line py-4">
-                    <p className="text-sm font-semibold text-foreground">No notes yet</p>
-                    <p className="mt-1 text-sm text-muted">This profile does not have any CRM notes.</p>
+              <dl className="mt-5 grid grid-cols-2 overflow-hidden border-l border-t border-line">
+                <div className="border-b border-r border-line bg-background p-3">
+                  <dt className="text-[11px] uppercase tracking-[0.14em] text-muted">Segment</dt>
+                  <dd className="mt-1 font-semibold text-foreground">{selectedTrader.segment}</dd>
+                </div>
+                <div className="border-b border-r border-line bg-background p-3">
+                  <dt className="text-[11px] uppercase tracking-[0.14em] text-muted">Partner</dt>
+                  <dd className="mt-1 truncate font-semibold text-foreground">{selectedTrader.partner?.name ?? "Unassigned"}</dd>
+                </div>
+                <div className="border-b border-r border-line bg-background p-3">
+                  <dt className="text-[11px] uppercase tracking-[0.14em] text-muted">Evaluation</dt>
+                  <dd className="mt-1 font-semibold text-foreground">{selectedTrader.evaluationStatus ?? "None"}</dd>
+                </div>
+                <div className="border-b border-r border-line bg-background p-3">
+                  <dt className="text-[11px] uppercase tracking-[0.14em] text-muted">Joined</dt>
+                  <dd className="mt-1 font-semibold text-foreground">{dateLabel(selectedTrader.joinedAt)}</dd>
+                </div>
+              </dl>
+
+              <div className="mt-5 border-t border-line pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-foreground">Trading accounts</h3>
+                    <p className="mt-1 text-xs text-muted">Latest synchronized account state.</p>
+                  </div>
+                  <StatusPill tone="muted">{selectedTrader.accounts.length}</StatusPill>
+                </div>
+                {selectedTrader.accounts.length ? (
+                  <div className="mt-3 divide-y divide-line border-y border-line">
+                    {selectedTrader.accounts.map((account) => (
+                      <div key={account.id} className="py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-foreground">{account.name}</p>
+                            <p className="mt-0.5 truncate text-xs text-muted">
+                              {account.brokerName}
+                              {account.brokerAccountId ? ` · …${account.brokerAccountId.slice(-4)}` : ""}
+                            </p>
+                          </div>
+                          <StatusPill tone={account.status === "CONNECTED" ? "lime" : "muted"}>{account.status}</StatusPill>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted">
+                          <span>{account.equity ? formatMoney(account.equity) : "Equity not synced"}</span>
+                          <span>{dateLabel(account.lastSyncedAt, true)}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
-                  recentNotes.map((note) => (
-                    <div key={note.id} className="border-t border-line py-4">
-                      <p className="text-sm leading-6 text-foreground">{note.note}</p>
-                      <p className="mt-2 text-xs text-muted">
-                        {note.authorName} - {new Date(note.createdAt).toLocaleString()}
-                      </p>
+                  <p className="mt-3 text-sm leading-6 text-muted">No trading accounts are connected to this trader.</p>
+                )}
+              </div>
+
+              <div className="mt-5 border-t border-line pt-4">
+                <h3 className="font-semibold text-foreground">Billing</h3>
+                {selectedTrader.subscription ? (
+                  <div className="mt-3 border border-line bg-background p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="font-semibold text-foreground">{selectedTrader.subscription.name}</p>
+                      <StatusPill tone={selectedTrader.subscription.status === "ACTIVE" ? "lime" : "muted"}>
+                        {selectedTrader.subscription.status}
+                      </StatusPill>
                     </div>
-                  ))
+                    <p className="mt-2 text-xs text-muted">
+                      Period ends: {dateLabel(selectedTrader.subscription.currentPeriodEnd)}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-muted">No subscription record exists for this trader.</p>
+                )}
+              </div>
+
+              <div className="mt-5 border-t border-line pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-foreground">CRM notes</h3>
+                    <p className="mt-1 text-xs text-muted">{selectedTrader.noteCount} saved notes</p>
+                  </div>
+                  <PrimaryButton type="button" onClick={() => setNoteOpen(true)}>
+                    <MessageSquarePlus className="mr-2 inline-block h-4 w-4" />
+                    Add note
+                  </PrimaryButton>
+                </div>
+                {notesQuery.isLoading ? (
+                  <p className="mt-3 text-sm text-muted">Loading notes…</p>
+                ) : notes.length ? (
+                  <div className="mt-3 divide-y divide-line border-y border-line">
+                    {notes.slice(0, 5).map((note) => (
+                      <article key={note.id} className="py-3">
+                        <p className="text-sm leading-6 text-foreground">{note.note}</p>
+                        <p className="mt-1 text-xs text-muted">{note.authorName} · {dateLabel(note.createdAt, true)}</p>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-muted">No CRM notes have been recorded.</p>
                 )}
               </div>
             </>
           ) : (
             <EmptyState
-              title="No activity to show"
-              description="Pick a contact to surface notes and activity history."
-              action={
-                <GhostButton type="button" onClick={() => setActiveOverlay("CONTACT_DIRECTORY")}>
-                  Open directory
-                </GhostButton>
-              }
+              icon={UserRoundSearch}
+              title="Select a trader"
+              description="Choose a directory row to inspect account, risk, billing, and CRM information."
             />
           )}
         </Panel>
       </div>
 
-      <CrmOverlay
-        open={activeOverlay !== null}
-        activeTab={activeOverlay}
-        onOpenChange={(open) => {
-          if (!open) {
-            setActiveOverlay(null);
-          }
-        }}
-        onTabChange={setActiveOverlay}
-        contacts={crmContacts}
-        selectedContact={selectedContact}
-        selectedId={effectiveSelectedId}
-        onSelectContact={(id) => setSelectedId(id)}
-        query={query}
-        onQueryChange={(value) => {
-          setQuery(value);
-          setCurrentPage(1);
-        }}
-        roleFilter={roleFilter}
-        onRoleFilterChange={(value) => {
-          setRoleFilter(value);
-          setCurrentPage(1);
-        }}
-        segmentFilter={segmentFilter}
-        onSegmentFilterChange={(value) => {
-          setSegmentFilter(value);
-          setCurrentPage(1);
-        }}
-        currentPage={currentPageSafe}
-        pageSize={pageSize}
-        totalContacts={totalContacts}
-        visibleContacts={visibleContacts}
-        onCurrentPageChange={setCurrentPage}
-        selectedNotes={selectedNotes}
-        onOpenNoteEditor={() => setNoteOpen(true)}
-        onFeedbackMessage={setFeedbackMessage}
-      />
-
-      <NoteEditorDialog
-        open={noteOpen}
-        onOpenChange={setNoteOpen}
-        selectedName={selectedContact?.name ?? ""}
-        onSave={setFeedbackMessage}
-      />
+      <Dialog.Root open={noteOpen} onOpenChange={setNoteOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 border border-line bg-panel p-5 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+            <Dialog.Title className="text-lg font-semibold text-foreground">Add CRM note</Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm leading-6 text-muted">
+              Save a real communication note for {selectedTrader?.name ?? "the selected trader"}.
+            </Dialog.Description>
+            <form className="mt-5" onSubmit={submitNote}>
+              <label className="grid gap-2">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">Note</span>
+                <textarea
+                  required
+                  value={noteText}
+                  onChange={(event) => setNoteText(event.target.value)}
+                  placeholder="Add follow-up details, account context, or review notes."
+                  className={textareaClassName}
+                />
+              </label>
+              <div className="mt-5 flex justify-end gap-3 border-t border-line pt-4">
+                <Dialog.Close asChild>
+                  <GhostButton type="button">Cancel</GhostButton>
+                </Dialog.Close>
+                <PrimaryButton type="submit" disabled={noteMutation.isPending || !noteText.trim()}>
+                  {noteMutation.isPending ? "Saving…" : "Save note"}
+                </PrimaryButton>
+              </div>
+            </form>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                aria-label="Close note dialog"
+                className="absolute right-4 top-4 grid h-9 w-9 place-items-center border border-line bg-background text-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </WorkspacePage>
   );
 }

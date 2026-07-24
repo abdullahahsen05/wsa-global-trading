@@ -31,6 +31,12 @@ export interface TraderAccountSummary {
   updatedAt: string;
 }
 
+export interface AdminTradingAccountSummary extends TraderAccountSummary {
+  traderId: string;
+  traderName: string;
+  traderEmail: string;
+}
+
 export interface TradeDto {
   id: string;
   shortTradeId: string;
@@ -136,11 +142,105 @@ export interface TraderProfileDto {
   lastActivityAt: string;
 }
 
+export interface DirectoryPaginationDto {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface AdminUserDirectoryItemDto {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  status: "ACTIVE" | "SUSPENDED" | "PENDING";
+  partnerId: string | null;
+  joinedAt: string;
+}
+
+export interface AdminUserDirectoryDto {
+  items: AdminUserDirectoryItemDto[];
+  pagination: DirectoryPaginationDto;
+  counts: {
+    total: number;
+    traders: number;
+    admins: number;
+    partners: number;
+    pending: number;
+    suspended: number;
+  };
+}
+
+export interface TraderCrmAccountDto {
+  id: string;
+  name: string;
+  brokerName: string;
+  brokerAccountId: string | null;
+  status: AccountStatus;
+  currency: string;
+  equity: MoneyValue | null;
+  floatingPnl: MoneyValue | null;
+  lastSyncedAt: string | null;
+}
+
+export interface TraderCrmSubscriptionDto {
+  name: string;
+  status: string;
+  currentPeriodEnd: string | null;
+}
+
+export interface TraderCrmItemDto {
+  traderId: string;
+  userId: string;
+  name: string;
+  email: string;
+  profileStatus: "ACTIVE" | "SUSPENDED" | "PENDING";
+  segment: "EVALUATION" | "FUNDED" | "AT_RISK" | "VIP";
+  joinedAt: string;
+  partner: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
+  accounts: TraderCrmAccountDto[];
+  connectedAccountCount: number;
+  totalEquity: MoneyValue | null;
+  floatingPnl: MoneyValue | null;
+  openRiskEventCount: number;
+  highestRiskSeverity: RiskSeverity | null;
+  evaluationStatus: string | null;
+  subscription: TraderCrmSubscriptionDto | null;
+  noteCount: number;
+  lastActivityAt: string | null;
+}
+
+export interface TraderCrmDirectoryDto {
+  items: TraderCrmItemDto[];
+  pagination: DirectoryPaginationDto;
+  counts: {
+    total: number;
+    funded: number;
+    evaluation: number;
+    atRisk: number;
+    vip: number;
+    openRiskEvents: number;
+    activeSubscriptions: number;
+  };
+}
+
 export interface AdminSummaryDto {
   activeTraders: number;
   connectedAccounts: number;
   openRiskEvents: number;
   monthlyRecurringRevenue: MoneyValue;
+}
+
+export interface AdminEquityTimelineDto {
+  points: EquityPoint[];
+  currency: string | null;
+  mixedCurrencies: boolean;
+  capturedAt: string | null;
 }
 
 export type SubscriptionStatus = "ACTIVE" | "PAUSED" | "TRIAL" | "CANCELLED";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCcw, WalletCards } from "lucide-react";
+import { RefreshCcw } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import {
   DataTable,
@@ -161,19 +161,6 @@ export default function AdminBrokersPage() {
       title="Broker catalog"
       description="Manage the broker companies and MetaTrader servers traders can select during account connection."
     >
-      <div className="border border-line border-l-2 border-l-accent bg-panel px-4 py-3">
-        <div className="flex items-start gap-3">
-          <WalletCards className="mt-0.5 h-5 w-5 text-accent" />
-          <div>
-            <h2 className="font-semibold text-foreground">Admin-configured catalog</h2>
-            <p className="mt-1 text-sm leading-6 text-muted">
-              The installed MetaApi SDK does not provide reliable broker-server discovery. These
-              entries are maintained by WSA Global administrators and are never labeled as live-discovered data.
-            </p>
-          </div>
-        </div>
-      </div>
-
       {notice ? (
         <div className={`mt-5 rounded-[4px] border px-4 py-3 text-sm ${
           notice.tone === "success"

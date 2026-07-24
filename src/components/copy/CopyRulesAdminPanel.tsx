@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DataTable, Panel, PrimaryButton, StatusPill } from "@/components/app/WorkspaceUI";
-import { SelectField, TextField } from "@/components/app/FormFields";
+import { DataTable, GhostButton, Panel, PrimaryButton, StatusPill } from "@/components/app/WorkspaceUI";
+import { SearchField, SelectField, TextField } from "@/components/app/FormFields";
 import type { CopyAccountRuleDto, CopyGlobalSettingsDto, CopyRuleEventDto } from "@/lib/copy/types";
-import type { TraderAccountSummary } from "@/lib/domain/types";
+import type { AdminTradingAccountSummary } from "@/lib/domain/types";
+
+const RULE_EVENT_PAGE_SIZE = 10;
 
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
@@ -51,6 +53,8 @@ const symbols = (value: string): string[] | null => {
 export function CopyRulesAdminPanel() {
   const queryClient = useQueryClient();
   const [accountId, setAccountId] = useState("");
+  const [accountSearch, setAccountSearch] = useState("");
+  const [eventPage, setEventPage] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
   const [copyEnabledDraft, setCopyEnabledDraft] = useState<boolean | null>(null);
   const [pauseOnDisconnectDraft, setPauseOnDisconnectDraft] = useState<boolean | null>(null);
@@ -61,7 +65,7 @@ export function CopyRulesAdminPanel() {
     queryKey: ["admin-copy-settings"],
     queryFn: () => getJson("/api/admin/copy/settings"),
   });
-  const { data: accounts = [] } = useQuery<TraderAccountSummary[]>({
+  const { data: accounts = [] } = useQuery<AdminTradingAccountSummary[]>({
     queryKey: ["admin-accounts"],
     queryFn: () => getJson("/api/admin/accounts"),
   });
@@ -73,8 +77,29 @@ export function CopyRulesAdminPanel() {
   });
   const { data: events = [] } = useQuery<CopyRuleEventDto[]>({
     queryKey: ["admin-copy-rule-events"],
-    queryFn: () => getJson("/api/admin/copy/rules/events?limit=30"),
+    queryFn: () => getJson("/api/admin/copy/rules/events?limit=200"),
   });
+  const normalizedAccountSearch = accountSearch.trim().toLowerCase();
+  const matchedAccounts = accounts.filter((account) => (
+    normalizedAccountSearch.length === 0
+    || account.accountName.toLowerCase().includes(normalizedAccountSearch)
+    || account.traderName.toLowerCase().includes(normalizedAccountSearch)
+    || account.traderEmail.toLowerCase().includes(normalizedAccountSearch)
+    || account.brokerName.toLowerCase().includes(normalizedAccountSearch)
+    || account.serverName?.toLowerCase().includes(normalizedAccountSearch) === true
+  ));
+  const selectedAccount = accounts.find((account) => account.accountId === selectedAccountId);
+  const accountOptions = [
+    ...(selectedAccount && !matchedAccounts.slice(0, 100).some((account) => account.accountId === selectedAccount.accountId)
+      ? [selectedAccount]
+      : []),
+    ...matchedAccounts.slice(0, 100),
+  ];
+  const eventPageSafe = Math.min(eventPage, Math.max(1, Math.ceil(events.length / RULE_EVENT_PAGE_SIZE)));
+  const visibleEvents = events.slice(
+    (eventPageSafe - 1) * RULE_EVENT_PAGE_SIZE,
+    eventPageSafe * RULE_EVENT_PAGE_SIZE,
+  );
 
   const copyEnabled = copyEnabledDraft ?? settings?.copyEnabled ?? true;
   const pauseOnDisconnect = pauseOnDisconnectDraft ?? settings?.pauseOnDisconnect ?? true;
@@ -125,7 +150,7 @@ export function CopyRulesAdminPanel() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Global stoppage rules</h2>
-            <p className="mt-1 text-sm text-muted">Applied before every simulated or live copied order.</p>
+            <p className="mt-1 text-sm text-muted">Applied before every live copied order.</p>
           </div>
           <label className="flex items-center gap-2 text-sm font-semibold text-foreground">
             <input type="checkbox" checked={copyEnabled} onChange={(event) => setCopyEnabledDraft(event.target.checked)} />
@@ -166,12 +191,42 @@ export function CopyRulesAdminPanel() {
 
       <Panel className="overflow-hidden">
         <h2 className="text-lg font-semibold text-foreground">Per-account rules</h2>
-        <p className="mt-1 text-sm text-muted">Override platform defaults for specific connected trading accounts.</p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <p className="mt-1 text-sm text-muted">Find a trader account, then override the platform defaults for that account only.</p>
+        <div className="mt-4 grid gap-4 border-y border-line py-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.8fr)]">
+          <div>
+            <SearchField
+              label="Find trading account"
+              placeholder="Trader, email, account, broker, or server"
+              value={accountSearch}
+              onChange={(event) => setAccountSearch(event.target.value)}
+            />
+            <p className="mt-2 text-xs text-muted">{matchedAccounts.length} matching accounts · showing up to 100</p>
+          </div>
           <SelectField label="Trading account" value={selectedAccountId} onChange={(event) => { setAccountId(event.target.value); setAccountFormDraft(null); }}>
             <option value="">Select account</option>
-            {accounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName} · {account.brokerName}</option>)}
+            {accountOptions.map((account) => (
+              <option key={account.accountId} value={account.accountId}>
+                {account.accountName} · {account.traderName} · {account.brokerName}
+              </option>
+            ))}
           </SelectField>
+        </div>
+        {selectedAccount ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-4 py-3">
+            <div className="min-w-0">
+              <p className="font-semibold text-foreground">{selectedAccount.accountName}</p>
+              <p className="mt-1 truncate text-xs text-muted">
+                {[selectedAccount.traderName, selectedAccount.traderEmail, selectedAccount.brokerName, selectedAccount.serverName]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </div>
+            <StatusPill tone={selectedAccount.status === "CONNECTED" ? "lime" : "accent"}>
+              {selectedAccount.status}
+            </StatusPill>
+          </div>
+        ) : null}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <TextField label="Max daily loss %" type="number" min="0.01" step="0.01" value={accountForm.maxDailyLossPercent} onChange={(e) => setAccount("maxDailyLossPercent", e.target.value)} />
           <TextField label="Max drawdown %" type="number" min="0.01" step="0.01" value={accountForm.maxDrawdownPercent} onChange={(e) => setAccount("maxDrawdownPercent", e.target.value)} />
           <TextField label="Max copied lots" type="number" min="0.01" step="0.01" value={accountForm.maxCopiedLots} onChange={(e) => setAccount("maxCopiedLots", e.target.value)} />
@@ -217,16 +272,37 @@ export function CopyRulesAdminPanel() {
             No copy rule has blocked an event yet.
           </p>
         ) : (
-          <DataTable
-            headers={["Time", "Scope", "Rule", "Mode", "Reason"]}
-            rows={events.map((event) => [
-              <span key="time">{new Date(event.createdAt).toLocaleString()}</span>,
-              <StatusPill key="scope" tone={event.scope === "GLOBAL" ? "danger" : "accent"}>{event.scope}</StatusPill>,
-              <span key="rule" className="font-mono text-xs">{event.ruleCode}</span>,
-              <StatusPill key="mode" tone={event.mode === "LIVE" ? "danger" : "muted"}>{event.mode}</StatusPill>,
-              <span key="reason">{event.reason}</span>,
-            ])}
-          />
+          <>
+            <div className="invisible-scrollbar min-w-0 overflow-x-auto">
+              <DataTable
+                headers={["Time", "Scope", "Rule", "Mode", "Reason"]}
+                rows={visibleEvents.map((event) => [
+                  <span key="time" className="min-w-[160px]">{new Date(event.createdAt).toLocaleString()}</span>,
+                  <StatusPill key="scope" tone={event.scope === "GLOBAL" ? "danger" : "accent"}>{event.scope}</StatusPill>,
+                  <span key="rule" className="min-w-[180px] font-mono text-xs">{event.ruleCode}</span>,
+                  <StatusPill key="mode" tone={event.mode === "LIVE" ? "danger" : "muted"}>{event.mode}</StatusPill>,
+                  <span key="reason" className="block min-w-[260px] whitespace-normal">{event.reason}</span>,
+                ])}
+              />
+            </div>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+              <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted">
+                {(eventPageSafe - 1) * RULE_EVENT_PAGE_SIZE + 1}-{Math.min(eventPageSafe * RULE_EVENT_PAGE_SIZE, events.length)} of {events.length}
+              </p>
+              <div className="flex gap-2">
+                <GhostButton type="button" disabled={eventPageSafe <= 1} onClick={() => setEventPage(Math.max(1, eventPageSafe - 1))}>
+                  Previous
+                </GhostButton>
+                <GhostButton
+                  type="button"
+                  disabled={eventPageSafe >= Math.ceil(events.length / RULE_EVENT_PAGE_SIZE)}
+                  onClick={() => setEventPage(Math.min(Math.ceil(events.length / RULE_EVENT_PAGE_SIZE), eventPageSafe + 1))}
+                >
+                  Next
+                </GhostButton>
+              </div>
+            </div>
+          </>
         )}
       </Panel>
     </div>

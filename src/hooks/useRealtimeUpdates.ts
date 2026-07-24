@@ -23,6 +23,7 @@ export function useRealtimeUpdates() {
       }, () => {
         queryClient.invalidateQueries({ queryKey: ['trading-accounts'] })
         queryClient.invalidateQueries({ queryKey: ['equity-curve'] })
+        queryClient.invalidateQueries({ queryKey: ['analytics-summary'] })
       })
       .subscribe()
 
@@ -35,6 +36,7 @@ export function useRealtimeUpdates() {
         table: 'trades',
       }, (payload) => {
         queryClient.invalidateQueries({ queryKey: ['trades'] })
+        queryClient.invalidateQueries({ queryKey: ['analytics-summary'] })
         const newStatus = 'new' in payload ? (payload.new as { status?: string } | null)?.status : undefined
         if (payload.eventType !== 'INSERT' || newStatus === 'OPEN') {
           queryClient.invalidateQueries({ queryKey: ['trading-accounts'] })
@@ -54,6 +56,17 @@ export function useRealtimeUpdates() {
       })
       .subscribe()
 
+    const riskRulesChannel = supabase
+      .channel('risk-rules-realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'risk_rules',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['risk-rules'] })
+      })
+      .subscribe()
+
     // Subscribe to notifications
     const notificationChannel = supabase
       .channel('notifications-realtime')
@@ -70,6 +83,7 @@ export function useRealtimeUpdates() {
       supabase.removeChannel(snapshotChannel)
       supabase.removeChannel(tradeChannel)
       supabase.removeChannel(riskChannel)
+      supabase.removeChannel(riskRulesChannel)
       supabase.removeChannel(notificationChannel)
     }
   }, [queryClient])

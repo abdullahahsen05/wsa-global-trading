@@ -20,6 +20,9 @@ const snapshotMs = Math.max(
   10_000,
   Number.parseInt(process.env.WSA_RISK_SNAPSHOT_MS ?? "30000", 10) || 30_000,
 );
+const liveCopyStreamEnabled =
+  process.env.WSA_COPY_ENGINE_ENABLED === "true"
+  && process.env.BROKER_EXECUTION_ENABLED === "true";
 const streams = new Map<string, StreamHandle>();
 let stopping = false;
 
@@ -402,8 +405,26 @@ async function reconcileStreams() {
     .in("status", ["CONNECTED", "RESTRICTED"])
     .limit(2_000);
   if (error) throw new Error(`Risk accounts could not be loaded: ${error.message}`);
+  const copyOwnedMasterIds = new Set<string>();
+  if (liveCopyStreamEnabled) {
+    const { data: strategyRows, error: strategyError } = await supabase
+      .from("copy_strategies")
+      .select("master_account_id")
+      .eq("status", "ACTIVE")
+      .eq("live_enabled", true)
+      .in("engine_status", ["LIVE", "STARTING", "ERROR"])
+      .limit(1_000);
+    if (strategyError) {
+      throw new Error(`Copy-owned risk accounts could not be loaded: ${strategyError.message}`);
+    }
+    for (const strategy of strategyRows ?? []) {
+      copyOwnedMasterIds.add(strategy.master_account_id);
+    }
+  }
   const active = new Map(
-    (data ?? []).map((account) => [account.id, account as RiskAccount]),
+    (data ?? [])
+      .filter((account) => !copyOwnedMasterIds.has(account.id))
+      .map((account) => [account.id, account as RiskAccount]),
   );
 
   for (const [accountId, stream] of streams) {

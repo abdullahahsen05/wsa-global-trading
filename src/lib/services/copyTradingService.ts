@@ -395,9 +395,14 @@ export async function updateCopyStrategy(
     maxOpenCopiedTrades: "max_open_copied_trades",
     symbolAllowlist: "symbol_allowlist",
     symbolBlocklist: "symbol_blocklist",
+    standardMonthlyPrice: "standard_monthly_price",
+    premiumMonthlyPrice: "premium_monthly_price",
   };
   for (const [k, col] of Object.entries(map)) {
     if (patch[k] !== undefined) row[col] = patch[k];
+  }
+  if (patch.standardMonthlyPrice !== undefined) {
+    row.monthly_price = patch.standardMonthlyPrice;
   }
 
   const { data, error } = await supabase
@@ -408,6 +413,38 @@ export async function updateCopyStrategy(
     .maybeSingle();
   if (error) throw new Error(`Failed to update strategy: ${error.message}`);
   if (!data) throw new CopyError(COPY_ERROR.COPY_STRATEGY_NOT_FOUND, "Strategy not found", 404);
+  const updatedStrategy = data as StrategyRow;
+
+  const billingProductUpdates: PromiseLike<{ error: { message: string } | null }>[] = [];
+  if (updatedStrategy.standard_billing_product_id) {
+    billingProductUpdates.push(
+      supabase
+        .from("billing_products")
+        .update({
+          name: `${updatedStrategy.name} Standard Copy Strategy`,
+          amount: Number(updatedStrategy.standard_monthly_price),
+        })
+        .eq("id", updatedStrategy.standard_billing_product_id),
+    );
+  }
+  if (updatedStrategy.premium_billing_product_id) {
+    billingProductUpdates.push(
+      supabase
+        .from("billing_products")
+        .update({
+          name: `${updatedStrategy.name} Premium Fast Copy Strategy`,
+          amount: Number(updatedStrategy.premium_monthly_price),
+        })
+        .eq("id", updatedStrategy.premium_billing_product_id),
+    );
+  }
+  if (billingProductUpdates.length > 0) {
+    const results = await Promise.all(billingProductUpdates);
+    const billingError = results.find((result) => result.error)?.error;
+    if (billingError) {
+      throw new Error(`Strategy pricing changed, but billing products could not be updated: ${billingError.message}`);
+    }
+  }
 
   await writeAuditLog({
     actorUserId,
@@ -420,9 +457,59 @@ export async function updateCopyStrategy(
   const { data: master } = await supabase
     .from("trading_accounts")
     .select("account_name")
-    .eq("id", (data as StrategyRow).master_account_id)
+    .eq("id", updatedStrategy.master_account_id)
     .maybeSingle();
-  return mapStrategy(data as StrategyRow, (master?.account_name as string) ?? null, 0);
+  return mapStrategy(updatedStrategy, (master?.account_name as string) ?? null, 0);
+}
+
+export async function deleteCopyStrategy(
+  strategyId: string,
+  actorUserId: string,
+): Promise<{ deleted: true }> {
+  const supabase = createAdminClient();
+  const strategy = await getStrategyRow(strategyId);
+  if (strategy.status !== "DRAFT" && strategy.status !== "ARCHIVED") {
+    throw new CopyError(
+      COPY_ERROR.VALIDATION_ERROR,
+      "Only draft or archived strategies can be deleted.",
+      409,
+    );
+  }
+
+  const [
+    { count: followerCount, error: followerError },
+    { count: orderCount, error: orderError },
+  ] = await Promise.all([
+    supabase
+      .from("copy_strategy_followers")
+      .select("id", { count: "exact", head: true })
+      .eq("strategy_id", strategyId),
+    supabase
+      .from("payment_orders")
+      .select("id", { count: "exact", head: true })
+      .eq("copy_strategy_id", strategyId),
+  ]);
+  if (followerError) throw new Error(`Failed to inspect strategy followers: ${followerError.message}`);
+  if (orderError) throw new Error(`Failed to inspect strategy orders: ${orderError.message}`);
+  if ((followerCount ?? 0) > 0 || (orderCount ?? 0) > 0) {
+    throw new CopyError(
+      COPY_ERROR.VALIDATION_ERROR,
+      "This strategy has follower or payment history and must remain archived.",
+      409,
+    );
+  }
+
+  const { error } = await supabase.from("copy_strategies").delete().eq("id", strategyId);
+  if (error) throw new Error(`Failed to delete strategy: ${error.message}`);
+
+  await writeAuditLog({
+    actorUserId,
+    action: "COPY_STRATEGY_DELETED",
+    entityType: "copy_strategy",
+    entityId: strategyId,
+    metadata: { name: strategy.name, status: strategy.status },
+  });
+  return { deleted: true };
 }
 
 // ── Master monitoring ──────────────────────────────────────────────────────

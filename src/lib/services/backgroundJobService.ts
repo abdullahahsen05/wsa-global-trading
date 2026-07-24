@@ -124,24 +124,37 @@ export async function claimNextJobs(params: {
     p_types: params.types ?? null,
   });
   if (error) throw new Error(`Failed to claim jobs: ${error.message}`);
-  return ((data ?? []) as Row[]).map(mapJob);
+  return ((data ?? []) as Row[])
+    .map(mapJob)
+    .sort((a, b) =>
+      a.priority - b.priority
+      || a.runAfter.localeCompare(b.runAfter)
+      || a.createdAt.localeCompare(b.createdAt),
+    );
 }
 
-async function update(jobId: string, patch: Record<string, unknown>): Promise<void> {
+async function updateClaimed(job: BackgroundJob, patch: Record<string, unknown>): Promise<boolean> {
   const supabase = createAdminClient();
-  const { error } = await supabase.from("background_jobs").update(patch).eq("id", jobId);
-  if (error) throw new Error(`Failed to update job: ${error.message}`);
+  let query = supabase
+    .from("background_jobs")
+    .update(patch)
+    .eq("id", job.id)
+    .eq("status", "RUNNING");
+  if (job.lockedBy) query = query.eq("locked_by", job.lockedBy);
+  const { data, error } = await query.select("id").maybeSingle();
+  if (error) throw new Error(`Failed to finalize job: ${error.message}`);
+  return Boolean(data);
 }
 
 /**
  * Finalize a claimed job from its processor result. FAILED jobs reschedule with
  * backoff while attempts remain (unless retry === false); otherwise terminal.
  */
-export async function finalizeJob(job: BackgroundJob, result: JobResult): Promise<void> {
+export async function finalizeJob(job: BackgroundJob, result: JobResult): Promise<boolean> {
   const now = new Date().toISOString();
 
   if (result.status === "SUCCESS") {
-    await update(job.id, {
+    return updateClaimed(job, {
       status: "SUCCESS",
       completed_at: now,
       result: result.result ?? null,
@@ -150,11 +163,10 @@ export async function finalizeJob(job: BackgroundJob, result: JobResult): Promis
       last_error_code: null,
       last_error_message: null,
     });
-    return;
   }
 
   if (result.status === "SKIPPED") {
-    await update(job.id, {
+    return updateClaimed(job, {
       status: "SKIPPED",
       completed_at: now,
       result: result.result ?? null,
@@ -163,13 +175,12 @@ export async function finalizeJob(job: BackgroundJob, result: JobResult): Promis
       last_error_code: result.errorCode ?? null,
       last_error_message: result.errorMessage ?? null,
     });
-    return;
   }
 
   // FAILED
   const canRetry = result.retry !== false && job.attempts < job.maxAttempts;
   if (canRetry) {
-    await update(job.id, {
+    return updateClaimed(job, {
       status: "PENDING",
       run_after: new Date(Date.now() + backoffMs(job.attempts)).toISOString(),
       locked_at: null,
@@ -177,16 +188,15 @@ export async function finalizeJob(job: BackgroundJob, result: JobResult): Promis
       last_error_code: result.errorCode ?? null,
       last_error_message: result.errorMessage ?? null,
     });
-  } else {
-    await update(job.id, {
-      status: "FAILED",
-      failed_at: now,
-      locked_at: null,
-      locked_by: null,
-      last_error_code: result.errorCode ?? null,
-      last_error_message: result.errorMessage ?? null,
-    });
   }
+  return updateClaimed(job, {
+    status: "FAILED",
+    failed_at: now,
+    locked_at: null,
+    locked_by: null,
+    last_error_code: result.errorCode ?? null,
+    last_error_message: result.errorMessage ?? null,
+  });
 }
 
 /** Release jobs stuck in RUNNING past the stale threshold back to PENDING (or FAILED if exhausted). */
@@ -195,18 +205,40 @@ export async function releaseStaleJobs(staleMinutes: number): Promise<number> {
   const cutoff = new Date(Date.now() - staleMinutes * 60_000).toISOString();
   const { data: stale } = await supabase
     .from("background_jobs")
-    .select("id, attempts, max_attempts")
+    .select("id, type, attempts, max_attempts, locked_at")
     .eq("status", "RUNNING")
     .lt("locked_at", cutoff)
     .limit(100);
 
   let released = 0;
-  for (const j of (stale ?? []) as { id: string; attempts: number; max_attempts: number }[]) {
-    const terminal = j.attempts >= j.max_attempts;
-    await update(j.id, terminal
-      ? { status: "FAILED", failed_at: new Date().toISOString(), locked_at: null, locked_by: null, last_error_code: "STALE_TIMEOUT", last_error_message: "Job exceeded the stale-running timeout." }
-      : { status: "PENDING", run_after: new Date().toISOString(), locked_at: null, locked_by: null, last_error_code: "STALE_TIMEOUT", last_error_message: "Released after stale-running timeout." });
-    released++;
+  for (const j of (stale ?? []) as { id: string; type: JobType; attempts: number; max_attempts: number; locked_at: string }[]) {
+    // An external broker action can finish after our process loses contact.
+    // Never automatically retry an uncertain live execution; require an
+    // operator to inspect it and explicitly choose Retry.
+    const uncertainExternalOutcome = ["EXECUTE_COPY_EVENT", "CLOSE_COPY_STRATEGY", "RETRY_COPY_LOG"].includes(j.type);
+    const terminal = uncertainExternalOutcome || j.attempts >= j.max_attempts;
+    const patch = terminal
+      ? {
+          status: "FAILED",
+          failed_at: new Date().toISOString(),
+          locked_at: null,
+          locked_by: null,
+          last_error_code: uncertainExternalOutcome ? "STALE_EXTERNAL_OUTCOME_UNKNOWN" : "STALE_TIMEOUT",
+          last_error_message: uncertainExternalOutcome
+            ? "Live broker operation became stale. Inspect the broker outcome before manually retrying."
+            : "Job exceeded the stale-running timeout.",
+        }
+      : { status: "PENDING", run_after: new Date().toISOString(), locked_at: null, locked_by: null, last_error_code: "STALE_TIMEOUT", last_error_message: "Released after stale-running timeout." };
+    const { data, error } = await supabase
+      .from("background_jobs")
+      .update(patch)
+      .eq("id", j.id)
+      .eq("status", "RUNNING")
+      .eq("locked_at", j.locked_at)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(`Failed to release stale job: ${error.message}`);
+    if (data) released++;
   }
   return released;
 }
@@ -237,6 +269,10 @@ export async function requeueJob(jobId: string): Promise<boolean> {
       locked_by: null,
       failed_at: null,
       completed_at: null,
+      started_at: null,
+      result: null,
+      last_error_code: null,
+      last_error_message: null,
     })
     .eq("id", jobId)
     .in("status", ["FAILED", "CANCELLED", "SKIPPED"])
@@ -266,7 +302,8 @@ export async function listJobs(filters?: {
 
 export async function getJob(jobId: string): Promise<BackgroundJob | null> {
   const supabase = createAdminClient();
-  const { data } = await supabase.from("background_jobs").select(SELECT_COLS).eq("id", jobId).maybeSingle();
+  const { data, error } = await supabase.from("background_jobs").select(SELECT_COLS).eq("id", jobId).maybeSingle();
+  if (error) throw new Error(`Failed to load job: ${error.message}`);
   return data ? mapJob(data as Row) : null;
 }
 

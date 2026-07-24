@@ -16,6 +16,7 @@ export async function GET(request: Request) {
         role: user.role,
         accountId: parsed.data.accountId,
         status: parsed.data.status as TradeStatus | undefined,
+        limit: parsed.data.limit,
       }),
       { headers: { "Cache-Control": "private, no-store, max-age=0" } },
     );

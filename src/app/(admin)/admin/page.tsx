@@ -1,15 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   BadgeDollarSign,
-  ShieldAlert,
+  Search,
+  TrendingDown,
+  TrendingUp,
   Users,
   WalletCards,
 } from "lucide-react";
 import {
+  DataTable,
+  PaginationControls,
   Panel,
   StatusPill,
   WorkspacePage,
@@ -20,12 +24,11 @@ import {
 } from "@/components/admin/AdminOverviewOverlay";
 import type {
   AdminSummaryDto,
-  CrmNoteDto,
+  AdminTradingAccountSummary,
+  AdminEquityTimelineDto,
   EquityPoint,
-  RiskEventDto,
-  RiskRuleDto,
   TradeDto,
-  TraderAccountSummary,
+  TraderCrmDirectoryDto,
   TraderProfileDto,
 } from "@/lib/domain/types";
 import {
@@ -58,8 +61,6 @@ const adminTabs: Array<{
 }> = [
   { key: "OVERVIEW", label: "Overview" },
   { key: "ACCOUNTS", label: "Accounts" },
-  { key: "RISK_QUEUE", label: "Risk Queue" },
-  { key: "CRM", label: "CRM" },
 ];
 
 const toneClasses: Record<
@@ -152,8 +153,14 @@ function PlatformMetricRail({ items }: { items: PlatformMetric[] }) {
 
 function PlatformOversightChart({
   data,
+  currency,
+  mixedCurrencies,
+  isRefreshing,
 }: {
   data: EquityPoint[];
+  currency: string;
+  mixedCurrencies: boolean;
+  isRefreshing: boolean;
 }) {
   const width = 920;
   const height = 300;
@@ -250,26 +257,43 @@ function PlatformOversightChart({
             Platform oversight
           </h2>
           <p className="mt-1 text-sm leading-6 text-muted">
-            Operational health and account movement across the platform.
+            Persisted platform equity from connected-account snapshots.
           </p>
         </div>
 
         <div className="text-right">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
-            Platform equity
+          <p className="flex items-center justify-end gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
+            <span className={`h-1.5 w-1.5 rounded-full ${isRefreshing ? "animate-pulse bg-accent" : "bg-accent-2"}`} />
+            {isRefreshing ? "Refreshing" : "Live snapshots"}
           </p>
           <p className="mt-1 text-base font-semibold text-accent tabular-nums">
             {latest
               ? formatMoney({
                   amount: latest.equity,
-                  currency: "USD",
+                  currency,
                 })
               : "$0"}
           </p>
         </div>
       </header>
 
-      <div className="px-4 pb-3 pt-4">
+      {mixedCurrencies ? (
+        <div className="grid h-[312px] place-items-center px-6 text-center">
+          <div>
+            <p className="font-semibold text-foreground">Multiple account currencies</p>
+            <p className="mt-2 max-w-lg text-sm leading-6 text-muted">
+              Platform equity is not combined without a verified conversion rate. Individual live equities remain available in the watchlist and account supervision.
+            </p>
+          </div>
+        </div>
+      ) : data.length === 0 ? (
+        <div className="grid h-[312px] place-items-center px-6 text-center">
+          <div>
+            <p className="font-semibold text-foreground">No equity snapshots yet</p>
+            <p className="mt-2 text-sm text-muted">Connect and synchronize an account to begin the platform timeline.</p>
+          </div>
+        </div>
+      ) : <div className="px-4 pb-3 pt-4">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="h-[280px] w-full overflow-visible"
@@ -310,7 +334,7 @@ function PlatformOversightChart({
                   notation: "compact",
                   maximumFractionDigits: 0,
                   style: "currency",
-                  currency: "USD",
+                  currency,
                 }).format(tick.value)}
               </text>
             </g>
@@ -378,7 +402,7 @@ function PlatformOversightChart({
             );
           })}
         </svg>
-      </div>
+      </div>}
     </section>
   );
 }
@@ -387,6 +411,9 @@ export default function AdminOverviewPage() {
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [overlayView, setOverlayView] =
     useState<AdminOverviewView>("OVERVIEW");
+  const [watchPage, setWatchPage] = useState(1);
+  const [watchPageSize, setWatchPageSize] = useState(25);
+  const [watchSearch, setWatchSearch] = useState("");
 
   const { data: sessionUser } = useQuery<SessionUser>({
     queryKey: ["session"],
@@ -418,10 +445,15 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: true,
   });
 
-  const { data: tradingAccounts = [] } = useQuery<
-    TraderAccountSummary[]
+  const {
+    data: tradingAccounts = [],
+    dataUpdatedAt: accountsFetchedAt,
+  } = useQuery<
+    AdminTradingAccountSummary[]
   >({
     queryKey: ["admin-accounts"],
     queryFn: async () => {
@@ -436,12 +468,21 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
   });
 
-  const { data: traders = [] } = useQuery<TraderProfileDto[]>({
-    queryKey: ["crm-traders"],
+  const { data: traderDirectory } = useQuery<TraderCrmDirectoryDto>({
+    queryKey: ["admin-overview-traders", watchPage, watchPageSize, watchSearch],
     queryFn: async () => {
-      const res = await fetch("/api/crm/traders");
+      const params = new URLSearchParams({
+        view: "directory",
+        page: String(watchPage),
+        pageSize: String(watchPageSize),
+        sort: "NEWEST",
+      });
+      if (watchSearch.trim()) params.set("search", watchSearch.trim());
+      const res = await fetch(`/api/crm/traders?${params.toString()}`);
       const json = await res.json();
 
       if (!json.ok) {
@@ -452,7 +493,14 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
+    placeholderData: (previous) => previous,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
   });
+  const traders = useMemo(
+    () => traderDirectory?.items ?? [],
+    [traderDirectory?.items],
+  );
 
   const { data: trades = [] } = useQuery<TradeDto[]>({
     queryKey: ["trades"],
@@ -468,116 +516,104 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
   });
 
-  const { data: riskEvents = [] } = useQuery<RiskEventDto[]>({
-    queryKey: ["risk-events"],
+  const {
+    data: equityTimeline,
+    isFetching: equityRefreshing,
+  } = useQuery<AdminEquityTimelineDto>({
+    queryKey: ["admin-equity-timeline"],
     queryFn: async () => {
-      const res = await fetch("/api/risk/events");
+      const res = await fetch("/api/admin/analytics/equity");
       const json = await res.json();
 
       if (!json.ok) {
         throw new Error(
-          json.error?.message ?? "Failed to load risk events",
+          json.error?.message ?? "Failed to load platform equity",
         );
       }
 
       return json.data;
     },
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
   });
 
-  const { data: riskRules = [] } = useQuery<RiskRuleDto[]>({
-    queryKey: ["risk-rules"],
-    queryFn: async () => {
-      const res = await fetch("/api/risk/rules");
-      const json = await res.json();
-
-      if (!json.ok) {
-        throw new Error(
-          json.error?.message ?? "Failed to load risk rules",
-        );
-      }
-
-      return json.data;
-    },
-  });
-
-  const { data: crmNotes = [] } = useQuery<CrmNoteDto[]>({
-    queryKey: ["crm-notes"],
-    queryFn: async () => {
-      const res = await fetch("/api/crm/notes");
-      const json = await res.json();
-
-      if (!json.ok) {
-        throw new Error(
-          json.error?.message ?? "Failed to load CRM notes",
-        );
-      }
-
-      return json.data;
-    },
-  });
-
-  const equityCurve: EquityPoint[] = tradingAccounts.map(
-    (account) => ({
-      capturedAt: account.updatedAt,
-      balance: account.balance.amount,
-      equity: account.equity.amount,
-    }),
-  );
+  const equityCurve = equityTimeline?.points ?? [];
 
   const activeTraders = adminSummary?.activeTraders ?? 0;
   const connectedAccounts = adminSummary?.connectedAccounts ?? 0;
-  const openRiskEvents =
-    adminSummary?.openRiskEvents ?? riskEvents.length;
   const monthlyRecurringRevenue =
     adminSummary?.monthlyRecurringRevenue ?? {
       amount: 0,
       currency: "USD",
     };
+  const connectedAccountRows = tradingAccounts.filter((account) => account.status === "CONNECTED");
+  const accountCurrencies = [...new Set(connectedAccountRows.map((account) => account.equity.currency))];
+  const portfolioCurrency = accountCurrencies.length === 1 ? accountCurrencies[0] : null;
+  const totalEquity = connectedAccountRows.reduce((sum, account) => sum + account.equity.amount, 0);
+  const totalFloatingPnl = connectedAccountRows.reduce((sum, account) => sum + account.floatingPnl.amount, 0);
+  const newestAccountUpdate = connectedAccountRows
+    .map((account) => account.updatedAt)
+    .sort((left, right) => right.localeCompare(left))[0] ?? null;
+  const snapshotFresh = newestAccountUpdate
+    ? accountsFetchedAt - Date.parse(newestAccountUpdate) < 10 * 60_000
+    : false;
+  const overlayTraders: TraderProfileDto[] = traders.map((trader) => ({
+    traderId: trader.traderId,
+    name: trader.name,
+    email: trader.email,
+    segment: trader.segment,
+    accountCount: trader.accounts.length,
+    totalEquity: trader.totalEquity ?? { amount: 0, currency: "USD" },
+    lastActivityAt: trader.lastActivityAt ?? trader.joinedAt,
+  }));
 
   const platformMetrics: PlatformMetric[] = [
     {
       label: "Active traders",
       value: `${activeTraders}`,
-      status: "Excellent",
+      status: "Active profiles",
       tone: "lime",
-      progress: Math.min(activeTraders / 150, 1),
+      progress: activeTraders > 0 ? 1 : 0.04,
       icon: Users,
     },
     {
       label: "Connected accounts",
       value: `${connectedAccounts}`,
-      status: "Good",
+      status: "Broker linked",
       tone: "accent",
-      progress: Math.min(connectedAccounts / 250, 1),
+      progress: connectedAccounts > 0 ? 1 : 0.04,
       icon: WalletCards,
     },
     {
-      label: "Open risk events",
-      value: `${openRiskEvents}`,
-      status: openRiskEvents > 0 ? "Watch" : "Stable",
-      tone: openRiskEvents > 0 ? "danger" : "lime",
-      progress: Math.max(0.08, 1 - openRiskEvents / 10),
-      icon: ShieldAlert,
+      label: "Live account equity",
+      value: portfolioCurrency
+        ? formatMoney({ amount: totalEquity, currency: portfolioCurrency })
+        : accountCurrencies.length > 1 ? "Mixed" : "$0",
+      status: snapshotFresh ? "Current" : "Awaiting sync",
+      tone: snapshotFresh ? "lime" : "muted",
+      progress: connectedAccounts > 0 ? 1 : 0.04,
+      icon: TrendingUp,
     },
     {
       label: "MRR",
       value: formatMoney(monthlyRecurringRevenue),
-      status: "Good",
+      status: "Active monthly products",
       tone: "accent",
-      progress: Math.min(
-        monthlyRecurringRevenue.amount / 20000,
-        1,
-      ),
+      progress: monthlyRecurringRevenue.amount > 0 ? 1 : 0.04,
       icon: BadgeDollarSign,
     },
     {
-      label: "Accounts under supervision",
-      value: `${tradingAccounts.length}`,
-      status: "Stable",
-      tone: "lime",
-      progress: Math.min(tradingAccounts.length / 10, 1),
+      label: "Floating P&L",
+      value: portfolioCurrency
+        ? formatMoney({ amount: totalFloatingPnl, currency: portfolioCurrency })
+        : accountCurrencies.length > 1 ? "Mixed" : "$0",
+      status: totalFloatingPnl > 0 ? "Positive" : totalFloatingPnl < 0 ? "Negative" : "Flat",
+      tone: totalFloatingPnl > 0 ? "lime" : totalFloatingPnl < 0 ? "danger" : "muted",
+      progress: connectedAccounts > 0 ? Math.min(Math.max(Math.abs(totalFloatingPnl) / Math.max(totalEquity, 1), 0.04), 1) : 0.04,
       icon: Activity,
     },
   ];
@@ -595,7 +631,7 @@ export default function AdminOverviewPage() {
     <WorkspacePage
       eyebrow="Admin"
       title={`Welcome, ${sessionUser?.name?.trim() || "Admin"}`}
-      description="A single calm operations dashboard for traders, accounts, risk, subscriptions, and audits."
+      description="Live trader, account, subscription, and platform-performance supervision."
     >
       <nav className="-mt-1 mb-5 invisible-scrollbar overflow-x-auto border-b border-line">
         <div className="flex min-w-max gap-7">
@@ -624,7 +660,12 @@ export default function AdminOverviewPage() {
       <PlatformMetricRail items={platformMetrics} />
 
       <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2.05fr)_minmax(300px,0.95fr)]">
-        <PlatformOversightChart data={equityCurve} />
+        <PlatformOversightChart
+          data={equityCurve}
+          currency={equityTimeline?.currency ?? "USD"}
+          mixedCurrencies={equityTimeline?.mixedCurrencies ?? false}
+          isRefreshing={equityRefreshing}
+        />
 
         <Panel className="h-full !rounded-[4px] !p-0">
           <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-5">
@@ -633,17 +674,14 @@ export default function AdminOverviewPage() {
                 Platform health
               </h2>
               <p className="mt-1 text-sm leading-6 text-muted">
-                Summary signals for support, supervision, and admin
-                follow-up.
+                Snapshot freshness and trading-performance signals.
               </p>
             </div>
 
             <StatusPill
-              tone={openRiskEvents > 0 ? "danger" : "lime"}
+              tone={snapshotFresh ? "lime" : "accent"}
             >
-              {openRiskEvents > 0
-                ? "Needs attention"
-                : "Stable"}
+              {snapshotFresh ? "Live data" : "Sync pending"}
             </StatusPill>
           </header>
 
@@ -686,161 +724,111 @@ export default function AdminOverviewPage() {
               </dt>
               <dd className="mt-2 text-sm leading-6 text-muted">
                 {closedTradeCount} closed trades are represented in
-                the platform snapshot, with{" "}
-                {tradingAccounts.length} accounts currently under
-                supervision.
+                the platform snapshot. Current account values were
+                last updated{" "}
+                {newestAccountUpdate
+                  ? new Date(newestAccountUpdate).toLocaleString()
+                  : "after the next account sync"}.
               </dd>
             </div>
           </dl>
         </Panel>
       </div>
 
-      <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Panel className="flex h-[340px] min-w-0 flex-col overflow-hidden !rounded-[4px] !p-0">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
-            <h2 className="text-base font-semibold text-foreground">
-              Trader watchlist
-            </h2>
-            <StatusPill tone="muted">Live review</StatusPill>
-          </header>
-
-          <div className="min-h-0 flex-1 invisible-scrollbar overflow-auto">
-            <table className="w-full min-w-[720px] table-fixed text-left text-sm">
-              <colgroup>
-                <col className="w-[28%]" />
-                <col className="w-[20%]" />
-                <col className="w-[12%]" />
-                <col className="w-[18%]" />
-                <col className="w-[22%]" />
-              </colgroup>
-
-              <thead className="border-b border-line bg-background/55">
-                <tr className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">
-                  <th className="px-5 py-3">Trader</th>
-                  <th className="px-4 py-3">Segment</th>
-                  <th className="px-4 py-3 text-right">
-                    Accounts
-                  </th>
-                  <th className="px-4 py-3 text-right">
-                    Equity
-                  </th>
-                  <th className="px-5 py-3 text-right">
-                    Last active
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-line">
-                {traders.length > 0 ? (
-                  traders.map((trader) => (
-                    <tr
-                      key={trader.traderId}
-                      className="transition-colors hover:bg-background/35"
-                    >
-                      <td className="px-5 py-4 font-semibold text-foreground">
-                        {trader.name}
-                      </td>
-                      <td className="px-4 py-4">
-                        <StatusPill
-                          tone={
-                            trader.segment === "AT_RISK"
-                              ? "accent"
-                              : "lime"
-                          }
-                        >
-                          {trader.segment}
-                        </StatusPill>
-                      </td>
-                      <td className="px-4 py-4 text-right text-foreground tabular-nums">
-                        {trader.accountCount}
-                      </td>
-                      <td className="px-4 py-4 text-right font-semibold text-accent-2 tabular-nums">
-                        {formatMoney(trader.totalEquity)}
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-right text-xs text-muted">
-                        {new Date(
-                          trader.lastActivityAt,
-                        ).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-5 py-8 text-sm text-muted"
-                    >
-                      No traders are currently available for review.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-
-        <Panel className="flex h-[340px] min-w-0 flex-col overflow-hidden !rounded-[4px] !p-0">
-          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
-            <h2 className="text-base font-semibold text-foreground">
-              Risk queue
-            </h2>
-            <StatusPill
-              tone={riskEvents.length > 0 ? "danger" : "lime"}
-            >
-              {riskEvents.length > 0
-                ? `${riskEvents.length} open`
-                : "Clear"}
-            </StatusPill>
-          </header>
-
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 invisible-scrollbar overflow-y-auto">
-            {riskEvents.length > 0 ? (
-              riskEvents.map((event) => (
-                <article
-                  key={event.id}
-                  className="group relative border-b border-line px-5 py-4 transition-colors hover:bg-background/30"
-                >
-                  <span className="absolute inset-y-0 left-0 w-0.5 bg-danger" />
-
-                  <div className="flex items-start gap-3">
-                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-danger" />
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-4">
-                        <p className="font-semibold leading-5 text-foreground">
-                          {event.ruleName}
-                        </p>
-                        <StatusPill tone="accent">
-                          {event.severity}
-                        </StatusPill>
-                      </div>
-
-                      <p className="mt-1.5 text-sm leading-6 text-muted">
-                        {event.message}
-                      </p>
-                    </div>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <div className="px-5 py-8 text-sm text-muted">
-                No risk events currently require review.
-              </div>
-            )}
+      <Panel className="mt-5 min-w-0 overflow-hidden !rounded-[4px] !p-0">
+        <header className="flex flex-col gap-4 border-b border-line px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-semibold text-foreground">Trader watchlist</h2>
+              <StatusPill tone="lime">Live data</StatusPill>
             </div>
-
-            <footer className="flex min-h-12 items-center justify-between gap-4 bg-background/35 px-5">
-              <p className="text-sm font-medium text-muted">
-                Accounts under supervision
-              </p>
-              <p className="text-lg font-semibold text-foreground tabular-nums">
-                {tradingAccounts.length}
-              </p>
-            </footer>
+            <p className="mt-1 text-sm text-muted">
+              Latest connected-account equity and activity for {traderDirectory?.pagination.total ?? 0} traders.
+            </p>
           </div>
-        </Panel>
-      </div>
+          <label className="relative block w-full xl:max-w-sm">
+            <span className="sr-only">Search trader watchlist</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              value={watchSearch}
+              onChange={(event) => {
+                setWatchPage(1);
+                setWatchSearch(event.target.value);
+              }}
+              placeholder="Search trader, email, or account..."
+              className="h-10 w-full rounded-[4px] border border-line bg-background pl-10 pr-3 text-sm text-foreground outline-none placeholder:text-muted focus:border-accent"
+            />
+          </label>
+        </header>
+
+        <DataTable
+          paginated={false}
+          maxBodyHeight="560px"
+          headers={["Trader", "Status", "Segment", "Accounts", "Equity", "Floating P&L", "Last activity"]}
+          rows={traders.map((trader) => {
+            const movement = trader.floatingPnl?.amount ?? null;
+            return [
+              <div key="trader" className="min-w-48">
+                <p className="font-semibold text-foreground">{trader.name}</p>
+                <p className="mt-0.5 text-xs text-muted">{trader.email}</p>
+              </div>,
+              <StatusPill key="status" tone={trader.profileStatus === "ACTIVE" ? "lime" : trader.profileStatus === "SUSPENDED" ? "danger" : "accent"}>
+                {trader.profileStatus}
+              </StatusPill>,
+              <StatusPill key="segment" tone={trader.segment === "AT_RISK" ? "danger" : "muted"}>
+                {trader.segment.replaceAll("_", " ")}
+              </StatusPill>,
+              <span key="accounts" className="whitespace-nowrap tabular-nums">
+                {trader.connectedAccountCount} / {trader.accounts.length} connected
+              </span>,
+              <span key="equity" className="whitespace-nowrap font-semibold text-accent-2 tabular-nums">
+                {trader.totalEquity ? formatMoney(trader.totalEquity) : "Mixed / awaiting sync"}
+              </span>,
+              <span
+                key="movement"
+                className={`inline-flex items-center justify-end gap-1 whitespace-nowrap font-semibold tabular-nums ${
+                  movement === null || movement === 0 ? "text-muted" : movement > 0 ? "text-accent-2" : "text-danger"
+                }`}
+              >
+                {movement === null || movement === 0 ? (
+                  <span aria-hidden="true">—</span>
+                ) : movement > 0 ? (
+                  <TrendingUp className="h-3.5 w-3.5" />
+                ) : (
+                  <TrendingDown className="h-3.5 w-3.5" />
+                )}
+                {movement === null
+                  ? "Waiting"
+                  : formatMoney({
+                      amount: Math.abs(movement),
+                      currency: trader.floatingPnl?.currency ?? "USD",
+                    })}
+              </span>,
+              <span key="activity" className="whitespace-nowrap text-xs text-muted">
+                {trader.lastActivityAt ? new Date(trader.lastActivityAt).toLocaleString() : "No sync yet"}
+              </span>,
+            ];
+          })}
+        />
+        {traders.length === 0 ? (
+          <p className="border-t border-line px-5 py-8 text-sm text-muted">
+            No traders match the current search.
+          </p>
+        ) : null}
+        <div className="px-5 pb-4">
+          <PaginationControls
+            currentPage={traderDirectory?.pagination.page ?? watchPage}
+            totalItems={traderDirectory?.pagination.total ?? 0}
+            pageSize={watchPageSize}
+            pageSizeOptions={[10, 25, 50, 100]}
+            onPageChange={setWatchPage}
+            onPageSizeChange={(size) => {
+              setWatchPage(1);
+              setWatchPageSize(size);
+            }}
+          />
+        </div>
+      </Panel>
 
       <AdminOverviewOverlay
         open={overlayOpen}
@@ -848,15 +836,15 @@ export default function AdminOverviewPage() {
         onOpenChange={setOverlayOpen}
         activeTraders={activeTraders}
         connectedAccounts={connectedAccounts}
-        openRiskEvents={openRiskEvents}
+        openRiskEvents={adminSummary?.openRiskEvents ?? 0}
         monthlyRecurringRevenue={monthlyRecurringRevenue}
         equityCurve={equityCurve}
         trades={trades}
         tradingAccounts={tradingAccounts}
-        traders={traders}
-        riskEvents={riskEvents}
-        riskRules={riskRules}
-        crmNotes={crmNotes}
+        traders={overlayTraders}
+        riskEvents={[]}
+        riskRules={[]}
+        crmNotes={[]}
       />
     </WorkspacePage>
   );

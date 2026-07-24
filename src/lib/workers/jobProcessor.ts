@@ -19,10 +19,10 @@ import type { BackgroundJob, JobResult, JobType } from "@/lib/jobs/types";
 // ─────────────────────────────────────────────────────────────────────────────
 // Job processor (server-only). Dispatches a claimed job to the right existing
 // service. Live execution stays fully gated — when blocked it returns SKIPPED
-// (no retry), never a fake success. Each job is bounded by a processor timeout.
+// (no retry), never a fake success. Broker operations own their timeouts:
+// racing one against a timer here would not cancel the underlying operation
+// and could allow the same live action to be retried while it is still running.
 // ─────────────────────────────────────────────────────────────────────────────
-
-const PROCESSOR_TIMEOUT_MS = 55_000;
 
 // Copy gate codes are intentional blocks, not failures → SKIPPED, no retry.
 const GATE_CODES = new Set<string>([
@@ -43,9 +43,23 @@ function requireId(job: BackgroundJob, key: string): string {
 
 async function dispatch(job: BackgroundJob): Promise<JobResult> {
   const actor = job.createdBy;
+  const liveRiskProjectionEnabled =
+    Boolean(process.env.METAAPI_TOKEN)
+    && process.env.WSA_RISK_ENGINE_ENABLED !== "false";
+  const liveCopyStreamEnabled =
+    Boolean(process.env.METAAPI_TOKEN)
+    && process.env.WSA_COPY_ENGINE_ENABLED === "true"
+    && process.env.BROKER_EXECUTION_ENABLED === "true";
 
   switch (job.type) {
     case "SYNC_ACCOUNT": {
+      if (liveRiskProjectionEnabled) {
+        return {
+          status: "SKIPPED",
+          errorCode: "OWNED_BY_LIVE_RISK_STREAM",
+          errorMessage: "The live risk stream already projects account snapshots and trades.",
+        };
+      }
       const accountId = requireId(job, "accountId");
       const summary = await syncTradingAccount(accountId, actor);
       if (summary.status === "CONNECTED") {
@@ -56,6 +70,13 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
     }
 
     case "SYNC_ALL_CONNECTED_ACCOUNTS": {
+      if (liveRiskProjectionEnabled) {
+        return {
+          status: "SKIPPED",
+          errorCode: "OWNED_BY_LIVE_RISK_STREAM",
+          errorMessage: "Recurring account synchronization is owned by the live risk stream.",
+        };
+      }
       const supabase = createAdminClient();
       const { data } = await supabase.from("trading_accounts").select("id").eq("status", "CONNECTED").limit(1000);
       let enqueued = 0;
@@ -67,12 +88,26 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
     }
 
     case "MONITOR_COPY_STRATEGY": {
+      if (liveCopyStreamEnabled) {
+        return {
+          status: "SKIPPED",
+          errorCode: "OWNED_BY_LIVE_COPY_STREAM",
+          errorMessage: "The dedicated live copy worker already monitors strategy streams.",
+        };
+      }
       const strategyId = requireId(job, "strategyId");
       const r = await monitorMasterAccount(strategyId, actor);
       return { status: "SUCCESS", result: { detected: r.detected } };
     }
 
     case "MONITOR_ALL_ACTIVE_COPY_STRATEGIES": {
+      if (liveCopyStreamEnabled) {
+        return {
+          status: "SKIPPED",
+          errorCode: "OWNED_BY_LIVE_COPY_STREAM",
+          errorMessage: "Recurring strategy monitoring is owned by the dedicated live copy worker.",
+        };
+      }
       const supabase = createAdminClient();
       const { data } = await supabase.from("copy_strategies").select("id").eq("status", "ACTIVE").limit(1000);
       let enqueued = 0;
@@ -160,15 +195,8 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
 }
 
 export async function processJob(job: BackgroundJob): Promise<JobResult> {
-  const timeout = new Promise<JobResult>((resolve) =>
-    setTimeout(
-      () => resolve({ status: "FAILED", errorCode: "PROCESSOR_TIMEOUT", errorMessage: "Job exceeded processor timeout.", retry: true }),
-      PROCESSOR_TIMEOUT_MS,
-    ),
-  );
-
   try {
-    return await Promise.race([dispatch(job), timeout]);
+    return await dispatch(job);
   } catch (err) {
     if (err instanceof CopyError) {
       // Gate blocks are SKIPPED (no retry); other copy errors are non-retryable failures.
@@ -187,6 +215,7 @@ export interface WorkerRunSummary {
   succeeded: number;
   failed: number;
   skipped: number;
+  superseded: number;
 }
 
 /**
@@ -199,11 +228,15 @@ export async function runWorkerOnce(params: {
   types?: JobType[];
 }): Promise<WorkerRunSummary> {
   const jobs = await claimNextJobs(params);
-  const summary: WorkerRunSummary = { processed: 0, succeeded: 0, failed: 0, skipped: 0 };
+  const summary: WorkerRunSummary = { processed: 0, succeeded: 0, failed: 0, skipped: 0, superseded: 0 };
   for (const job of jobs) {
     const result = await processJob(job);
-    await finalizeJob(job, result);
+    const finalized = await finalizeJob(job, result);
     summary.processed++;
+    if (!finalized) {
+      summary.superseded++;
+      continue;
+    }
     if (result.status === "SUCCESS") summary.succeeded++;
     else if (result.status === "SKIPPED") summary.skipped++;
     else summary.failed++;

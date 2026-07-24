@@ -36,12 +36,23 @@ const STATUS_TONE: Record<JobStatus, "lime" | "accent" | "danger" | "muted"> = {
 };
 
 type StatusFilter = "ALL" | JobStatus;
+type JobAction = "QUEUE_SYNC" | "QUEUE_MONITOR" | "RUN_WORKER" | "RETRY" | "CANCEL";
+
+interface WorkerRunResponse {
+  processed: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  superseded: number;
+  releasedStale: number;
+  remainingPending: number;
+}
 
 export default function AdminJobsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [detail, setDetail] = useState<BackgroundJob | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   const { data, isLoading, isError } = useQuery<{ jobs: BackgroundJob[]; stats: JobStats }>({
     queryKey: ["admin-jobs", statusFilter],
@@ -51,13 +62,20 @@ export default function AdminJobsPage() {
 
   const jobs = data?.jobs ?? [];
   const stats = data?.stats;
+  const detailQuery = useQuery<BackgroundJob>({
+    queryKey: ["admin-job", detailId],
+    queryFn: () => getJson(`/api/admin/jobs/${detailId}`),
+    enabled: Boolean(detailId),
+    refetchInterval: detailId ? 3000 : false,
+  });
+  const detail = detailQuery.data ?? null;
 
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["admin-jobs"] });
   }
 
   const action = useMutation({
-    mutationFn: async ({ url, body }: { url: string; body?: unknown; label?: string }) => {
+    mutationFn: async ({ url, body }: { url: string; body?: unknown; kind: JobAction }) => {
       const res = await fetch(url, {
         method: "POST",
         headers: body ? { "Content-Type": "application/json" } : undefined,
@@ -67,9 +85,22 @@ export default function AdminJobsPage() {
       if (!json.ok) throw new Error(json.error?.message ?? "Request failed");
       return json.data;
     },
-    onSuccess: (_d, vars) => {
+    onSuccess: (result, vars) => {
       invalidate();
-      setNotice({ type: "success", text: `Done: ${vars.label ?? "updated"}.` });
+      if (detailId) queryClient.invalidateQueries({ queryKey: ["admin-job", detailId] });
+      if (vars.kind === "RUN_WORKER") {
+        const run = result as WorkerRunResponse;
+        setNotice({
+          type: "success",
+          text: `Worker processed ${run.processed}: ${run.succeeded} succeeded, ${run.failed} failed, ${run.skipped} skipped${run.superseded ? `, ${run.superseded} superseded` : ""}. ${run.remainingPending} pending remain${run.releasedStale ? `; ${run.releasedStale} stale job(s) recovered` : ""}.`,
+        });
+      } else if (vars.kind === "QUEUE_SYNC") {
+        setNotice({ type: "success", text: "Account-sync job queued. An already-pending sync-all job is reused." });
+      } else if (vars.kind === "QUEUE_MONITOR") {
+        setNotice({ type: "success", text: "Copy-monitor job queued. An already-pending monitor-all job is reused." });
+      } else {
+        setNotice({ type: "success", text: vars.kind === "RETRY" ? "Job re-queued with a fresh attempt counter." : "Pending job cancelled." });
+      }
     },
     onError: (err: Error) => setNotice({ type: "error", text: err.message }),
   });
@@ -78,25 +109,32 @@ export default function AdminJobsPage() {
     <WorkspacePage
       eyebrow="Admin"
       title="Background Jobs"
-      description="Queue and process MT5 sync, copy monitoring, simulation, and gated live execution off the request path."
+      description="Queue and process account sync, copy monitoring, evaluation checks, and gated live execution outside the request path."
       action={
         <PageActionGroup>
           <GhostButton
             type="button"
-            onClick={() => action.mutate({ url: "/api/admin/jobs/enqueue", body: { type: "SYNC_ALL_CONNECTED_ACCOUNTS" }, label: "queued sync all" })}
+            disabled={action.isPending}
+            onClick={() => action.mutate({ url: "/api/admin/jobs/enqueue", body: { type: "SYNC_ALL_CONNECTED_ACCOUNTS" }, kind: "QUEUE_SYNC" })}
           >
             <Plus className="mr-2 inline-block h-4 w-4" /> Queue sync all
           </GhostButton>
           <GhostButton
             type="button"
-            onClick={() => action.mutate({ url: "/api/admin/jobs/enqueue", body: { type: "MONITOR_ALL_ACTIVE_COPY_STRATEGIES" }, label: "queued monitor all" })}
+            disabled={action.isPending}
+            onClick={() => action.mutate({ url: "/api/admin/jobs/enqueue", body: { type: "MONITOR_ALL_ACTIVE_COPY_STRATEGIES" }, kind: "QUEUE_MONITOR" })}
           >
             <Repeat className="mr-2 inline-block h-4 w-4" /> Queue monitor all
           </GhostButton>
           <PrimaryButton
             type="button"
             disabled={action.isPending}
-            onClick={() => action.mutate({ url: "/api/admin/jobs/run-now", body: { limit: 5 }, label: "worker run" })}
+            onClick={() => {
+              const confirmed = window.confirm(
+                "Process up to 5 pending jobs now? This may sync broker accounts and execute already-authorized live copy jobs. All execution gates and risk rules remain enforced.",
+              );
+              if (confirmed) action.mutate({ url: "/api/admin/jobs/run-now", body: { limit: 5 }, kind: "RUN_WORKER" });
+            }}
           >
             <Play className="mr-2 inline-block h-4 w-4" /> Run worker now
           </PrimaryButton>
@@ -157,14 +195,25 @@ export default function AdminJobsPage() {
                 <span key="c">{new Date(j.createdAt).toLocaleString()}</span>,
                 <span key="e" className="text-xs text-muted">{j.lastErrorCode ? `${j.lastErrorCode}` : "—"}</span>,
                 <div key="x" className="flex flex-wrap justify-end gap-3">
-                  <GhostButton type="button" onClick={() => setDetail(j)}>View</GhostButton>
+                  <GhostButton type="button" onClick={() => setDetailId(j.id)}>View</GhostButton>
                   {["FAILED", "CANCELLED", "SKIPPED"].includes(j.status) ? (
-                    <GhostButton type="button" disabled={action.isPending} onClick={() => action.mutate({ url: `/api/admin/jobs/${j.id}/retry`, label: "retried" })}>
+                    <GhostButton
+                      type="button"
+                      disabled={action.isPending}
+                      onClick={() => {
+                        const uncertainLiveJob = ["EXECUTE_COPY_EVENT", "CLOSE_COPY_STRATEGY", "RETRY_COPY_LOG"].includes(j.type);
+                        if (
+                          uncertainLiveJob
+                          && !window.confirm("Retry this live broker job? First verify the broker-side outcome to avoid duplicating an order or close.")
+                        ) return;
+                        action.mutate({ url: `/api/admin/jobs/${j.id}/retry`, kind: "RETRY" });
+                      }}
+                    >
                       <RefreshCcw className="mr-1 inline-block h-3.5 w-3.5" /> Retry
                     </GhostButton>
                   ) : null}
                   {j.status === "PENDING" ? (
-                    <GhostButton type="button" disabled={action.isPending} onClick={() => action.mutate({ url: `/api/admin/jobs/${j.id}/cancel`, label: "cancelled" })}>
+                    <GhostButton type="button" disabled={action.isPending} onClick={() => action.mutate({ url: `/api/admin/jobs/${j.id}/cancel`, kind: "CANCEL" })}>
                       Cancel
                     </GhostButton>
                   ) : null}
@@ -176,13 +225,19 @@ export default function AdminJobsPage() {
       </div>
 
       {/* Job detail dialog — payload holds IDs only; result holds counts/summaries (no secrets). */}
-      <Dialog.Root open={Boolean(detail)} onOpenChange={(o) => !o && setDetail(null)}>
+      <Dialog.Root open={Boolean(detailId)} onOpenChange={(o) => !o && setDetailId(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
-            <Dialog.Title className="text-xl font-semibold text-foreground">{detail?.type}</Dialog.Title>
-            <Dialog.Description className="mt-1 text-sm text-muted">Job {detail?.id}</Dialog.Description>
-            {detail ? (
+            <Dialog.Title className="text-xl font-semibold text-foreground">{detail?.type ?? "Job details"}</Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm text-muted">Job {detailId}</Dialog.Description>
+            {detailQuery.isLoading ? (
+              <p className="mt-4 text-sm text-muted">Loading current job state...</p>
+            ) : detailQuery.isError ? (
+              <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger">
+                Could not load the current job state.
+              </p>
+            ) : detail ? (
               <div className="mt-4 space-y-3 text-sm">
                 <Row label="Status" value={detail.status} />
                 <Row label="Attempts" value={`${detail.attempts}/${detail.maxAttempts}`} />

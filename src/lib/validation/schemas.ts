@@ -77,6 +77,7 @@ export const analyticsSummaryQuerySchema = z.object({
 export const tradeQuerySchema = paginationSchema.extend({
   accountId: z.string().optional(),
   status: z.enum(["OPEN", "CLOSED"]).optional(),
+  limit: z.coerce.number().int().min(1).max(10_000).default(200),
 });
 
 export const crmNoteCreateSchema = z.object({
@@ -396,8 +397,12 @@ const jobTypeEnum = z.enum([
   "SIMULATE_COPY_EVENT",
   "SIMULATE_COPY_STRATEGY",
   "EXECUTE_COPY_EVENT",
+  "CLOSE_COPY_STRATEGY",
   "RETRY_COPY_LOG",
   "CLEANUP_STALE_JOBS",
+  "SYNC_EVALUATION_ACCOUNT",
+  "CHECK_EVALUATION_ATTEMPT",
+  "CHECK_ALL_ACTIVE_EVALUATIONS",
 ]);
 
 export const jobEnqueueSchema = z.object({
@@ -409,6 +414,7 @@ export const jobEnqueueSchema = z.object({
       strategyId: z.string().uuid().optional(),
       masterEventId: z.string().uuid().optional(),
       copyExecutionLogId: z.string().uuid().optional(),
+      attemptId: z.string().uuid().optional(),
     })
     .strict()
     .optional()

@@ -23,6 +23,9 @@ export function Sidebar({
   const router = useRouter();
   const queryClient = useQueryClient();
   const items = navItems.filter((item) => item.role === role);
+  const activeHref = items
+    .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((left, right) => right.href.length - left.href.length)[0]?.href;
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -36,7 +39,7 @@ export function Sidebar({
     <nav className="flex flex-col gap-1">
       {items.map((item) => {
         const Icon = item.icon;
-        const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        const active = item.href === activeHref;
           return (
             <Link
               key={item.href}

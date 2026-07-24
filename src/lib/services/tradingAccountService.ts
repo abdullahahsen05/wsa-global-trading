@@ -30,7 +30,7 @@ export async function listTradingAccounts(userId: string, role: UserRole): Promi
   ] = await Promise.all([
     supabase
       .from('latest_account_snapshots')
-      .select('trading_account_id, balance, equity, floating_pnl, drawdown_percent')
+      .select('trading_account_id, balance, equity, floating_pnl, drawdown_percent, captured_at')
       .in('trading_account_id', accountIds),
     supabase
       .from('account_open_trade_counts')
@@ -82,7 +82,7 @@ export async function getTradingAccount(
   ] = await Promise.all([
     supabase
       .from('latest_account_snapshots')
-      .select('trading_account_id, balance, equity, floating_pnl, drawdown_percent')
+      .select('trading_account_id, balance, equity, floating_pnl, drawdown_percent, captured_at')
       .eq('trading_account_id', accountId),
     supabase
       .from('account_open_trade_counts')

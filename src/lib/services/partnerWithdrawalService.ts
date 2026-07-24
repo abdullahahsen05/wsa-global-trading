@@ -495,6 +495,7 @@ export async function transitionPartnerWithdrawal(params: {
 export async function getPartnerFinancialLedger(
   partnerId: string,
   currency = "USD",
+  options?: { includeItems?: boolean },
 ): Promise<PartnerFinancialLedgerDto> {
   const supabase = createAdminClient();
   const [
@@ -606,7 +607,7 @@ export async function getPartnerFinancialLedger(
   const approvedUnpaidCommissions = Math.max(0, approvedCommissionTotal - paidCommissionAllocations);
   const approvedUnpaidRebates = Math.max(0, approvedRebateTotal - paidRebateAllocations);
 
-  const items: PartnerLedgerItemDto[] = [
+  const items: PartnerLedgerItemDto[] = options?.includeItems === false ? [] : [
     ...(commissions ?? []).map((item) => ({
       id: item.id,
       type: "COMMISSION" as const,

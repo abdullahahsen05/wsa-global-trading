@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Bell, ShieldAlert } from "lucide-react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Bell, ChevronRight, Clock3, ShieldAlert, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DataTable,
@@ -46,6 +47,8 @@ const EMPTY_DRAFT: RuleDraft = {
 export default function AdminRiskPage() {
   const queryClient = useQueryClient();
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [allEventsOpen, setAllEventsOpen] = useState(false);
+  const [acknowledgingEventId, setAcknowledgingEventId] = useState<string | null>(null);
   const [draft, setDraft] = useState<RuleDraft>(EMPTY_DRAFT);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -78,6 +81,10 @@ export default function AdminRiskPage() {
       return json.data;
     },
   });
+  const recentRiskEvents = riskEvents.slice(0, 3);
+  const accountNames = new Map(
+    tradingAccounts.map((account) => [account.accountId, account.accountName]),
+  );
 
   const startCreate = () => {
     setEditingRuleId(null);
@@ -159,14 +166,74 @@ export default function AdminRiskPage() {
   };
 
   const acknowledgeEvent = async (eventId: string) => {
-    const response = await fetch(`/api/risk/events/${eventId}/acknowledge`, { method: "POST" });
-    const json = await response.json();
-    if (!json.ok) {
-      setErrorMessage(json.error?.message ?? "Risk event could not be acknowledged.");
-      return;
+    setAcknowledgingEventId(eventId);
+    setMessage("");
+    setErrorMessage("");
+    try {
+      const response = await fetch(`/api/risk/events/${eventId}/acknowledge`, { method: "POST" });
+      const json = await response.json();
+      if (!json.ok) {
+        throw new Error(json.error?.message ?? "Risk event could not be acknowledged.");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["risk-events"] });
+      setMessage("Risk event acknowledged. If the breach still exists, the live monitor will raise it again.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Risk event could not be acknowledged.");
+    } finally {
+      setAcknowledgingEventId(null);
     }
-    await queryClient.invalidateQueries({ queryKey: ["risk-events"] });
-    setMessage("Risk event acknowledged. If the breach still exists, the live monitor will raise it again.");
+  };
+
+  const eventCard = (event: RiskEventDto, expanded = false) => {
+    const accountName = accountNames.get(event.accountId) ?? "Trading account";
+    const isAcknowledging = acknowledgingEventId === event.id;
+    const severityTone = event.severity === "CRITICAL"
+      ? "danger"
+      : event.severity === "WARNING"
+        ? "accent"
+        : "muted";
+    const severityRail = event.severity === "CRITICAL"
+      ? "bg-danger"
+      : event.severity === "WARNING"
+        ? "bg-accent"
+        : "bg-muted";
+
+    return (
+      <article
+        key={event.id}
+        className={`relative overflow-hidden rounded-[5px] border border-line bg-background transition-colors hover:border-accent/30 ${
+          expanded ? "p-5" : "p-4"
+        }`}
+      >
+        <span className={`absolute inset-y-0 left-0 w-0.5 ${severityRail}`} aria-hidden="true" />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-semibold text-foreground">{event.ruleName}</p>
+            <p className="mt-1 text-xs font-medium uppercase tracking-[0.12em] text-muted">
+              {accountName}
+            </p>
+          </div>
+          <StatusPill tone={severityTone}>{event.severity}</StatusPill>
+        </div>
+        <p className={`text-sm leading-6 text-muted ${expanded ? "mt-4" : "mt-3 line-clamp-2"}`}>
+          {event.message}
+        </p>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+          <span className="flex items-center gap-2 text-xs text-muted">
+            <Clock3 className="h-3.5 w-3.5" />
+            {new Date(event.createdAt).toLocaleString()}
+          </span>
+          <GhostButton
+            type="button"
+            disabled={isAcknowledging}
+            onClick={() => void acknowledgeEvent(event.id)}
+            className="min-h-9 px-3 py-2 text-xs"
+          >
+            {isAcknowledging ? "Acknowledging…" : "Acknowledge"}
+          </GhostButton>
+        </div>
+      </article>
+    );
   };
 
   return (
@@ -246,30 +313,41 @@ export default function AdminRiskPage() {
         <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-semibold text-foreground">Open risk events</h2>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent">
+                Live event feed
+              </p>
+              <h2 className="mt-1 text-lg font-semibold text-foreground">Recent risk events</h2>
               <p className="mt-1 text-sm text-muted">
-                Acknowledging removes the alert; an unresolved live breach will be raised again.
+                Latest unresolved breaches, ordered newest first.
               </p>
             </div>
             <StatusPill tone="accent">{riskEvents.length} open</StatusPill>
           </div>
-          <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-y-auto">
+          <div className="invisible-scrollbar mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
             {riskEvents.length === 0 ? (
-              <p className="border-t border-line py-4 text-sm text-muted">
-                No open risk events.
-              </p>
-            ) : riskEvents.map((event) => (
-              <div key={event.id} className="flex flex-wrap items-center justify-between gap-4 border-b border-line bg-background px-4 py-3 last:border-b-0">
-                <div className="min-w-0">
-                  <p className="font-semibold text-foreground">{event.ruleName}</p>
-                  <p className="mt-1 text-sm leading-5 text-muted">{event.message}</p>
+              <div className="grid min-h-44 place-items-center rounded-[5px] border border-dashed border-line bg-background/50 px-6 text-center">
+                <div>
+                  <div className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-accent-2/20 bg-accent-2/10 text-accent-2">
+                    <ShieldAlert className="h-4 w-4" />
+                  </div>
+                  <p className="mt-3 font-semibold text-foreground">No open risk events</p>
+                  <p className="mt-1 text-sm text-muted">All monitored accounts are clear.</p>
                 </div>
-                <GhostButton type="button" onClick={() => void acknowledgeEvent(event.id)}>
-                  Acknowledge
-                </GhostButton>
               </div>
-            ))}
+            ) : recentRiskEvents.map((event) => eventCard(event))}
           </div>
+          <button
+            type="button"
+            disabled={riskEvents.length === 0}
+            onClick={() => setAllEventsOpen(true)}
+            className="mt-4 flex shrink-0 items-center justify-between border-t border-line pt-4 text-sm font-semibold text-foreground transition-colors hover:text-accent disabled:cursor-not-allowed disabled:text-muted"
+          >
+            <span>View all open events</span>
+            <span className="flex items-center gap-2 text-xs uppercase tracking-[0.12em]">
+              {riskEvents.length}
+              <ChevronRight className="h-4 w-4" />
+            </span>
+          </button>
         </Panel>
         </div>
 
@@ -437,6 +515,61 @@ export default function AdminRiskPage() {
           </div>
         </Panel>
       </div>
+
+      <Dialog.Root open={allEventsOpen} onOpenChange={setAllEventsOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[94vw] max-w-5xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[6px] border border-line bg-panel shadow-[0_24px_80px_rgba(0,0,0,0.65)] focus:outline-none">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-5 sm:px-6">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent">
+                  Live event feed
+                </p>
+                <Dialog.Title className="mt-2 text-xl font-semibold text-foreground">
+                  All open risk events
+                </Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm text-muted">
+                  {riskEvents.length} unresolved {riskEvents.length === 1 ? "breach" : "breaches"} across monitored trading accounts.
+                </Dialog.Description>
+              </div>
+              <Dialog.Close asChild>
+                <button
+                  type="button"
+                  aria-label="Close all risk events"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-[4px] border border-line bg-background text-muted transition-colors hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </Dialog.Close>
+            </div>
+
+            <div className="invisible-scrollbar min-h-0 flex-1 overflow-y-auto p-5 sm:p-6">
+              {riskEvents.length === 0 ? (
+                <div className="grid min-h-64 place-items-center rounded-[5px] border border-dashed border-line bg-background/50 px-6 text-center">
+                  <div>
+                    <ShieldAlert className="mx-auto h-6 w-6 text-accent-2" />
+                    <p className="mt-3 font-semibold text-foreground">No open risk events</p>
+                    <p className="mt-1 text-sm text-muted">All monitored accounts are clear.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {riskEvents.map((event) => eventCard(event, true))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line bg-background/50 px-5 py-4 sm:px-6">
+              <p className="text-xs text-muted">
+                Acknowledging removes an alert. A continuing live breach will be raised again.
+              </p>
+              <Dialog.Close asChild>
+                <GhostButton type="button">Close</GhostButton>
+              </Dialog.Close>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </WorkspacePage>
   );
 }

@@ -18,7 +18,7 @@ const ringColors: Record<RingTone, string> = {
 export function PerformanceRings({ items }: { items: PerformanceRingItem[] }) {
   return (
     <div className="overflow-hidden rounded-[4px] border border-line bg-panel">
-      <div className="grid sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3">
         {items.map((item) => (
         <div
           key={item.label}
