@@ -1,4 +1,8 @@
 import type { TraderAccountSummary } from '@/lib/domain/types'
+import {
+  latestAccountActivityAt,
+  resolveAccountLifecycleStatus,
+} from '@/lib/accounts/lifecycle'
 
 interface AccountRow {
   id: string
@@ -9,6 +13,7 @@ interface AccountRow {
   status: string
   currency: string
   updated_at: string
+  last_synced_at?: string | null
 }
 
 interface SnapshotRow {
@@ -29,21 +34,36 @@ export function mapAccountToDto(
   const equity = snapshot ? Number(snapshot.equity) : 0
   const floatingPnl = snapshot ? Number(snapshot.floating_pnl) : 0
   const drawdown = snapshot ? Number(snapshot.drawdown_percent) : 0
+  const platform = account.broker_platform === 'MT4' || account.broker_platform === 'MT5'
+    ? account.broker_platform
+    : null
+  const lastSyncedAt = latestAccountActivityAt(
+    account.last_synced_at,
+    snapshot?.captured_at,
+  )
+  const status = resolveAccountLifecycleStatus({
+    status: account.status as TraderAccountSummary['status'],
+    lastSyncedAt: account.last_synced_at,
+    snapshotCapturedAt: snapshot?.captured_at,
+    serverName: account.broker_server,
+    platform,
+  })
 
   return {
     accountId: account.id,
     accountName: account.account_name,
     brokerName: account.broker_name?.trim() || 'WSA GLOBAL',
     serverName: account.broker_server ?? null,
-    platform: account.broker_platform === 'MT4' || account.broker_platform === 'MT5'
-      ? account.broker_platform
-      : null,
-    status: account.status as TraderAccountSummary['status'],
+    platform,
+    status,
     balance: { amount: balance, currency },
     equity: { amount: equity, currency },
     floatingPnl: { amount: floatingPnl, currency },
     openTradeCount,
     drawdownPercent: drawdown,
-    updatedAt: snapshot?.captured_at ?? account.updated_at,
+    updatedAt: lastSyncedAt ?? account.updated_at,
+    lastSyncedAt,
+    live: status === 'CONNECTED',
+    reconnectRequired: status === 'INACTIVE' || status === 'DISCONNECTED',
   }
 }

@@ -29,6 +29,9 @@ export interface TraderAccountSummary {
   openTradeCount: number;
   drawdownPercent: number;
   updatedAt: string;
+  lastSyncedAt?: string | null;
+  live?: boolean;
+  reconnectRequired?: boolean;
 }
 
 export interface AdminTradingAccountSummary extends TraderAccountSummary {

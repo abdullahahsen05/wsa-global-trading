@@ -2,6 +2,7 @@ import { createAdminClient } from "../src/lib/supabase/admin";
 import { enqueueJob } from "../src/lib/services/backgroundJobService";
 import { runWorkerOnce } from "../src/lib/workers/jobProcessor";
 import { executeSelfCopyPositionEvent } from "../src/lib/services/selfCopyService";
+import { expireStaleTradingAccounts } from "../src/lib/services/tradingAccountLifecycleService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -28,6 +29,7 @@ const workerId = `wsa-copy-${process.pid}`;
 const streams = new Map<string, StreamHandle>();
 const selfCopyStreams = new Map<string, StreamHandle>();
 let stopping = false;
+let nextLifecycleScanAt = 0;
 
 function iso(value?: Date | string) {
   if (!value) return new Date().toISOString();
@@ -283,6 +285,13 @@ async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHan
 }
 
 async function reconcileStreams() {
+  if (Date.now() >= nextLifecycleScanAt) {
+    const expired = await expireStaleTradingAccounts();
+    if (expired > 0) {
+      console.log(`[copy-worker] moved ${expired} stale or incomplete account(s) out of live status`);
+    }
+    nextLifecycleScanAt = Date.now() + 60 * 60 * 1_000;
+  }
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("copy_strategies")

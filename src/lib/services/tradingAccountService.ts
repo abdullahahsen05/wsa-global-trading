@@ -9,7 +9,7 @@ export async function listTradingAccounts(userId: string, role: UserRole): Promi
 
   let query = supabase
     .from('trading_accounts')
-    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, user_id')
+    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, last_synced_at, user_id')
     .order('created_at', { ascending: false })
     .limit(500)
 
@@ -66,7 +66,7 @@ export async function getTradingAccount(
 
   let query = supabase
     .from('trading_accounts')
-    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, user_id')
+    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, last_synced_at, user_id')
     .eq('id', accountId)
 
   if (!isAdmin(role)) {
@@ -117,10 +117,34 @@ export async function createTradingAccount(userId: string, data: {
       currency: data.currency ?? 'USD',
       status: 'PENDING',
     })
-    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, user_id')
+    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, last_synced_at, user_id')
     .single()
 
   if (error || !account) throw new Error(`Failed to create account: ${error?.message}`)
 
+  return mapAccountToDto(account, null, 0)
+}
+
+export async function updatePendingTradingAccount(
+  accountId: string,
+  userId: string,
+  data: { accountName: string; brokerName: string },
+): Promise<TraderAccountSummary> {
+  const supabase = await createClient()
+  const { data: account, error } = await supabase
+    .from('trading_accounts')
+    .update({
+      account_name: data.accountName,
+      broker_name: data.brokerName,
+    })
+    .eq('id', accountId)
+    .eq('user_id', userId)
+    .eq('status', 'PENDING')
+    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, last_synced_at, user_id')
+    .single()
+
+  if (error || !account) {
+    throw new Error('Only your pending account setup can be updated.')
+  }
   return mapAccountToDto(account, null, 0)
 }

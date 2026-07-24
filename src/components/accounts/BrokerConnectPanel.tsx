@@ -44,7 +44,7 @@ interface VerifyResult {
 
 interface ConnectionStatusResult {
   accountId: string;
-  status: "PENDING" | "SYNCING" | "CONNECTED" | "DISCONNECTED" | "RESTRICTED";
+  status: "PENDING" | "SYNCING" | "CONNECTED" | "DISCONNECTED" | "RESTRICTED" | "INACTIVE";
   providerState: string | null;
   providerConnectionStatus: string | null;
   providerReady: boolean;
@@ -63,7 +63,10 @@ interface BrokerServer {
   serverName: string;
   platform: "MT4" | "MT5";
   source: "MANUAL" | "METAAPI";
+  brokerName?: string;
 }
+
+const CUSTOM_SERVER_OPTION = "__custom__";
 
 function isDeploymentPendingMessage(message: string | null | undefined): boolean {
   if (!message) return false;
@@ -89,6 +92,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
     login: "",
     password: "",
     server: "",
+    customServer: "",
   });
   const [notice, setNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
@@ -139,23 +143,36 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
   });
 
   const storeMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<ConnectionResult>(`/api/trading-accounts/${accountId}/broker-credentials`, {
+    mutationFn: () => {
+      const selectedServer = serversQuery.data?.servers.find(
+        (server) => server.serverName === form.server,
+      );
+      const usesCustomServer =
+        form.server === CUSTOM_SERVER_OPTION || selectedServer?.source === "METAAPI";
+      const selectedProvider = providersQuery.data?.providers.find(
+        (provider) => provider.id === form.brokerProviderId,
+      );
+      return apiFetch<ConnectionResult>(`/api/trading-accounts/${accountId}/broker-credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           platform: form.platform,
           login: form.login.trim(),
           password: form.password,
-          server: form.server.trim(),
+          server: form.server === CUSTOM_SERVER_OPTION
+            ? form.customServer.trim()
+            : form.server.trim(),
           brokerProviderId: form.brokerProviderId,
+          brokerName: selectedServer?.brokerName ?? selectedProvider?.displayName,
+          useCustomBrokerServer: usesCustomServer,
         }),
-      }),
+      });
+    },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["broker-cred-status", accountId] });
       queryClient.invalidateQueries({ queryKey: ["trading-accounts"] });
       setFormOpen(false);
-      setForm({ platform: "MT5", brokerProviderId: "", login: "", password: "", server: "" });
+      setForm({ platform: "MT5", brokerProviderId: "", login: "", password: "", server: "", customServer: "" });
       if (data.connected) {
         setNotice({
           type: "success",
@@ -255,9 +272,12 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
   const statusTone =
     displayedStatus === "CONNECTED"
       ? ("lime" as const)
+      : displayedStatus === "INACTIVE" || displayedStatus === "DISCONNECTED"
+        ? ("danger" as const)
       : displayedStatus === "SYNCING" || displayedStatus === "PENDING"
         ? ("accent" as const)
         : ("muted" as const);
+  const reconnecting = displayedStatus === "INACTIVE" || displayedStatus === "DISCONNECTED";
 
   return (
     <Panel>
@@ -389,7 +409,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
               onClick={() => { setNotice(null); syncMutation.mutate(); }}
             >
               <RefreshCcw className={`mr-1.5 inline-block h-3.5 w-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-              {syncMutation.isPending ? "Syncing…" : "Sync account"}
+              {syncMutation.isPending ? "Connecting…" : reconnecting ? "Reconnect account" : "Sync account"}
             </PrimaryButton>
           </>
         ) : null}
@@ -413,6 +433,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                   platform: e.target.value,
                   brokerProviderId: "",
                   server: "",
+                  customServer: "",
                 }))}
                 className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
               >
@@ -431,6 +452,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                   ...f,
                   brokerProviderId: e.target.value,
                   server: "",
+                  customServer: "",
                 }))}
                 className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
               >
@@ -503,16 +525,34 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 {(serversQuery.data?.servers ?? []).map((server) => (
                   <option key={server.id} value={server.serverName}>{server.serverName}</option>
                 ))}
+                <option value={CUSTOM_SERVER_OPTION}>Enter server manually</option>
               </select>
             </div>
           </div>
+          {form.server === CUSTOM_SERVER_OPTION ? (
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                Custom server name <span className="text-danger">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={form.customServer}
+                onChange={(event) => setForm((current) => ({ ...current, customServer: event.target.value }))}
+                placeholder="Exact MetaTrader server name"
+                maxLength={100}
+                autoComplete="off"
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+              />
+            </div>
+          ) : null}
           {form.brokerProviderId && serversQuery.isSuccess && serversQuery.data.servers.length === 0 ? (
             <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
               No servers are configured for this broker and platform. Contact support or an administrator.
             </div>
           ) : null}
           <p className="text-xs text-muted">
-            Broker and server options come from the WSA Global admin-configured catalog. They are not presented as live MetaApi discovery.
+            Server options combine the WSA Global broker catalog with MetaApi discovery. You can enter the exact server manually when needed.
           </p>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <p className="text-xs text-muted">
@@ -527,7 +567,12 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
               </GhostButton>
               <PrimaryButton
                 type="submit"
-                disabled={busy || !form.brokerProviderId || !form.server}
+                disabled={
+                  busy ||
+                  !form.brokerProviderId ||
+                  !form.server ||
+                  (form.server === CUSTOM_SERVER_OPTION && !form.customServer.trim())
+                }
               >
                 {storeMutation.isPending ? "Connecting…" : "Connect and sync"}
               </PrimaryButton>

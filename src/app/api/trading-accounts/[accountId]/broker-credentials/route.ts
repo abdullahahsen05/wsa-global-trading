@@ -8,6 +8,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { brokerConnectionSchema } from "@/lib/validation/schemas";
 import { resolveBrokerSelection } from "@/lib/services/brokerCatalogService";
+import { resolveAccountLifecycleStatus } from "@/lib/accounts/lifecycle";
+import type { AccountStatus } from "@/lib/domain/types";
 
 // GET — safe credential status (never returns password or encrypted payload)
 export async function GET(
@@ -26,7 +28,7 @@ export async function GET(
 
     const supabase = createAdminClient();
 
-    const [credRow, accountRow] = await Promise.all([
+    const [credRow, accountRow, snapshotRow] = await Promise.all([
       supabase
         .from("broker_credentials")
         .select("provider, created_at, updated_at")
@@ -37,7 +39,21 @@ export async function GET(
         .select("provider_account_id, last_synced_at, sync_error, status, broker_name, broker_server, broker_platform, broker_provider_id")
         .eq("id", accountId)
         .maybeSingle(),
+      supabase
+        .from("latest_account_snapshots")
+        .select("captured_at")
+        .eq("trading_account_id", accountId)
+        .maybeSingle(),
     ]);
+    const accountStatus = accountRow.data
+      ? resolveAccountLifecycleStatus({
+          status: accountRow.data.status as AccountStatus,
+          lastSyncedAt: accountRow.data.last_synced_at,
+          snapshotCapturedAt: snapshotRow.data?.captured_at ?? null,
+          serverName: accountRow.data.broker_server,
+          platform: accountRow.data.broker_platform,
+        })
+      : null;
 
     return jsonOk({
       accountId,
@@ -46,7 +62,7 @@ export async function GET(
       providerAccountId: accountRow.data?.provider_account_id ?? null,
       lastSyncedAt: accountRow.data?.last_synced_at ?? null,
       syncError: accountRow.data?.sync_error ?? null,
-      status: accountRow.data?.status ?? null,
+      status: accountStatus,
       brokerName: accountRow.data?.broker_name ?? "WSA GLOBAL",
       brokerProviderId: accountRow.data?.broker_provider_id ?? null,
       serverName: accountRow.data?.broker_server ?? null,

@@ -6,6 +6,7 @@ import { Plus, X } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  DataTable,
   EmptyState,
   GhostButton,
   FilterChipRow,
@@ -41,6 +42,28 @@ type BrokerServerOption = {
 
 const CUSTOM_BROKER_OPTION = "__custom__";
 
+function statusTone(status: TraderAccountSummary["status"]) {
+  if (status === "CONNECTED") return "lime" as const;
+  if (status === "RESTRICTED" || status === "DISCONNECTED" || status === "INACTIVE") {
+    return "danger" as const;
+  }
+  return "accent" as const;
+}
+
+function statusLabel(account: TraderAccountSummary) {
+  if (account.status === "PENDING") return "NEEDS SETUP";
+  if (account.status === "INACTIVE") return "RECONNECT";
+  return account.status;
+}
+
+function accountActionLabel(account: TraderAccountSummary) {
+  if (account.status === "PENDING") return "Complete setup";
+  if (account.status === "INACTIVE" || account.status === "DISCONNECTED") return "Reconnect";
+  if (account.status === "SYNCING") return "Check connection";
+  if (account.status === "RESTRICTED") return "Review account";
+  return "View account";
+}
+
 export default function AccountsPage() {
   const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
   const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
@@ -49,7 +72,7 @@ export default function AccountsPage() {
     return (
       <WorkspacePage
         eyebrow="Trading accounts"
-        title="Connected broker accounts"
+        title="Broker accounts"
         description="Loading your platform access status."
       >
         <Panel>
@@ -63,7 +86,7 @@ export default function AccountsPage() {
     return (
       <WorkspacePage
         eyebrow="Trading accounts"
-        title="Connected broker accounts"
+        title="Broker accounts"
         description="Activate your platform subscription to unlock account connection and supervision."
       >
         <PlatformSubscriptionLocked
@@ -136,11 +159,21 @@ function AccountsContent() {
   });
 
   const filteredAccounts = tradingAccounts.filter((account) => {
+    const normalizedQuery = query.trim().toLowerCase();
     const matchesQuery =
-      query.trim().length === 0 ||
-      account.accountName.toLowerCase().includes(query.toLowerCase()) ||
-      account.brokerName.toLowerCase().includes(query.toLowerCase());
-    const matchesStatus = statusFilter === "ALL" || account.status === statusFilter;
+      normalizedQuery.length === 0 ||
+      [
+        account.accountName,
+        account.brokerName,
+        account.serverName ?? "",
+        account.platform ?? "",
+        account.status,
+      ].some((value) => value.toLowerCase().includes(normalizedQuery));
+    const matchesStatus =
+      statusFilter === "ALL" ||
+      (statusFilter === "RECONNECT"
+        ? account.status === "INACTIVE" || account.status === "DISCONNECTED"
+        : account.status === statusFilter);
     return matchesQuery && matchesStatus;
   });
 
@@ -183,14 +216,17 @@ function AccountsContent() {
     }
 
     try {
-      const res = await fetch("/api/trading-accounts", {
-        method: "POST",
+      const res = await fetch(
+        pendingAccountId ? `/api/trading-accounts/${pendingAccountId}` : "/api/trading-accounts",
+        {
+        method: pendingAccountId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountName, brokerName }),
-      });
+        },
+      );
       const json = await res.json();
       if (json.ok) {
-        setPendingAccountId(json.data.accountId);
+        setPendingAccountId(pendingAccountId ?? json.data.accountId);
         setPendingBrokerName(brokerName);
         setPendingBrokerProviderId(provider?.id ?? null);
         setSelectedServerOption("");
@@ -228,7 +264,9 @@ function AccountsContent() {
       !pendingBrokerProviderId ||
       serverSelection === CUSTOM_BROKER_OPTION ||
       selectedServer?.source === "METAAPI";
-    const server = usesCustomServer ? customServer : serverSelection;
+    const server = !pendingBrokerProviderId || serverSelection === CUSTOM_BROKER_OPTION
+      ? customServer
+      : serverSelection;
     const platform = selectedPlatform;
 
     if (!login || !password || !server || !platform) {
@@ -308,23 +346,30 @@ function AccountsContent() {
     );
   };
 
-  const connectedCount = tradingAccounts.filter((a) => a.status === "CONNECTED").length;
+  const connectedCount = tradingAccounts.filter((a) => a.status === "CONNECTED" && a.live !== false).length;
   const syncingCount = tradingAccounts.filter((a) => a.status === "SYNCING").length;
   const pendingCount = tradingAccounts.filter((a) => a.status === "PENDING").length;
-  const totalPnl = tradingAccounts.reduce((sum, a) => sum + a.floatingPnl.amount, 0);
+  const reconnectCount = tradingAccounts.filter((a) => a.status === "INACTIVE" || a.status === "DISCONNECTED").length;
+  const liveAccounts = tradingAccounts.filter((a) => a.status === "CONNECTED" && a.live !== false);
+  const totalPnl = liveAccounts.reduce((sum, a) => sum + a.floatingPnl.amount, 0);
 
   return (
     <WorkspacePage
       eyebrow="Trading accounts"
-      title="Connected broker accounts"
-      description="Track broker status, equity, drawdown, and connection health across your accounts."
+      title="Broker accounts"
+      description="Connect, search, monitor, and reconnect every broker account from one operational directory."
       action={
         <PageActionGroup>
           <Dialog.Root
             open={connectOpen}
             onOpenChange={(open) => {
               setConnectOpen(open);
-              if (!open) resetDialog();
+              if (!open) {
+                if (pendingAccountId) {
+                  void queryClient.invalidateQueries({ queryKey: ["trading-accounts"] });
+                }
+                resetDialog();
+              }
             }}
           >
             <Dialog.Trigger asChild>
@@ -601,13 +646,15 @@ function AccountsContent() {
     >
       <InlineStatusStrip
         items={[
-          { label: "Connected", value: connectedCount, helper: "Live adapter", tone: "lime" },
-          { label: "Syncing", value: syncingCount, helper: "Active sync", tone: "accent" },
-          { label: "Pending", value: pendingCount, helper: "Awaiting verification" },
+          { label: "All accounts", value: tradingAccounts.length, helper: "Your broker directory" },
+          { label: "Live", value: connectedCount, helper: "Selectable for live data", tone: "lime" },
+          { label: "Setting up", value: syncingCount + pendingCount, helper: `${pendingCount} need information`, tone: "accent" },
+          { label: "Reconnect", value: reconnectCount, helper: "Disconnected or inactive", tone: reconnectCount ? "danger" : "default" },
           {
             label: "Open exposure",
             value: formatMoney({ amount: totalPnl, currency: "USD" }),
-            helper: "Net floating PnL",
+            helper: "Live accounts only",
+            tone: totalPnl < 0 ? "danger" : "default",
           },
         ]}
       />
@@ -622,102 +669,109 @@ function AccountsContent() {
         <div className="grid flex-1 gap-4">
           <SearchField
             label="Search accounts"
-            placeholder="Search by account or broker"
+            placeholder="Search account, broker, server, platform, or status"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <FilterChipRow
             chips={[
-              { label: "All statuses", active: statusFilter === "ALL", onClick: () => setStatusFilter("ALL") },
-              { label: "Connected", active: statusFilter === "CONNECTED", onClick: () => setStatusFilter("CONNECTED") },
-              { label: "Syncing", active: statusFilter === "SYNCING", onClick: () => setStatusFilter("SYNCING") },
-              { label: "Pending", active: statusFilter === "PENDING", onClick: () => setStatusFilter("PENDING") },
-              { label: "Disconnected", active: statusFilter === "DISCONNECTED", onClick: () => setStatusFilter("DISCONNECTED") },
+              { label: `All (${tradingAccounts.length})`, active: statusFilter === "ALL", onClick: () => setStatusFilter("ALL") },
+              { label: `Live (${connectedCount})`, active: statusFilter === "CONNECTED", onClick: () => setStatusFilter("CONNECTED") },
+              { label: `Syncing (${syncingCount})`, active: statusFilter === "SYNCING", onClick: () => setStatusFilter("SYNCING") },
+              { label: `Needs setup (${pendingCount})`, active: statusFilter === "PENDING", onClick: () => setStatusFilter("PENDING") },
+              { label: `Reconnect (${reconnectCount})`, active: statusFilter === "RECONNECT", onClick: () => setStatusFilter("RECONNECT") },
               { label: "Restricted", active: statusFilter === "RESTRICTED", onClick: () => setStatusFilter("RESTRICTED") },
             ]}
           />
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+      <Panel className="mt-5 overflow-hidden p-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Account directory</h2>
+            <p className="mt-1 text-sm text-muted">
+              Live accounts feed the workspace selector. Pending and inactive accounts stay here for setup or reconnection.
+            </p>
+          </div>
+          <StatusPill tone="muted">{filteredAccounts.length} shown</StatusPill>
+        </div>
+
         {isLoading ? (
-          <div className="xl:col-span-2 space-y-3">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-56 rounded-[4px] border border-line bg-panel animate-pulse" />
+          <div className="space-y-3 p-5">
+            {[...Array(5)].map((_, index) => (
+              <div key={index} className="h-14 animate-pulse rounded-[4px] border border-line bg-background" />
             ))}
           </div>
         ) : isError ? (
-          <div className="xl:col-span-2 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div className="m-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
             Failed to load accounts. Please refresh the page.
           </div>
-        ) : filteredAccounts.length === 0 && tradingAccounts.length === 0 ? (
-          <div className="xl:col-span-2">
-            <EmptyState
-              title="No accounts connected yet"
-              description="Connect a broker account to start tracking your performance."
-            />
-          </div>
         ) : filteredAccounts.length === 0 ? (
-          <div className="xl:col-span-2">
+          <div className="p-5">
             <EmptyState
-              title="No accounts match your filters"
-              description="Try a different search term or clear the status filter."
-              action={
+              title={tradingAccounts.length ? "No accounts match your filters" : "No broker accounts yet"}
+              description={tradingAccounts.length
+                ? "Try another search term or clear the current status filter."
+                : "Connect a broker account to begin live synchronization."}
+              action={tradingAccounts.length ? (
                 <GhostButton type="button" onClick={() => { setQuery(""); setStatusFilter("ALL"); }}>
                   Reset filters
                 </GhostButton>
-              }
+              ) : undefined}
             />
           </div>
         ) : (
-          filteredAccounts.map((account) => (
-            <Panel key={account.accountId} className="min-h-56">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-muted">{account.brokerName}</p>
-                  <p className="mt-1 text-xs text-muted">
-                    {[account.platform, account.serverName].filter(Boolean).join(" · ") ||
-                      "Broker details pending"}
-                  </p>
-                  <h2 className="mt-2 text-xl font-semibold text-foreground">{account.accountName}</h2>
-                </div>
-                <StatusPill tone={account.status === "CONNECTED" ? "lime" : account.status === "RESTRICTED" ? "danger" : account.status === "PENDING" || account.status === "SYNCING" ? "accent" : "muted"}>
-                  {account.status}
-                </StatusPill>
-              </div>
-              <div className="mt-6 grid gap-3 sm:grid-cols-4">
-                <div>
-                  <p className="text-xs font-semibold text-muted">Balance</p>
-                  <p className="mt-2 font-semibold text-foreground">{formatMoney(account.balance)}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-muted">Equity</p>
-                  <p className="mt-2 font-semibold text-accent-2">{formatMoney(account.equity)}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-muted">Floating PnL</p>
-                  <p className={account.floatingPnl.amount >= 0 ? "mt-2 font-semibold text-accent" : "mt-2 font-semibold text-danger"}>
-                    {formatMoney(account.floatingPnl)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold text-muted">Drawdown</p>
-                  <p className="mt-2 font-semibold text-foreground">{formatPercent(account.drawdownPercent)}</p>
-                </div>
-              </div>
-              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-                <p className="text-sm text-muted">Updated {new Date(account.updatedAt).toLocaleString()}</p>
-                <Link
-                  href={`/accounts/${account.accountId}`}
-                  className="rounded-[4px] bg-panel-strong px-5 py-2 text-sm font-semibold text-accent transition"
-                >
-                  View details
-                </Link>
-              </div>
-            </Panel>
-          ))
+          <DataTable
+            headers={["Account", "Connection", "Balance", "Equity", "Floating PnL", "Drawdown", "Last live sync", "Action"]}
+            initialPageSize={10}
+            pageSizeOptions={[10, 25, 50]}
+            maxBodyHeight="660px"
+            rows={filteredAccounts.map((account) => [
+              <div key="account" className="min-w-[210px]">
+                <p className="font-semibold text-foreground">{account.accountName}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {account.brokerName}
+                  {account.serverName ? ` · ${account.serverName}` : " · Broker information pending"}
+                  {account.platform ? ` · ${account.platform}` : ""}
+                </p>
+              </div>,
+              <div key="connection" className="ml-auto w-fit text-right">
+                <StatusPill tone={statusTone(account.status)}>{statusLabel(account)}</StatusPill>
+                <p className="mt-1 whitespace-nowrap text-[11px] text-muted">
+                  {account.status === "CONNECTED"
+                    ? "Live data enabled"
+                    : account.status === "PENDING"
+                      ? "Information incomplete"
+                      : account.status === "SYNCING"
+                        ? "Verification in progress"
+                        : account.status === "INACTIVE"
+                          ? "Inactive for 10 days"
+                          : account.status === "DISCONNECTED"
+                            ? "Broker connection lost"
+                            : "Trading restricted"}
+                </p>
+              </div>,
+              <span key="balance" className="font-semibold text-foreground">{formatMoney(account.balance)}</span>,
+              <span key="equity" className="font-semibold text-accent-2">{formatMoney(account.equity)}</span>,
+              <span key="pnl" className={account.floatingPnl.amount >= 0 ? "font-semibold text-accent" : "font-semibold text-danger"}>
+                {formatMoney(account.floatingPnl)}
+              </span>,
+              <span key="drawdown" className="font-semibold text-foreground">{formatPercent(account.drawdownPercent)}</span>,
+              <span key="sync" className="whitespace-nowrap text-xs text-muted">
+                {account.lastSyncedAt ? new Date(account.lastSyncedAt).toLocaleString() : "Never"}
+              </span>,
+              <Link
+                key="action"
+                href={`/accounts/${account.accountId}`}
+                className="btn-dark inline-flex h-9 items-center whitespace-nowrap px-3 text-xs font-semibold text-accent"
+              >
+                {accountActionLabel(account)}
+              </Link>,
+            ])}
+          />
         )}
-      </div>
+      </Panel>
 
     </WorkspacePage>
   );

@@ -4,6 +4,7 @@ import {
   evaluateAndEnforceRiskValues,
   type LiveRiskValues,
 } from "../src/lib/services/riskEvaluationService";
+import { expireStaleTradingAccounts } from "../src/lib/services/tradingAccountLifecycleService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -25,6 +26,7 @@ const liveCopyStreamEnabled =
   && process.env.BROKER_EXECUTION_ENABLED === "true";
 const streams = new Map<string, StreamHandle>();
 let stopping = false;
+let nextLifecycleScanAt = 0;
 
 function utcDayStart(): Date {
   const value = new Date();
@@ -108,14 +110,26 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
     const drawdown = values.balance > 0
       ? Math.max(0, ((values.balance - values.equity) / values.balance) * 100)
       : 0;
-    const { error } = await createAdminClient().from("account_snapshots").insert({
+    const supabase = createAdminClient();
+    const { error } = await supabase.from("account_snapshots").insert({
       trading_account_id: accountRow.id,
       balance: values.balance,
       equity: values.equity,
       floating_pnl: values.equity - values.balance,
       drawdown_percent: drawdown,
     });
-    if (error) console.error(`[risk-worker] snapshot failed for ${accountRow.id}: ${error.message}`);
+    if (error) {
+      console.error(`[risk-worker] snapshot failed for ${accountRow.id}: ${error.message}`);
+      return;
+    }
+    const { error: activityError } = await supabase
+      .from("trading_accounts")
+      .update({ last_synced_at: new Date(now).toISOString(), sync_error: null })
+      .eq("id", accountRow.id)
+      .in("status", ["CONNECTED", "RESTRICTED"]);
+    if (activityError) {
+      console.error(`[risk-worker] activity update failed for ${accountRow.id}: ${activityError.message}`);
+    }
   };
 
   const persistLiveTrades = async (): Promise<void> => {
@@ -397,6 +411,13 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
 }
 
 async function reconcileStreams() {
+  if (Date.now() >= nextLifecycleScanAt) {
+    const expired = await expireStaleTradingAccounts();
+    if (expired > 0) {
+      console.log(`[risk-worker] moved ${expired} stale or incomplete account(s) out of live status`);
+    }
+    nextLifecycleScanAt = Date.now() + 60 * 60 * 1_000;
+  }
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("trading_accounts")

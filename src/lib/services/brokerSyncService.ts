@@ -7,6 +7,7 @@ import { getDecryptedCredentials, type BrokerCredentialPayload } from '@/lib/ser
 import { writeAuditLog } from '@/lib/services/auditService';
 import { evaluateAndPersistRiskEvents } from '@/lib/services/riskEvaluationService';
 import { createNotification } from '@/lib/services/notificationService';
+import { resolveAccountLifecycleStatus } from '@/lib/accounts/lifecycle';
 
 // MetaAPI can return dates as Date objects, ISO strings, or Unix timestamps
 // depending on the build variant. Always use this helper.
@@ -32,7 +33,7 @@ export interface SyncSummary {
 
 export interface BrokerConnectionStatusSummary {
   accountId: string;
-  status: 'PENDING' | 'SYNCING' | 'CONNECTED' | 'DISCONNECTED' | 'RESTRICTED';
+  status: 'PENDING' | 'SYNCING' | 'CONNECTED' | 'DISCONNECTED' | 'RESTRICTED' | 'INACTIVE';
   providerState: string | null;
   providerConnectionStatus: string | null;
   providerReady: boolean;
@@ -686,25 +687,39 @@ export async function getBrokerConnectionStatus(
   const supabase = createAdminClient();
   const { data: account, error } = await supabase
     .from('trading_accounts')
-    .select('id, status, provider_account_id, last_synced_at')
+    .select('id, status, provider_account_id, last_synced_at, broker_server, broker_platform')
     .eq('id', accountId)
     .maybeSingle();
 
   if (error || !account) throw new Error('Trading account not found.');
   const localStatus = account.status as BrokerConnectionStatusSummary['status'];
+  const { data: snapshot } = await supabase
+    .from('latest_account_snapshots')
+    .select('captured_at')
+    .eq('trading_account_id', accountId)
+    .maybeSingle();
+  const effectiveLocalStatus = resolveAccountLifecycleStatus({
+    status: localStatus,
+    lastSyncedAt: account.last_synced_at,
+    snapshotCapturedAt: snapshot?.captured_at ?? null,
+    serverName: account.broker_server,
+    platform: account.broker_platform,
+  });
   const token = process.env.METAAPI_TOKEN;
 
   if (!account.provider_account_id || !token) {
     return {
       accountId,
-      status: localStatus,
+      status: effectiveLocalStatus,
       providerState: null,
       providerConnectionStatus: null,
       providerReady: false,
       lastSyncedAt: account.last_synced_at,
       message: account.provider_account_id
         ? 'MetaApi status is unavailable because the provider is not configured.'
-        : 'Credentials are stored. The MetaApi account has not been provisioned yet.',
+        : effectiveLocalStatus === 'PENDING'
+          ? 'Account setup is incomplete. Add broker credentials to start the connection.'
+          : 'The MetaApi account has not been provisioned yet.',
     };
   }
 
@@ -716,28 +731,29 @@ export async function getBrokerConnectionStatus(
     const providerConnectionStatus = providerAccount.connectionStatus ?? null;
     const providerReady = providerState === 'DEPLOYED' && providerConnectionStatus === 'CONNECTED';
 
-    if (providerReady && localStatus !== 'CONNECTED' && localStatus !== 'RESTRICTED') {
-      await supabase
-        .from('trading_accounts')
-        .update({ status: 'CONNECTED', sync_error: null })
-        .eq('id', accountId);
-    }
-
+    const synchronized = effectiveLocalStatus === 'CONNECTED' || effectiveLocalStatus === 'RESTRICTED';
+    const status = providerReady
+      ? effectiveLocalStatus === 'INACTIVE'
+        ? 'INACTIVE'
+        : synchronized
+          ? effectiveLocalStatus
+          : 'SYNCING'
+      : effectiveLocalStatus === 'DISCONNECTED' || effectiveLocalStatus === 'INACTIVE'
+        ? effectiveLocalStatus
+        : 'SYNCING';
     return {
       accountId,
-      status: providerReady
-        ? localStatus === 'RESTRICTED' ? 'RESTRICTED' : 'CONNECTED'
-        : localStatus === 'DISCONNECTED'
-          ? 'DISCONNECTED'
-          : 'SYNCING',
+      status,
       providerState,
       providerConnectionStatus,
       providerReady,
       lastSyncedAt: account.last_synced_at,
-      message: providerReady
-        ? account.last_synced_at
+      message: status === 'INACTIVE'
+        ? 'This account has had no successful broker activity for 10 days. Re-enter or confirm the credentials, then sync it to reconnect.'
+        : providerReady
+        ? synchronized
           ? 'MetaApi is connected and the account has synchronized.'
-          : 'MetaApi is connected. Account data synchronization is finishing in the background.'
+          : 'MetaApi is connected, but the first account-data sync has not completed. Run Sync account to finish connecting.'
         : 'MetaApi is still deploying or connecting this account. No action is required yet.',
     };
   } catch (providerError) {
@@ -747,7 +763,7 @@ export async function getBrokerConnectionStatus(
       .slice(0, 300);
     return {
       accountId,
-      status: localStatus,
+      status: effectiveLocalStatus,
       providerState: null,
       providerConnectionStatus: null,
       providerReady: false,
