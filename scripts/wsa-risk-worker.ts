@@ -22,6 +22,10 @@ const snapshotMs = Math.max(
   10_000,
   Number.parseInt(process.env.WSA_RISK_SNAPSHOT_MS ?? "30000", 10) || 30_000,
 );
+const tradeReconcileMs = Math.max(
+  2_000,
+  Number.parseInt(process.env.WSA_TRADE_RECONCILE_MS ?? "5000", 10) || 5_000,
+);
 const liveCopyStreamEnabled =
   process.env.WSA_COPY_ENGINE_ENABLED === "true"
   && process.env.BROKER_EXECUTION_ENABLED === "true";
@@ -92,6 +96,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
   let projectingTrades: Promise<void> | null = null;
   let tradeProjectionQueued = false;
   let lastSnapshotAt = 0;
+  let lastTradeProjectionAt = 0;
   let lastEvaluationCheckAt = 0;
 
   const readValues = (): LiveRiskValues => {
@@ -149,6 +154,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
     projectingTrades = (async () => {
       do {
         tradeProjectionQueued = false;
+        lastTradeProjectionAt = Date.now();
         const supabase = createAdminClient();
         const positions = (connection.terminalState.positions ?? []) as any[];
         const accountInfo = connection.terminalState.accountInformation ?? {};
@@ -167,7 +173,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
           close_price: null,
           profit: Number(position.profit ?? 0),
           currency,
-          opened_at: safeIso(position.openTime),
+          opened_at: safeIso(position.time ?? position.openTime),
           closed_at: null,
         }));
 
@@ -197,14 +203,14 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
         const existingByExternalId = new Map(
           (existingRows ?? []).map((row) => [String(row.external_trade_id), row]),
         );
-        let changedTrade = false;
+        let changedTrades = 0;
 
         for (const row of openRows) {
           const existing = existingByExternalId.get(row.external_trade_id);
           if (!existing) {
             const { error } = await supabase.from("trades").insert(row);
             if (error) throw new Error(error.message);
-            changedTrade = true;
+            changedTrades++;
             continue;
           }
           const changed =
@@ -231,7 +237,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
             })
             .eq("id", existing.id);
           if (error) throw new Error(error.message);
-          changedTrade = true;
+          changedTrades++;
         }
 
         for (const [positionId, closingDeals] of closingDealsByPosition) {
@@ -271,7 +277,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
               })
               .eq("id", existing.id);
             if (error) throw new Error(error.message);
-            changedTrade = true;
+            changedTrades++;
             continue;
           }
 
@@ -294,14 +300,17 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
             closed_at: closedAt,
           });
           if (error) throw new Error(error.message);
-          changedTrade = true;
+          changedTrades++;
         }
 
-        if (changedTrade) {
+        if (changedTrades > 0) {
           await supabase
             .from("trading_accounts")
             .update({ last_synced_at: new Date().toISOString(), sync_error: null })
             .eq("id", accountRow.id);
+          console.log(
+            `[risk-worker] projected ${changedTrades} trade change(s) for ${accountRow.id}; ${openRows.length} open position(s)`,
+          );
         }
       } while (tradeProjectionQueued && !stopping);
     })().finally(() => {
@@ -383,6 +392,14 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
     }, 1_000);
   };
 
+  const reconcileNow = async () => {
+    const tasks: Promise<void>[] = [evaluate()];
+    if (Date.now() - lastTradeProjectionAt >= tradeReconcileMs) {
+      tasks.push(persistLiveTrades());
+    }
+    await Promise.all(tasks);
+  };
+
   class RiskListener extends sdk.SynchronizationListener {
     async onAccountInformationUpdated() { scheduleEvaluation(); }
     async onPositionsReplaced() { scheduleEvaluation(); scheduleTradeProjection(); }
@@ -405,7 +422,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
   );
 
   return {
-    evaluateNow: evaluate,
+    evaluateNow: reconcileNow,
     async close() {
       ready = false;
       if (timer) clearTimeout(timer);
