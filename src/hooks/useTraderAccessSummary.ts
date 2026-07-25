@@ -15,7 +15,10 @@ export const EMPTY_PLATFORM_SUBSCRIPTION_ACCESS: SubscriptionDto = {
 };
 
 async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
   const json = await res.json();
   if (!json.ok) throw new Error(json.error?.message ?? "Request failed");
   return json.data as T;
@@ -26,5 +29,11 @@ export function useTraderAccessSummary() {
     queryKey: ["billing-me"],
     queryFn: () => getJson("/api/billing/me"),
     staleTime: 0,
+    retry: 3,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+    refetchInterval: (query) =>
+      query.state.data?.platformSubscription.status === "ACTIVE" ? false : 5_000,
   });
 }
