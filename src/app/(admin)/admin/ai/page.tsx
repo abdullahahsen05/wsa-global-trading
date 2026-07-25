@@ -284,7 +284,7 @@ export default function AdminAiPage() {
                   assistantLoading || assistantPrompt.trim().length === 0
                 }
                 onClick={() => void runAdminAssistant()}
-                className="!h-10 !min-w-[190px] !rounded-[4px]"
+                className="!h-11 w-full !min-w-0 !rounded-[4px] sm:w-auto sm:!min-w-[190px]"
               >
                 {assistantLoading ? (
                   <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" />
@@ -376,7 +376,7 @@ export default function AdminAiPage() {
                 type="button"
                 disabled={!imageFile || imageLoading}
                 onClick={() => void runImageAnalysis()}
-                className="!h-10 !min-w-[170px] !rounded-[4px]"
+                className="!h-11 w-full !min-w-0 !rounded-[4px] sm:w-auto sm:!min-w-[170px]"
               >
                 {imageLoading ? (
                   <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" />

@@ -64,8 +64,8 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
   const mobileItems = sections.slice(0, 6);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="flex min-h-screen">
+    <div className="min-h-screen min-w-0 overflow-x-hidden bg-background">
+      <div className="flex min-h-screen min-w-0">
         <aside className="hidden h-screen w-[240px] self-start overflow-hidden border-r border-line bg-panel px-4 py-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
           <div className="mb-7 px-2">
             <BrandLogo priority />
@@ -92,7 +92,7 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
         <Dialog.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <Dialog.Portal>
             <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 lg:hidden" />
-            <Dialog.Content className="fixed left-0 top-0 z-50 flex h-full w-[88vw] max-w-sm flex-col border-r border-line bg-panel px-5 py-5 focus:outline-none lg:hidden">
+            <Dialog.Content className="fixed left-0 top-0 z-50 flex h-[100dvh] w-[min(88vw,340px)] flex-col border-r border-line bg-panel px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] focus:outline-none sm:px-5 lg:hidden">
               <Dialog.Title className="sr-only">Demo navigation</Dialog.Title>
               <div className="mb-7 flex items-center justify-between">
                 <div>
@@ -129,14 +129,14 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
           </Dialog.Portal>
         </Dialog.Root>
 
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 border-b border-line bg-panel px-4 py-3 lg:px-7">
-            <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
+          <header className="sticky top-0 z-20 border-b border-line bg-panel px-3 py-3 sm:px-4 lg:px-7">
+            <div className="flex min-w-0 items-center justify-between gap-2 sm:gap-4">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setMobileNavOpen(true)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-[4px] border border-[rgba(255,255,255,0.08)] bg-panel-strong text-muted lg:hidden"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-[4px] border border-[rgba(255,255,255,0.08)] bg-panel-strong text-muted lg:hidden"
                   aria-label="Open navigation"
                 >
                   <Menu className="h-4 w-4" />
@@ -148,7 +148,7 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
                 <span className="hidden rounded-[4px] border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent sm:inline-flex">
                   Demo mode
                 </span>
@@ -183,7 +183,7 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
               ))}
             </nav>
           </header>
-          <main className="relative flex-1 px-4 py-5 lg:px-7">{children}</main>
+          <main className="relative min-w-0 flex-1 overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5 lg:px-7">{children}</main>
         </div>
       </div>
     </div>

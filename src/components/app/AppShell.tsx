@@ -29,16 +29,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>
       <TradingAccountSelectionProvider>
-        <div className="min-h-screen bg-background">
-          <div className="flex min-h-screen">
+        <div className="min-h-screen min-w-0 overflow-x-hidden bg-background">
+          <div className="flex min-h-screen min-w-0">
             <Sidebar
               role={role}
               mobileNavOpen={mobileNavOpen}
               onMobileNavOpenChange={setMobileNavOpen}
             />
-            <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
               <Topbar role={role} onOpenMobileNav={() => setMobileNavOpen(true)} />
-              <main className="relative flex-1 px-4 py-5 md:px-5 lg:px-7 lg:py-6">{children}</main>
+              <main className="relative min-w-0 flex-1 overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5 md:px-5 lg:px-7 lg:py-6">{children}</main>
             </div>
           </div>
         </div>

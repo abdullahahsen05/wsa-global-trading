@@ -272,7 +272,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
     <motion.section layout className="section-surface overflow-hidden">
       <video ref={videoRef} playsInline className="pointer-events-none fixed h-px w-px opacity-0" />
 
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-5">
+      <div className="flex flex-col items-start justify-between gap-4 border-b border-line px-4 py-4 sm:flex-row sm:flex-wrap sm:px-5 sm:py-5">
         <div>
           <div className="flex items-center gap-2">
             <span className="status-pill px-3 py-1 text-xs">XAUUSD</span>
@@ -284,7 +284,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="invisible-scrollbar flex max-w-full flex-nowrap gap-2 overflow-x-auto sm:flex-wrap">
           {timeframes.map((item) => (
             <button
               key={item}
@@ -298,13 +298,13 @@ export function TradingChart({ accountId }: { accountId?: string }) {
         </div>
       </div>
 
-      <div className="px-5 py-5">
+      <div className="px-3 py-3 sm:px-5 sm:py-5">
         <div className="relative w-full">
           <div ref={chartRegionRef}>
             <TradingViewAdvancedChart
               symbol={tvSymbol}
               interval={tvInterval}
-              height="560px"
+              height="clamp(360px, 62dvh, 560px)"
               theme="dark"
               allowSymbolChange={false}
             />
@@ -312,7 +312,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
           <button
             type="button"
             onClick={() => setAssistantOpen((open) => !open)}
-            className="absolute bottom-4 right-4 inline-flex min-h-11 items-center gap-2 rounded-[5px] border border-accent/40 bg-background/95 px-4 text-sm font-semibold text-accent transition hover:bg-panel"
+            className="absolute bottom-3 right-3 inline-flex min-h-11 max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-[5px] border border-accent/40 bg-background/95 px-3 text-sm font-semibold text-accent transition hover:bg-panel sm:bottom-4 sm:right-4 sm:px-4"
           >
             <MessageSquare className="h-4 w-4" />
             {ASK_ASSISTANT_LABEL}
@@ -321,7 +321,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
       </div>
 
       {assistantOpen ? (
-        <div className="border-t border-line px-5 py-5">
+        <div className="border-t border-line px-4 py-4 sm:px-5 sm:py-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="text-sm font-semibold text-foreground">{ASK_ASSISTANT_LABEL} about this chart</h4>

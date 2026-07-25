@@ -206,7 +206,7 @@ function AiAssistantContent() {
       description="Your built-in trading copilot. Ask about your account risk, performance, exposure, and upcoming news — grounded in your live WSA Global data."
       action={
         <PageActionGroup>
-          <div className="min-w-[220px]">
+          <div className="w-full min-w-0 sm:min-w-[220px]">
             <SelectField
               label="Account context"
               value={accountId}

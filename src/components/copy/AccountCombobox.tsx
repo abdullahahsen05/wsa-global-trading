@@ -62,7 +62,7 @@ export function AccountCombobox({
   }, [open]);
 
   return (
-    <div ref={rootRef} className="relative">
+    <div ref={rootRef} className="relative min-w-0">
       <p className="mb-2 text-sm font-semibold text-foreground">{label}</p>
       <button
         type="button"
@@ -71,7 +71,7 @@ export function AccountCombobox({
         aria-expanded={open}
         aria-controls={listboxId}
         onClick={() => setOpen((current) => !current)}
-        className="flex h-12 w-full items-center justify-between gap-3 rounded-[5px] border border-line bg-panel-strong px-4 text-left text-sm text-foreground outline-none transition-colors hover:border-foreground/20 focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-12 w-full min-w-0 items-center justify-between gap-3 rounded-[5px] border border-line bg-panel-strong px-4 text-left text-sm text-foreground outline-none transition-colors hover:border-foreground/20 focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <span className="min-w-0">
           <span className={`block truncate font-semibold ${selected ? "text-foreground" : "text-muted"}`}>
@@ -87,7 +87,7 @@ export function AccountCombobox({
       </button>
 
       {open ? (
-        <div className="absolute z-50 mt-2 w-full min-w-[280px] overflow-hidden rounded-[5px] border border-line bg-panel shadow-2xl shadow-black/40">
+        <div className="absolute z-50 mt-2 w-full min-w-0 overflow-hidden rounded-[5px] border border-line bg-panel shadow-2xl shadow-black/40">
           <div className="relative border-b border-line p-3">
             <Search className="pointer-events-none absolute left-6 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
             <input

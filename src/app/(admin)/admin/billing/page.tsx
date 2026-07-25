@@ -401,7 +401,7 @@ export default function AdminBillingPage() {
             </p>
           </div>
           <div className="flex w-full flex-wrap items-end gap-3 lg:w-auto">
-            <div className="min-w-[240px] flex-1 lg:w-[320px]">
+            <div className="min-w-0 flex-1 sm:min-w-[240px] lg:w-[320px]">
               <SearchField
                 aria-label="Search payment orders"
                 placeholder="User, product, provider, or order ID"
@@ -555,7 +555,7 @@ export default function AdminBillingPage() {
       <Dialog.Root open={Boolean(approveTarget)} onOpenChange={(open) => !open && setApproveTarget(null)}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
-          <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-lime/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
+          <Dialog.Content className="invisible-scrollbar fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-lime/30 bg-panel p-4 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none sm:p-6">
             <Dialog.Title className="flex items-center gap-2 text-xl font-semibold text-foreground">
               <CheckCircle className="h-5 w-5 text-lime" />
               Approve access

@@ -88,7 +88,7 @@ export function Sidebar({
       <Dialog.Root open={mobileNavOpen} onOpenChange={onMobileNavOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 lg:hidden" />
-        <Dialog.Content className="fixed left-0 top-0 z-50 flex h-full w-[88vw] max-w-sm flex-col border-r border-line bg-panel px-5 py-5 focus:outline-none lg:hidden">
+        <Dialog.Content className="fixed left-0 top-0 z-50 flex h-[100dvh] w-[min(88vw,340px)] flex-col border-r border-line bg-panel px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] focus:outline-none sm:px-5 lg:hidden">
           <Dialog.Title className="sr-only">Navigation menu</Dialog.Title>
           <div className="mb-7 flex items-center justify-between">
             <BrandLogo priority />

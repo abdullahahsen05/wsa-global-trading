@@ -19,7 +19,7 @@ export function OpenTradesTable({
           {updatedAt ? `Updated ${updatedAt}` : "Live refresh"}
         </span>
       </div>
-      <div className="invisible-scrollbar overflow-x-auto">
+      <div className="hidden invisible-scrollbar overflow-x-auto sm:block">
         <table className="w-full min-w-[620px] text-left text-sm">
           <thead className="bg-panel-strong text-xs font-semibold uppercase tracking-[0.12em] text-muted">
             <tr>
@@ -58,6 +58,40 @@ export function OpenTradesTable({
             ))}
           </tbody>
         </table>
+      </div>
+      <div className="divide-y divide-line sm:hidden">
+        {trades.map((trade) => (
+          <article key={trade.id} className="grid gap-3 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-semibold text-foreground">{trade.symbol}</p>
+              <span
+                className={`rounded-[4px] px-2 py-1 text-xs ${
+                  trade.side === "BUY"
+                    ? "bg-accent/12 text-accent"
+                    : "bg-danger/12 text-danger"
+                }`}
+              >
+                {trade.side}
+              </span>
+            </div>
+            <dl className="grid grid-cols-3 gap-3 text-xs">
+              <div>
+                <dt className="text-muted">Volume</dt>
+                <dd className="mt-1 font-semibold text-foreground">{trade.volume}</dd>
+              </div>
+              <div>
+                <dt className="text-muted">Open</dt>
+                <dd className="mt-1 font-semibold text-foreground">{trade.openPrice}</dd>
+              </div>
+              <div className="text-right">
+                <dt className="text-muted">Floating PnL</dt>
+                <dd className={`mt-1 font-semibold ${trade.profit.amount >= 0 ? "text-accent" : "text-danger"}`}>
+                  {formatMoney(trade.profit)}
+                </dd>
+              </div>
+            </dl>
+          </article>
+        ))}
       </div>
     </div>
   );

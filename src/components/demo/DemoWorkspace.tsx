@@ -494,7 +494,7 @@ function DemoAiPage() {
       description="Your built-in trading copilot. Ask about account risk, performance, exposure, and upcoming news."
       action={
         <PageActionGroup>
-          <div className="min-w-[220px]">
+          <div className="w-full min-w-0 sm:min-w-[220px]">
             <SelectField label="Account context" value={accountId} onChange={(event) => setAccountId(event.target.value)}>
               <option value="">All my accounts</option>
               {demoAccounts.map((account) => (
@@ -690,8 +690,8 @@ function DemoTerminalPage() {
                 </button>
               ))}
             </div>
-            <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_220px]">
-              <div className="border-r border-line bg-background p-4">
+            <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px]">
+              <div className="border-b border-line bg-background p-4 lg:border-b-0 lg:border-r">
                 <div className="grid h-full gap-3">
                   <div className="grid h-full items-end gap-2 rounded-[4px] border border-line bg-panel-strong p-4">
                     <div className="flex h-full items-end gap-2">

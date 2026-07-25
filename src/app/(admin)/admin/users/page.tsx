@@ -361,7 +361,8 @@ export default function AdminUsersPage() {
               />
             </div>
           ) : (
-            <div className="invisible-scrollbar overflow-x-auto">
+            <>
+            <div className="hidden invisible-scrollbar overflow-x-auto md:block">
               <table className="w-full min-w-[850px] text-left text-sm">
                 <thead className="bg-panel-strong text-[11px] uppercase tracking-[0.12em] text-muted">
                   <tr>
@@ -408,15 +409,54 @@ export default function AdminUsersPage() {
                 </tbody>
               </table>
             </div>
+            <div className="divide-y divide-line md:hidden">
+              {users.map((user) => {
+                const active = user.id === selectedUser?.id;
+                const partner = user.partnerId ? partnerById.get(user.partnerId) : null;
+                return (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => setSelectedId(user.id)}
+                    className={`grid w-full gap-3 px-4 py-4 text-left ${
+                      active ? "bg-accent/[0.07]" : "transition-colors hover:bg-white/[0.025]"
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <span className="block truncate font-semibold text-foreground">{user.name}</span>
+                        <span className="mt-0.5 block truncate text-xs text-muted">{user.email}</span>
+                      </div>
+                      <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted" />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusPill tone={roleTone(user.role)}>{roleLabel(user.role)}</StatusPill>
+                      <StatusPill tone={STATUS_TONE[user.status]}>{user.status}</StatusPill>
+                    </div>
+                    <dl className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <dt className="text-muted">Partner</dt>
+                        <dd className="mt-1 truncate font-semibold text-foreground">{partner?.name ?? "—"}</dd>
+                      </div>
+                      <div className="text-right">
+                        <dt className="text-muted">Joined</dt>
+                        <dd className="mt-1 font-semibold text-foreground">{new Date(user.joinedAt).toLocaleDateString()}</dd>
+                      </div>
+                    </dl>
+                  </button>
+                );
+              })}
+            </div>
+            </>
           )}
 
           {pagination && pagination.totalPages > 1 ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-xs text-muted">
+            <div className="flex flex-col gap-3 border-t border-line px-4 py-3 text-xs text-muted sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <span>
                 Showing {(pagination.page - 1) * pagination.pageSize + 1}–
                 {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:w-auto">
                 <GhostButton type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
                   Previous
                 </GhostButton>

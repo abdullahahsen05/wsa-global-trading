@@ -208,7 +208,7 @@ function TradesContent() {
               </div>
               <span className="text-xs font-semibold uppercase tracking-widest text-muted">{recentTrades.length} trades</span>
             </div>
-            <div className="invisible-scrollbar overflow-x-auto">
+            <div className="hidden invisible-scrollbar overflow-x-auto md:block">
               <table className="w-full min-w-[1040px] text-left text-sm">
                 <thead className="border-b border-line bg-background/60 text-[11px] uppercase tracking-widest text-muted">
                   <tr>
@@ -265,6 +265,61 @@ function TradesContent() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div className="divide-y divide-line md:hidden">
+              {recentTrades.map((trade) => (
+                <button
+                  key={trade.id}
+                  type="button"
+                  className="grid w-full gap-3 bg-panel px-4 py-4 text-left transition-colors hover:bg-background/50 focus:bg-background/50 focus:outline-none"
+                  onClick={() => {
+                    setSelectedId(trade.id);
+                    setSearchOpen(true);
+                  }}
+                >
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-mono font-semibold text-foreground">{trade.symbol}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted">{trade.shortTradeId}</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={`text-xs font-semibold ${trade.side === "BUY" ? "text-lime" : "text-danger"}`}>
+                        {trade.side}
+                      </span>
+                      <StatusPill tone={trade.status === "OPEN" ? "accent" : "muted"}>{trade.status}</StatusPill>
+                    </div>
+                  </div>
+                  {trade.copyStrategyName ? (
+                    <p className="text-xs font-semibold text-accent">Copied by {trade.copyStrategyName}</p>
+                  ) : null}
+                  <dl className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <dt className="text-muted">Opened</dt>
+                      <dd className="mt-1 font-mono font-semibold text-foreground">{trade.openPrice}</dd>
+                      <dd className="mt-0.5 text-muted">{new Date(trade.openedAt).toLocaleString()}</dd>
+                    </div>
+                    <div className="text-right">
+                      <dt className="text-muted">{trade.status === "OPEN" ? "Volume" : "Closed"}</dt>
+                      <dd className="mt-1 font-mono font-semibold text-foreground">
+                        {trade.status === "OPEN" ? trade.volume : trade.closePrice ?? "—"}
+                      </dd>
+                      <dd className="mt-0.5 text-muted">
+                        {trade.status === "OPEN"
+                          ? "Still open"
+                          : trade.closedAt
+                            ? new Date(trade.closedAt).toLocaleString()
+                            : "—"}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="flex items-center justify-between border-t border-line pt-3">
+                    <span className="text-xs text-muted">Profit &amp; loss</span>
+                    <span className={`font-mono font-semibold ${trade.profit.amount >= 0 ? "text-lime" : "text-danger"}`}>
+                      {trade.copySyncPending ? "Sync pending" : formatMoney(trade.profit)}
+                    </span>
+                  </div>
+                </button>
+              ))}
             </div>
           </Panel>
         )}

@@ -146,7 +146,7 @@ export function MasterAccountConnectDialog({
     <Dialog.Root open={open} onOpenChange={(value) => !value && close()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[94vw] max-w-3xl -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-6 shadow-[0_24px_80px_rgba(0,0,0,0.62)] focus:outline-none">
+        <Dialog.Content className="invisible-scrollbar fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-line bg-panel p-4 shadow-[0_24px_80px_rgba(0,0,0,0.62)] focus:outline-none sm:p-6">
           <Dialog.Title className="text-2xl font-semibold text-foreground">Connect a master trading account</Dialog.Title>
           <Dialog.Description className="mt-2 max-w-2xl text-sm leading-6 text-muted">
             Add the MT4 or MT5 account that will generate the live strategy trades. Credentials are encrypted and never returned.
@@ -179,7 +179,7 @@ export function MasterAccountConnectDialog({
             </div>
           </form>
 
-          <Dialog.Close className="absolute right-5 top-5 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
+          <Dialog.Close className="absolute right-3 top-3 grid h-11 w-11 place-items-center rounded-full border border-line bg-background text-muted hover:text-foreground sm:right-5 sm:top-5"><X className="h-4 w-4" /></Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

@@ -67,7 +67,7 @@ export default function PartnerTradersPage() {
       description="Your assigned traders - performance, accounts, and risk status."
       action={
         <PageActionGroup>
-          <div className="min-w-[240px]">
+          <div className="w-full min-w-0 sm:min-w-[240px]">
             <SearchField
               placeholder="Search name or email"
               value={search}

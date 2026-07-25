@@ -419,7 +419,7 @@ export default function AdminCopyPage() {
                 </p>
                 <p className="mt-1 text-xs text-muted">Dispatch targets: {strategy.standardDelayMs / 1000}s standard · {strategy.premiumDelayMs / 1000}s premium</p>
               </div>
-              <div className="flex min-w-[210px] flex-wrap justify-end gap-2">
+              <div className="flex min-w-0 flex-wrap gap-2 lg:justify-end">
                 <GhostButton type="button" onClick={() => openEditStrategy(strategy)}>
                   <Pencil className="mr-1 inline h-3.5 w-3.5" /> Edit
                 </GhostButton>

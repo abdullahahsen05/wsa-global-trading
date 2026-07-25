@@ -154,12 +154,12 @@ export function Topbar({
   ]);
 
   return (
-    <header className="sticky top-0 z-20 min-h-16 border-b border-line bg-panel px-4 py-3 lg:px-7">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex min-w-0 items-center gap-3">
+    <header className="sticky top-0 z-20 min-h-16 border-b border-line bg-panel px-3 py-3 sm:px-4 lg:px-7">
+      <div className="flex min-w-0 items-center justify-between gap-2 sm:gap-4">
+        <div className="flex min-w-0 shrink-0 items-center gap-3">
           <button
             onClick={onOpenMobileNav}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-[4px] border border-line bg-panel-strong text-muted lg:hidden"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-[4px] border border-line bg-panel-strong text-muted lg:hidden"
             aria-label="Open navigation"
           >
             <Menu className="h-4 w-4" />
@@ -169,12 +169,12 @@ export function Topbar({
             <p className="mt-0.5 text-xs font-medium text-muted">{subtitle}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
           <div className="relative" ref={popoverRef}>
             <button
               type="button"
               onClick={() => setNotificationsOpen((current) => !current)}
-              className="relative grid h-9 w-9 place-items-center rounded-full border border-[rgba(255,255,255,0.08)] bg-panel-strong text-muted transition hover:border-accent/40 hover:text-accent"
+              className="relative grid h-11 w-11 place-items-center rounded-full border border-[rgba(255,255,255,0.08)] bg-panel-strong text-muted transition hover:border-accent/40 hover:text-accent"
               aria-label="Show notifications"
               aria-expanded={notificationsOpen}
             >
@@ -269,7 +269,7 @@ export function Topbar({
           {role === "TRADER" ? (
             <select
               aria-label="Select one of your trading accounts"
-              className="h-10 max-w-[260px] rounded-[5px] border border-line bg-panel-strong px-3 text-sm font-semibold text-foreground outline-none focus:border-accent"
+              className="h-11 min-w-0 w-[min(45vw,180px)] truncate rounded-[5px] border border-line bg-panel-strong px-2 text-base font-semibold text-foreground outline-none focus:border-accent sm:w-auto sm:max-w-[260px] sm:px-3 sm:text-sm"
               value={effectiveSelectedAccountId ?? ""}
               onChange={(event) => setSelectedAccountId(event.target.value || null)}
               disabled={connectedAccounts.length === 0}
@@ -287,12 +287,12 @@ export function Topbar({
           ) : null}
         </div>
       </div>
-      <nav className="invisible-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+      <nav className="invisible-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden" aria-label="Section navigation">
         {mobileItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
-            className="btn-dark h-9 shrink-0 px-4 text-xs text-muted"
+            className="btn-dark shrink-0 px-4 text-xs text-muted"
           >
             {item.label}
           </Link>

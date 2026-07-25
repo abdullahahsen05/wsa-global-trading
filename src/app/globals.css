@@ -45,6 +45,25 @@
   box-sizing: border-box;
 }
 
+img,
+video,
+canvas,
+iframe {
+  max-width: 100%;
+}
+
+pre {
+  max-width: 100%;
+  overflow: auto;
+}
+
+button,
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
 .invisible-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -58,10 +77,15 @@
 
 html {
   background: var(--background);
+  min-width: 320px;
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   min-height: 100vh;
+  min-width: 320px;
+  overflow-x: clip;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
@@ -208,6 +232,24 @@ body {
 
 .text-muted {
   color: var(--muted);
+}
+
+@media (max-width: 767px) {
+  [role="dialog"] {
+    overscroll-behavior: contain;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  .btn-dark,
+  .btn-active {
+    min-height: 2.75rem !important;
+    height: 2.75rem !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

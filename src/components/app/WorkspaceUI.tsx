@@ -7,13 +7,13 @@ import { Sparkles } from "lucide-react";
 const ease = [0.22, 1, 0.36, 1] as const;
 
 export const controlClassName =
-  "h-12 w-full rounded-[5px] border border-line bg-panel-strong px-4 text-sm text-foreground outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 read-only:bg-panel";
+  "h-12 w-full min-w-0 rounded-[5px] border border-line bg-panel-strong px-4 text-base text-foreground outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 read-only:bg-panel sm:text-sm";
 
 export const textareaClassName =
-  "min-h-28 w-full rounded-[5px] border border-line bg-panel-strong px-4 py-3 text-sm text-foreground outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 read-only:bg-panel";
+  "min-h-28 w-full min-w-0 rounded-[5px] border border-line bg-panel-strong px-4 py-3 text-base text-foreground outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 read-only:bg-panel sm:text-sm";
 
 export const selectClassName =
-  "h-12 w-full rounded-[5px] border border-line bg-panel-strong px-4 text-sm text-foreground outline-none transition-colors duration-150 focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50";
+  "h-12 w-full min-w-0 rounded-[5px] border border-line bg-panel-strong px-4 text-base text-foreground outline-none transition-colors duration-150 focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm";
 
 export const pageMotion = {
   hidden: { opacity: 0 },
@@ -53,15 +53,15 @@ export function WorkspacePage({
       variants={pageMotion}
       initial="hidden"
       animate="show"
-      className="w-full"
+      className="w-full min-w-0"
     >
-      <motion.div variants={itemMotion} className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
-        <div>
+      <motion.div variants={itemMotion} className="mb-5 flex flex-col items-stretch gap-4 border-b border-line pb-5 sm:mb-6 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+        <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">{eyebrow}</p>
-          <h1 className="mt-2 text-[30px] font-semibold leading-tight text-foreground">{title}</h1>
+          <h1 className="mt-2 break-words text-2xl font-semibold leading-tight text-foreground sm:text-[30px]">{title}</h1>
           <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-muted">{description}</p>
         </div>
-        {action}
+        {action ? <div className="w-full sm:w-auto">{action}</div> : null}
       </motion.div>
       {children}
     </motion.section>
@@ -69,7 +69,11 @@ export function WorkspacePage({
 }
 
 export function PageActionGroup({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center justify-end gap-3">{children}</div>;
+  return (
+    <div className="flex w-full flex-wrap items-center gap-2 [&>*]:min-w-0 [&>*]:flex-1 sm:w-auto sm:justify-end sm:gap-3 sm:[&>*]:flex-none">
+      {children}
+    </div>
+  );
 }
 
 export function FilterChipRow({
@@ -82,7 +86,7 @@ export function FilterChipRow({
   }>;
 }) {
   return (
-    <div className="invisible-scrollbar flex max-w-full flex-wrap gap-2 overflow-x-auto rounded-[4px] border border-line bg-background p-2 sm:inline-flex">
+    <div className="invisible-scrollbar flex max-w-full flex-nowrap gap-2 overflow-x-auto rounded-[4px] border border-line bg-background p-2 sm:inline-flex sm:flex-wrap">
       {chips.map((chip) => (
         <button
           key={chip.label}
@@ -108,7 +112,7 @@ export function Panel({
   return (
     <motion.div
       variants={itemMotion}
-      className={`card-surface p-5 ${className}`}
+      className={`card-surface min-w-0 p-4 sm:p-5 ${className}`}
     >
       {children}
     </motion.div>
@@ -138,7 +142,7 @@ export function StatTile({
   return (
     <motion.div
       variants={itemMotion}
-      className="bg-panel p-5"
+      className="min-w-0 bg-panel p-4 sm:p-5"
     >
       <p className="text-sm font-semibold text-muted">{label}</p>
       <p className={`mt-3 text-2xl font-semibold ${toneClass}`}>{value}</p>
@@ -173,7 +177,7 @@ export function InlineStatusStrip({
           return (
             <div
               key={item.label}
-              className="flex min-w-[220px] flex-1 items-center justify-between gap-4 border-r border-line px-4 py-3 last:border-r-0"
+              className="flex min-w-[170px] flex-1 items-center justify-between gap-3 border-r border-line px-3 py-3 last:border-r-0 sm:min-w-[220px] sm:gap-4 sm:px-4"
             >
               <div className="min-w-0">
                 <p className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
@@ -242,7 +246,7 @@ export function DataTable({
 
   return (
     <div className="overflow-hidden border border-line bg-panel">
-      <div className="invisible-scrollbar overflow-x-auto" style={maxBodyHeight ? { maxHeight: maxBodyHeight } : undefined}>
+      <div className="hidden md:block invisible-scrollbar overflow-x-auto" style={maxBodyHeight ? { maxHeight: maxBodyHeight } : undefined}>
         <table className="w-full min-w-[780px] text-left text-sm">
           <thead className="sticky top-0 z-10 bg-panel-strong text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
             <tr>
@@ -272,12 +276,39 @@ export function DataTable({
           </tbody>
         </table>
       </div>
+      <div
+        className="divide-y divide-line md:hidden"
+        style={maxBodyHeight ? { maxHeight: maxBodyHeight, overflowY: "auto" } : undefined}
+      >
+        {visibleRows.map((row, rowIndex) => (
+          <article key={rowIndex} className="grid gap-3 p-4">
+            <div className="min-w-0 text-sm font-semibold text-foreground">
+              {row[0]}
+            </div>
+            <dl className="grid gap-2.5">
+              {row.slice(1).map((cell, cellIndex) => (
+                <div
+                  key={cellIndex}
+                  className="grid min-w-0 grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] items-start gap-3"
+                >
+                  <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+                    {headers[cellIndex + 1]}
+                  </dt>
+                  <dd className="min-w-0 break-words text-right text-sm font-medium tabular-nums text-foreground/85">
+                    {cell}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </article>
+        ))}
+      </div>
       {showPagination ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line bg-panel-strong px-4 py-3 text-xs text-muted">
+        <div className="flex flex-col gap-3 border-t border-line bg-panel-strong px-4 py-3 text-xs text-muted sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <span>
             Showing {start}-{end} of {rows.length}
           </span>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
             <label className="flex items-center gap-2">
               Rows
               <select
@@ -301,7 +332,7 @@ export function DataTable({
             >
               Previous
             </button>
-            <span className="min-w-14 text-center font-semibold text-foreground">{currentPage} / {totalPages}</span>
+            <span className="text-center font-semibold text-foreground sm:min-w-14">{currentPage} / {totalPages}</span>
             <button
               type="button"
               disabled={currentPage >= totalPages}
@@ -340,9 +371,9 @@ export function PaginationControls({
   if (totalItems <= pageSizeOptions[0]) return null;
 
   return (
-    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3 text-xs text-muted">
+    <div className="mt-4 flex flex-col gap-3 border-t border-line pt-3 text-xs text-muted sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
       <span>Showing {start}-{end} of {totalItems}</span>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
         <label className="flex items-center gap-2">
           Rows
           <select
@@ -363,7 +394,7 @@ export function PaginationControls({
         >
           Previous
         </button>
-        <span className="min-w-14 text-center font-semibold text-foreground">{safePage} / {totalPages}</span>
+        <span className="text-center font-semibold text-foreground sm:min-w-14">{safePage} / {totalPages}</span>
         <button
           type="button"
           disabled={safePage >= totalPages}
@@ -448,7 +479,7 @@ export function EmptyState({
       </div>
       <h3 className="mt-4 text-lg font-semibold text-foreground">{title}</h3>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted">{description}</p>
-      {action ? <div className="mt-5 flex">{action}</div> : null}
+      {action ? <div className="mt-5 flex w-full [&>*]:w-full sm:[&>*]:w-auto">{action}</div> : null}
     </div>
   );
 }

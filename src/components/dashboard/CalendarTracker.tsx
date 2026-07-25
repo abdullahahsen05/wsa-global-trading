@@ -252,7 +252,7 @@ export function CalendarTracker({
 
   return (
     <Panel>
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:flex-wrap">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
             Calendar tracker
@@ -262,14 +262,14 @@ export function CalendarTracker({
             Month and year review for closed trades, daily profit, and selected period summaries.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="invisible-scrollbar flex max-w-full items-center gap-2 overflow-x-auto">
           <StatusPill tone="muted">{shareStatus === "copied" ? "Copied" : "Live ledger"}</StatusPill>
           <StatusPill tone="lime">{mode === "MONTH" ? "Month view" : "Year view"}</StatusPill>
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-[4px] border border-line bg-background p-1">
+      <div className="mt-5 flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="inline-flex self-start rounded-[4px] border border-line bg-background p-1">
           {(["MONTH", "YEAR"] as CalendarMode[]).map((value) => {
             const active = mode === value;
             return (
@@ -289,11 +289,11 @@ export function CalendarTracker({
           })}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
           <button
             type="button"
             onClick={handleShare}
-            className="h-11 rounded-[4px] border border-line bg-panel px-4 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent"
+            className="h-11 rounded-[4px] border border-line bg-panel px-3 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent sm:px-4"
           >
             Share
           </button>
@@ -311,7 +311,7 @@ export function CalendarTracker({
                   null,
               );
             }}
-            className="h-11 rounded-[4px] border border-line bg-background px-4 text-sm font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10"
+            className="h-11 min-w-0 rounded-[4px] border border-line bg-background px-2 text-base font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10 sm:px-4 sm:text-sm"
           >
             {monthNames.map((name, index) => (
               <option key={name} value={index}>
@@ -333,7 +333,7 @@ export function CalendarTracker({
                   null,
               );
             }}
-            className="h-11 rounded-[4px] border border-line bg-background px-4 text-sm font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10"
+            className="h-11 min-w-0 rounded-[4px] border border-line bg-background px-2 text-base font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10 sm:px-4 sm:text-sm"
           >
             {availableYears.map((year) => (
               <option key={year} value={year}>
@@ -346,18 +346,18 @@ export function CalendarTracker({
 
       {mode === "MONTH" ? (
         <>
-          <div className="mt-5 grid grid-cols-7 gap-2">
+          <div className="mt-5 grid grid-cols-7 gap-1 sm:gap-2">
             {weekdayLabels.map((label) => (
               <div
                 key={label}
-                className="rounded-[4px] border border-line bg-background py-2 text-center text-[11px] font-semibold uppercase tracking-[0.2em] text-muted"
+                className="rounded-[4px] border border-line bg-background py-2 text-center text-[9px] font-semibold uppercase tracking-[0.04em] text-muted sm:text-[11px] sm:tracking-[0.2em]"
               >
                 {label}
               </div>
             ))}
           </div>
 
-          <div className="mt-2 grid grid-cols-7 gap-2">
+          <div className="mt-1 grid grid-cols-7 gap-1 sm:mt-2 sm:gap-2">
             {monthCells.map((cell) => {
               const summary = cell.summary;
               const selected = cell.key === selectedDayKey;
@@ -379,7 +379,7 @@ export function CalendarTracker({
                     }
                     setSelectedDayKey(cell.key);
                   }}
-                  className={`relative flex min-h-[122px] flex-col rounded-[4px] border p-3 text-left transition ${
+                  className={`relative flex min-h-[68px] min-w-0 flex-col overflow-hidden rounded-[4px] border p-1.5 text-left transition sm:min-h-[122px] sm:p-3 ${
                     cell.inMonth
                       ? "border-line bg-background"
                       : "border-line/70 bg-panel/70 text-muted/70"
@@ -401,18 +401,18 @@ export function CalendarTracker({
                   <div className="mt-auto grid gap-1">
                     {summary ? (
                       <>
-                        <p className={`text-lg font-semibold ${amountClass}`}>
+                        <p className={`truncate text-[10px] font-semibold sm:text-lg ${amountClass}`}>
                           {compactMoney(summary.profit, currency)}
                         </p>
-                        <p className="text-xs font-medium text-muted">
+                        <p className="hidden text-xs font-medium text-muted sm:block">
                           {summary.tradeCount} trade{summary.tradeCount === 1 ? "" : "s"}
                         </p>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
+                        <p className="hidden text-[11px] font-semibold uppercase tracking-[0.16em] text-muted sm:block">
                           {percent((summary.wins / Math.max(summary.tradeCount, 1)) * 100)} win rate
                         </p>
                       </>
                     ) : (
-                      <p className="text-xs text-muted/60">No closed trades</p>
+                      <p className="hidden text-xs text-muted/60 sm:block">No closed trades</p>
                     )}
                   </div>
                 </motion.button>
@@ -446,7 +446,7 @@ export function CalendarTracker({
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted">
                 Month summary
               </p>
-              <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+              <div className="mt-3 grid grid-cols-1 gap-3 text-sm min-[390px]:grid-cols-3">
                 <div>
                   <p className="text-muted">Closed trades</p>
                   <p className="mt-1 text-lg font-semibold text-foreground">{monthSummary.tradeCount}</p>
