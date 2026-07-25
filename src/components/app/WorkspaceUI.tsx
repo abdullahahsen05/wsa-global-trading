@@ -70,7 +70,7 @@ export function WorkspacePage({
 
 export function PageActionGroup({ children }: { children: ReactNode }) {
   return (
-    <div className="flex w-full flex-wrap items-center gap-2 [&>*]:min-w-0 [&>*]:flex-1 sm:w-auto sm:justify-end sm:gap-3 sm:[&>*]:flex-none">
+    <div className="flex w-full flex-wrap items-center gap-2 [&>*]:min-w-0 [&>*]:basis-[calc(50%-0.25rem)] [&>*]:grow sm:w-auto sm:justify-end sm:gap-3 sm:[&>*]:basis-auto sm:[&>*]:grow-0">
       {children}
     </div>
   );

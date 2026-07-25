@@ -163,10 +163,10 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
                     </option>
                   ))}
                 </select>
-                <Link href="/register" className="btn-dark btn-active hidden sm:inline-flex">
+                <Link href="/register" className="btn-dark btn-active max-sm:!hidden sm:inline-flex">
                   Create account
                 </Link>
-                <Link href="/login" className="btn-dark hidden sm:inline-flex">
+                <Link href="/login" className="btn-dark max-sm:!hidden sm:inline-flex">
                   Back to login
                 </Link>
               </div>
