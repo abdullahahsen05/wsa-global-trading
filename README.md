@@ -1,80 +1,220 @@
-# WSA GLOBAL Trading Platform
+# WSA Global Trading Platform
 
-Full-stack fintech trading platform for trader dashboards, CRM, admin oversight, analytics, risk monitoring, broker adapters, and realtime account updates.
+[![Next.js](https://img.shields.io/badge/Next.js-16.2.6-000000?logo=nextdotjs)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19.2-149ECA?logo=react&logoColor=white)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3FCF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![MetaTrader](https://img.shields.io/badge/MetaTrader-MT4%20%2F%20MT5-111111)](https://www.metatrader5.com/)
+[![Stripe](https://img.shields.io/badge/Stripe-Billing-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
+[![Vercel](https://img.shields.io/badge/Deployment-Vercel-000000?logo=vercel)](https://wsa-global-trading-platform.vercel.app/)
+[![Mobile Ready](https://img.shields.io/badge/UI-Mobile%20Ready-FFD000)](https://wsa-global-trading-platform.vercel.app/demo)
 
-## Tech Stack
+WSA Global is a multi-role trading operations platform for connected MT4/MT5 accounts, live portfolio monitoring, controlled copy trading, risk enforcement, billing, education, evaluations, and partner management.
 
-- **Next.js 16.2.6** (App Router, Turbopack) + **React 19** + **TypeScript 5**
-- **Tailwind CSS v4** with custom design tokens (black/yellow/lime theme)
-- **Prisma 7.8.0** — 14-model schema (users, accounts, trades, risk, CRM, audit)
-- **Framer Motion** for page and item animations
-- **Radix UI** for accessible dialogs and overlays
-- **Vitest** for unit tests, **Playwright** for E2E (scaffold)
+**[Open the live platform](https://wsa-global-trading-platform.vercel.app/)** · **[Explore the public demo](https://wsa-global-trading-platform.vercel.app/demo)** · **[Read the deployment notes](docs/deployment.md)**
 
-## Getting Started
+![WSA Global sign-in experience](docs/screenshots/login.png)
 
-```bash
+## What the platform does
+
+### MT4 and MT5 account connections
+
+Traders and administrators can connect MetaTrader accounts through the platform using the MetaApi integration.
+
+- Secure, server-side credential handling
+- MT4 and MT5 account provisioning and connection-status checks
+- Broker-server discovery and manual server entry
+- Balance, equity, floating P&L, drawdown, positions, and trade-history synchronization
+- Manual sync plus background synchronization jobs
+- Connected-account scoping so each trader only sees their own live accounts
+- Automatic inactive-account handling and reconnection workflows
+
+![Trader dashboard with a connected MT5 account](docs/screenshots/trader-dashboard.png)
+
+### WSA live copy-trading engine
+
+The WSA engine supports administrator-published strategies and trader-managed account routes without exposing broker credentials to the browser.
+
+- Admin-owned master accounts and published monthly strategies
+- Standard and premium/fast strategy tiers
+- Per-follower account subscriptions
+- Trader self-copy routes between their own connected accounts
+- OPEN, MODIFY, and CLOSE propagation
+- Fixed-lot, multiplier, balance-proportional, and equity-proportional sizing
+- Global, strategy, and per-account stoppage rules
+- Maximum lot, drawdown, daily loss, symbol, and open-position controls
+- Idempotent execution links and detailed copy execution logs
+- Dedicated continuous worker for MetaApi streams and order routing
+
+Live execution is intentionally gated. A new deployment keeps `BROKER_EXECUTION_ENABLED=false` until MetaApi, workers, entitlements, consent, and risk controls have been verified with demo accounts.
+
+![Trader copy-trading workspace](docs/screenshots/copy-trading.png)
+
+### Trade monitoring and analytics
+
+- Open and closed trade ledger with search and CSV export
+- Copy-strategy attribution on copied trades
+- Account-level and all-account analytics
+- Equity, P&L, win rate, profit factor, drawdown, and daily calendar views
+- Live snapshots and automatic trade updates from connected accounts
+- Responsive dashboards for desktop and mobile devices
+
+![Searchable synchronized trade ledger](docs/screenshots/trade-ledger.png)
+
+### Administration
+
+The admin console provides a single operational view across users, trading accounts, risk, billing, copy trading, and platform services.
+
+- User access, roles, suspension, and partner assignment
+- Account supervision and broker catalog management
+- Live risk rules, events, restrictions, and monitoring
+- Master accounts, strategies, followers, copy logs, and stoppage controls
+- Stripe orders, subscriptions, access entitlements, and webhook processing
+- Partner commissions, rebates, ledgers, and withdrawals
+- Background job queue, retries, cancellation, and worker controls
+- AI provider keys, limits, and usage controls
+- Academy content, webinars, evaluations, certificates, and verification
+- Bot marketplace products, protected releases, licenses, and downloads
+- Audit logs, contact requests, calendar publishing, and terminal controls
+
+![WSA Global admin overview](docs/screenshots/admin-overview.png)
+
+### Trader and partner workspaces
+
+| Workspace | Capabilities |
+|---|---|
+| Trader | Accounts, trades, analytics, risk, WSA Assistant, copy trading, marketplace, bots, academy, calendar, evaluations, billing, reports, and settings |
+| Partner | Referred traders, CRM notes, activity, commissions, rebates, payout ledger, exports, and withdrawal requests |
+| Admin / Super Admin | Platform supervision, access control, broker and copy operations, billing, partner finance, risk, jobs, content, AI, and audit |
+
+## Architecture
+
+```text
+MT4 / MT5 accounts
+        │
+        ▼
+MetaApi connection and trade streams
+        │
+        ├──► Account and trade synchronization ──► Supabase ──► Trader/Admin UI
+        │
+        ├──► Live risk worker ──► events, restrictions, notifications
+        │
+        └──► WSA copy worker ──► sizing + risk gates ──► follower accounts
+
+Stripe Checkout ──► signed webhook ──► orders and access entitlements
+```
+
+The Next.js application is stateless and can run on Vercel. Continuous copy monitoring, live risk enforcement, and queued broker synchronization should run on a persistent Node.js worker host.
+
+## Technology
+
+| Layer | Technology |
+|---|---|
+| Web application | Next.js 16 App Router, React 19, TypeScript |
+| Styling and UI | Tailwind CSS 4, Radix UI, Framer Motion, Lucide |
+| Database and authentication | Supabase PostgreSQL, Supabase Auth, RLS |
+| Broker integration | MetaApi Cloud SDK for MT4/MT5 |
+| Payments | Stripe Checkout, subscriptions, and signed webhooks |
+| Data and state | TanStack Query, Supabase Realtime, Zustand |
+| Charts | Recharts, Lightweight Charts, TradingView embed |
+| Testing | Vitest and Playwright |
+| Deployment | Vercel web app plus persistent Node workers |
+
+## Local setup
+
+### Requirements
+
+- Node.js 20 or newer
+- npm
+- A Supabase project
+- A MetaApi token for MT4/MT5 connections
+- Stripe test-mode credentials when testing payments
+
+### Install and run
+
+```powershell
+git clone https://github.com/abdullahahsen05/wsa-global-trading.git
+cd wsa-global-trading
 npm install
+Copy-Item .env.example .env.local
+npm run migrate
 npm run dev
 ```
 
-Open [http://localhost:3000/dashboard](http://localhost:3000/dashboard) for the trader workspace or [http://localhost:3000/admin](http://localhost:3000/admin) for the admin panel.
+Open [http://localhost:3000](http://localhost:3000). The public sample workspace is available at [http://localhost:3000/demo](http://localhost:3000/demo).
 
-## Pages
+Do not commit `.env.local`. Keep all Supabase service keys, MetaApi tokens, Stripe secrets, encryption keys, worker secrets, and broker credentials server-side.
 
-### Trader
-| Route | Description |
+### Essential configuration
+
+| Capability | Environment variables |
 |---|---|
-| `/dashboard` | Live KPI strip (sparklines, delta %), market sentiment bar, performance rings, trading chart |
-| `/accounts` | Connected broker accounts with search, status filters, connect dialog |
-| `/accounts/[id]` | Account detail — equity curve, open trades, snapshots |
-| `/trades` | Trade ledger with searchable overlay |
-| `/analytics` | Equity curve, drawdown meter, KPI dashboard, period switching |
-| `/risk` | Risk rules, drawdown bars, warning events, limit settings |
-| `/reports` | Export and schedule reports |
-| `/settings` | Profile and broker connection preferences |
+| Supabase | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_PASSWORD` |
+| Application URLs | `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_APP_URL` |
+| MT4/MT5 | `METAAPI_TOKEN`, `METAAPI_RELIABILITY`, `BROKER_PROVIDER` |
+| Live broker execution | `BROKER_EXECUTION_ENABLED` |
+| Background workers | `WORKER_SECRET`, `WORKER_MAX_JOBS_PER_RUN`, `WORKER_STALE_JOB_MINUTES` |
+| Credential encryption | `ENCRYPTION_KEY` |
+| Stripe | `BILLING_PROVIDER`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, product price IDs |
+| AI assistant | Database-managed provider key or environment fallback, plus AI usage limits |
 
-### Admin
-| Route | Description |
-|---|---|
-| `/admin` | Platform overview — rings, equity curve, trader watchlist, risk queue, overlay tabs |
-| `/admin/traders` | Trader CRM directory |
-| `/admin/accounts` | All accounts under supervision |
-| `/admin/risk` | Risk rule editor, account monitoring, moderation tools |
-| `/admin/crm` | CRM notes, activity timeline, trader profiles |
-| `/admin/users` | User management |
-| `/admin/subscriptions` | Subscription management |
-| `/admin/audit` | Audit log |
+Review [`.env.example`](.env.example) for the complete list and safe defaults.
 
-## Current State
+## Workers
 
-- Polished UI across all 16 pages — black/yellow/lime design system.
-- Dashboard with live-updating KPI cards (sparklines, % change, status), market sentiment strip, performance rings, and interactive overlay tabs.
-- Sidebar with sticky positioning, left-border active indicator, and logout.
-- Topbar with notification bell popover, account selector, and role switcher.
-- Admin overview with platform-level performance rings (MRR, active traders, risk events) and drill-down overlays.
-- Shared domain types, deterministic mock data, and mock-backed service layer.
-- Prisma schema fully defined — 14 models with indexes, ready for migration.
-- Broker adapter contract with mock and MetaApi-ready implementations.
-- API route boundaries returning `ApiEnvelope<T>`.
+The web application and worker processes have separate responsibilities:
 
-## Useful Scripts
+```powershell
+# General queued account and platform jobs
+npm run jobs:worker
 
-```bash
-npm run lint
-npm run test
-npm run build
-npm run prisma:generate
-npm run prisma:migrate
-npm run prisma:seed
+# Continuous master-strategy and self-copy streams
+npm run copy:worker
+
+# Continuous account risk monitoring
+npm run risk:worker
 ```
 
-## Docs
+Only run live workers after confirming the environment, demo-account connections, risk rules, and execution flag. Worker payloads use internal IDs rather than raw broker credentials.
 
-- `docs/requirements-summary.md`
-- `docs/database-model.md`
-- `docs/deployment.md`
+## Useful commands
 
-## Notes
+```powershell
+npm run dev
+npm run build
+npm run start
+npm run lint
+npm run test
+npm run test:e2e
+npx tsc --noEmit
+npm run migrate
+```
 
-The app runs on deterministic mock data while Supabase credentials and MetaApi broker credentials are being provisioned. Backend implementation (auth, Prisma queries, Supabase Realtime, broker sync) is planned for the next phase.
+## Security and execution safeguards
+
+- Supabase Row Level Security and server-side role checks protect role-scoped data.
+- Broker credentials and provider keys are never returned to the browser after storage.
+- Stripe webhooks require signature verification before access is activated.
+- Live copy execution requires explicit configuration, entitlement, consent, healthy connected accounts, and passing risk checks.
+- Duplicate master events and follower executions are deduplicated.
+- Closing an existing copied position is treated separately from opening a new position, so an opening limit does not prevent the master close from being propagated.
+- Admin and worker actions are recorded in audit or execution logs.
+
+Trading and copy trading involve financial risk. Test broker execution with demo accounts before enabling it for any live account.
+
+## Project documentation
+
+- [Background worker architecture](docs/BACKGROUND_WORKER.md)
+- [Database model](docs/database-model.md)
+- [Deployment notes](docs/deployment.md)
+- [Implementation status](docs/IMPLEMENTATION_STATUS.md)
+- [Requirements summary](docs/requirements-summary.md)
+
+## Production
+
+- Web: [wsa-global-trading-platform.vercel.app](https://wsa-global-trading-platform.vercel.app/)
+- Public demo: [wsa-global-trading-platform.vercel.app/demo](https://wsa-global-trading-platform.vercel.app/demo)
+
+---
+
+Built for WSA Global.
