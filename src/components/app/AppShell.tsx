@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/app/Sidebar";
 import { Topbar } from "@/components/app/Topbar";
 import { ToastProvider } from "@/components/app/Toast";
+import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
 import type { UserRole } from "@/lib/domain/types";
 import { TradingAccountSelectionProvider } from "@/providers/TradingAccountSelectionProvider";
 
@@ -21,6 +22,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : pathname.startsWith("/partner")
       ? "PARTNER"
       : "TRADER";
+  useRealtimeUpdates(!isShellFreeRoute);
 
   if (isShellFreeRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;

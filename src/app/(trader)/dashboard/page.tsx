@@ -32,7 +32,6 @@ import type {
   TradeDto,
   RiskRuleDto,
 } from "@/lib/domain/types";
-import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 import { getAccountDisplayIdentity } from "@/lib/domain/accountIdentity";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
@@ -273,7 +272,6 @@ function TraderDashboardContent() {
   });
 
   // Subscribe to realtime updates
-  useRealtimeUpdates();
 
   useEffect(() => {
     const timer = window.setInterval(() => setStatsNow(new Date()), 60_000);

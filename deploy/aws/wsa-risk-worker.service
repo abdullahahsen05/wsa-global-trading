@@ -2,6 +2,7 @@
 Description=WSA Global live account risk and trade synchronization worker
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -9,9 +10,10 @@ User=wsa
 WorkingDirectory=/opt/wsa/app
 ExecStart=/bin/bash /opt/wsa/app/deploy/aws/wsa-worker-start.sh risk
 Restart=always
-RestartSec=5
+RestartSec=10
 TimeoutStopSec=30
 KillSignal=SIGTERM
+KillMode=mixed
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

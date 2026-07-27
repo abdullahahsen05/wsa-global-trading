@@ -30,6 +30,11 @@ const streams = new Map<string, StreamHandle>();
 const selfCopyStreams = new Map<string, StreamHandle>();
 let stopping = false;
 let nextLifecycleScanAt = 0;
+const retryAfter = new Map<string, number>();
+
+function retryDelayMs(): number {
+  return 15_000;
+}
 
 function iso(value?: Date | string) {
   if (!value) return new Date().toISOString();
@@ -324,14 +329,34 @@ async function reconcileStreams() {
   }
   for (const strategy of active.values()) {
     if (streams.has(strategy.id)) {
-      await streams.get(strategy.id)!.reconcile();
-      await supabase.from("copy_strategies").update({ engine_heartbeat_at: new Date().toISOString() }).eq("id", strategy.id);
+      try {
+        await streams.get(strategy.id)!.reconcile();
+        retryAfter.delete(`strategy:${strategy.id}`);
+        await supabase.from("copy_strategies").update({
+          engine_status: "LIVE",
+          engine_error: null,
+          engine_heartbeat_at: new Date().toISOString(),
+        }).eq("id", strategy.id);
+      } catch (error) {
+        await streams.get(strategy.id)!.close().catch(() => undefined);
+        streams.delete(strategy.id);
+        retryAfter.set(`strategy:${strategy.id}`, Date.now() + retryDelayMs());
+        const message = (error instanceof Error ? error.message : "Master stream failed").slice(0, 400);
+        await supabase.from("copy_strategies").update({
+          engine_status: "ERROR",
+          engine_error: message,
+        }).eq("id", strategy.id);
+        console.error(`[copy-worker] active master stream failed for ${strategy.id}: ${message}`);
+      }
       continue;
     }
+    if ((retryAfter.get(`strategy:${strategy.id}`) ?? 0) > Date.now()) continue;
     try {
       streams.set(strategy.id, await openStrategyStream(strategy));
+      retryAfter.delete(`strategy:${strategy.id}`);
     } catch (error) {
       const message = (error instanceof Error ? error.message : "Master stream failed").slice(0, 400);
+      retryAfter.set(`strategy:${strategy.id}`, Date.now() + retryDelayMs());
       await supabase.from("copy_strategies").update({ engine_status: "ERROR", engine_error: message }).eq("id", strategy.id);
     }
   }
@@ -355,12 +380,27 @@ async function reconcileStreams() {
   }
   for (const source of activeSources.values()) {
     if (selfCopyStreams.has(source.source_account_id)) {
-      await selfCopyStreams.get(source.source_account_id)!.reconcile();
+      try {
+        await selfCopyStreams.get(source.source_account_id)!.reconcile();
+        retryAfter.delete(`self:${source.source_account_id}`);
+      } catch (error) {
+        await selfCopyStreams.get(source.source_account_id)!.close().catch(() => undefined);
+        selfCopyStreams.delete(source.source_account_id);
+        retryAfter.set(`self:${source.source_account_id}`, Date.now() + retryDelayMs());
+        console.error(
+          `[self-copy] active source stream failed for ${source.source_account_id}: ${
+            error instanceof Error ? error.message : "unknown error"
+          }`,
+        );
+      }
       continue;
     }
+    if ((retryAfter.get(`self:${source.source_account_id}`) ?? 0) > Date.now()) continue;
     try {
       selfCopyStreams.set(source.source_account_id, await openSelfCopyStream(source));
+      retryAfter.delete(`self:${source.source_account_id}`);
     } catch (error) {
+      retryAfter.set(`self:${source.source_account_id}`, Date.now() + retryDelayMs());
       console.error(`[self-copy] source stream failed: ${error instanceof Error ? error.message : "unknown error"}`);
     }
   }
@@ -372,6 +412,7 @@ async function shutdown() {
   await Promise.allSettled([...selfCopyStreams.values()].map((stream) => stream.close()));
   streams.clear();
   selfCopyStreams.clear();
+  retryAfter.clear();
 }
 
 async function main() {
@@ -384,8 +425,16 @@ async function main() {
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
   while (!stopping) {
-    await reconcileStreams();
-    await runWorkerOnce({ workerId, limit: 25, types: ["EXECUTE_COPY_EVENT", "CLOSE_COPY_STRATEGY", "RETRY_COPY_LOG"] });
+    try {
+      await reconcileStreams();
+      await runWorkerOnce({ workerId, limit: 25, types: ["EXECUTE_COPY_EVENT", "CLOSE_COPY_STRATEGY", "RETRY_COPY_LOG"] });
+    } catch (error) {
+      console.error(
+        `[copy-worker] reconcile cycle failed; retrying in ${pollMs}ms: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 }

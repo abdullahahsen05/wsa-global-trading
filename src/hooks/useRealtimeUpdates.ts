@@ -7,10 +7,12 @@ import { createClient } from '@/lib/supabase/client'
  * Subscribe to Supabase Realtime events and invalidate React Query caches.
  * Call this hook once in a top-level layout or dashboard component.
  */
-export function useRealtimeUpdates() {
+export function useRealtimeUpdates(enabled = true) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
+    if (!enabled) return
+
     const supabase = createClient()
 
     // Subscribe to account snapshots
@@ -79,12 +81,78 @@ export function useRealtimeUpdates() {
       })
       .subscribe()
 
+    const accountChannel = supabase
+      .channel('trading-accounts-realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'trading_accounts',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['trading-accounts'] })
+        queryClient.invalidateQueries({ queryKey: ['admin-accounts'] })
+        queryClient.invalidateQueries({ queryKey: ['copy-master-accounts'] })
+      })
+      .subscribe()
+
+    const copyChannel = supabase
+      .channel('copy-operations-realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'copy_execution_logs',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['copy-logs'] })
+        queryClient.invalidateQueries({ queryKey: ['admin-copy-logs'] })
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'copy_trade_links',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['trades'] })
+        queryClient.invalidateQueries({ queryKey: ['copy-logs'] })
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'copy_master_events',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['copy-logs'] })
+        queryClient.invalidateQueries({ queryKey: ['admin-copy-strategies'] })
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'copy_strategy_followers',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['copy-my-subscriptions'] })
+        queryClient.invalidateQueries({ queryKey: ['admin-copy-strategies'] })
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'self_copy_relationships',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['self-copy-relationships'] })
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'self_copy_trade_links',
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ['self-copy-relationships'] })
+        queryClient.invalidateQueries({ queryKey: ['trades'] })
+      })
+      .subscribe()
+
     return () => {
       supabase.removeChannel(snapshotChannel)
       supabase.removeChannel(tradeChannel)
       supabase.removeChannel(riskChannel)
       supabase.removeChannel(riskRulesChannel)
       supabase.removeChannel(notificationChannel)
+      supabase.removeChannel(accountChannel)
+      supabase.removeChannel(copyChannel)
     }
-  }, [queryClient])
+  }, [enabled, queryClient])
 }

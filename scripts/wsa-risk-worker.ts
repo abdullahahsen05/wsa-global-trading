@@ -490,7 +490,29 @@ async function reconcileStreams() {
   for (const accountRow of active.values()) {
     const stream = streams.get(accountRow.id);
     if (stream) {
-      await stream.evaluateNow();
+      try {
+        await stream.evaluateNow();
+        streamFailureCounts.delete(accountRow.id);
+        streamRetryAfter.delete(accountRow.id);
+      } catch (error) {
+        await stream.close().catch(() => undefined);
+        streams.delete(accountRow.id);
+        const failures = (streamFailureCounts.get(accountRow.id) ?? 0) + 1;
+        const retryAt = Date.now() + retryDelayMs(failures);
+        streamFailureCounts.set(accountRow.id, failures);
+        streamRetryAfter.set(accountRow.id, retryAt);
+        const publicMessage = publicMetaApiError(error);
+        console.error(
+          `[risk-worker] active stream failed for ${accountRow.id}; reconnecting at ${new Date(retryAt).toISOString()}: ${
+            error instanceof Error ? error.message : "unknown error"
+          }`,
+        );
+        await supabase
+          .from("trading_accounts")
+          .update({ sync_error: publicMessage })
+          .eq("id", accountRow.id)
+          .in("status", ["CONNECTED", "RESTRICTED"]);
+      }
       continue;
     }
     if ((streamRetryAfter.get(accountRow.id) ?? 0) > Date.now()) {
@@ -536,7 +558,15 @@ async function main() {
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
   while (!stopping) {
-    await reconcileStreams();
+    try {
+      await reconcileStreams();
+    } catch (error) {
+      console.error(
+        `[risk-worker] reconcile cycle failed; retrying in ${reconcileMs}ms: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, reconcileMs));
   }
 }
