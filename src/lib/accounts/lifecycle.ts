@@ -54,3 +54,12 @@ export function isLiveConnectedAccount(account: TraderAccountSummary): boolean {
   return account.status === "CONNECTED" && account.live !== false;
 }
 
+export function resolveLiveSelectedAccountId(
+  accounts: TraderAccountSummary[],
+  selectedAccountId: string | null,
+): string | null {
+  const connectedAccounts = accounts.filter(isLiveConnectedAccount);
+  return connectedAccounts.some((account) => account.accountId === selectedAccountId)
+    ? selectedAccountId
+    : connectedAccounts[0]?.accountId ?? null;
+}

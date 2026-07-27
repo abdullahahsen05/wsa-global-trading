@@ -8,6 +8,7 @@ import { getAnalyticsSummary } from "@/lib/services/analyticsService";
 import { listUpcomingEvents, type EconomicEventDto } from "@/lib/services/economicCalendarService";
 import { currenciesFromSymbols } from "@/lib/ai/symbols";
 import type { AnalyticsSummary, TradeDto, TraderAccountSummary } from "@/lib/domain/types";
+import { isLiveConnectedAccount } from "@/lib/accounts/lifecycle";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AI Assistant — trader context builder (server-only)
@@ -117,7 +118,10 @@ export async function buildTraderAiContext(params: {
       );
     }
   } else {
-    selectedAccount = accounts[0] ?? null;
+    selectedAccount =
+      accounts.find(isLiveConnectedAccount) ??
+      accounts[0] ??
+      null;
   }
 
   const scopedAccountId = selectedAccount?.accountId;

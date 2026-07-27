@@ -2,10 +2,34 @@ import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_INACTIVITY_MS,
   latestAccountActivityAt,
+  resolveLiveSelectedAccountId,
   resolveAccountLifecycleStatus,
 } from "@/lib/accounts/lifecycle";
+import type { AccountStatus, TraderAccountSummary } from "@/lib/domain/types";
 
 const now = new Date("2026-07-25T00:00:00.000Z").getTime();
+
+function account(
+  accountId: string,
+  status: AccountStatus,
+  live = status === "CONNECTED",
+): TraderAccountSummary {
+  return {
+    accountId,
+    accountName: accountId,
+    brokerName: "WSA GLOBAL",
+    serverName: "MetaQuotes-Demo",
+    platform: "MT5",
+    status,
+    balance: { amount: 0, currency: "USD" },
+    equity: { amount: 0, currency: "USD" },
+    floatingPnl: { amount: 0, currency: "USD" },
+    openTradeCount: 0,
+    drawdownPercent: 0,
+    updatedAt: "2026-07-25T00:00:00.000Z",
+    live,
+  };
+}
 
 describe("trading account lifecycle", () => {
   it("keeps incomplete account information pending", () => {
@@ -55,5 +79,24 @@ describe("trading account lifecycle", () => {
       "2026-07-24T12:00:00.000Z",
     )).toBe("2026-07-24T12:00:00.000Z");
   });
-});
 
+  it("keeps the topbar selection when that account is live", () => {
+    const accounts = [
+      account("pending-account", "PENDING", false),
+      account("test-abd", "CONNECTED"),
+      account("second-live", "CONNECTED"),
+    ];
+
+    expect(resolveLiveSelectedAccountId(accounts, "second-live")).toBe("second-live");
+  });
+
+  it("never falls back to a pending account for the shared selection", () => {
+    const accounts = [
+      account("account-121", "PENDING", false),
+      account("test-abd", "CONNECTED"),
+    ];
+
+    expect(resolveLiveSelectedAccountId(accounts, "account-121")).toBe("test-abd");
+    expect(resolveLiveSelectedAccountId(accounts, null)).toBe("test-abd");
+  });
+});

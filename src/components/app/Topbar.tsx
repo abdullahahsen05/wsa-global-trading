@@ -8,7 +8,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { navItems } from "@/components/app/navigation";
 import type { UserRole, TraderAccountSummary, NotificationDto } from "@/lib/domain/types";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
-import { isLiveConnectedAccount } from "@/lib/accounts/lifecycle";
+import {
+  isLiveConnectedAccount,
+  resolveLiveSelectedAccountId,
+} from "@/lib/accounts/lifecycle";
 
 function relativeTime(isoString: string): string {
   const diff = Date.now() - new Date(isoString).getTime();
@@ -61,11 +64,10 @@ export function Topbar({
     refetchOnWindowFocus: true,
   });
   const connectedAccounts = tradingAccounts.filter(isLiveConnectedAccount);
-  const effectiveSelectedAccountId = connectedAccounts.some(
-    (account) => account.accountId === selectedAccountId,
-  )
-    ? selectedAccountId
-    : connectedAccounts[0]?.accountId ?? null;
+  const effectiveSelectedAccountId = resolveLiveSelectedAccountId(
+    tradingAccounts,
+    selectedAccountId,
+  );
 
   const { data: notifData } = useQuery<{ notifications: NotificationDto[]; unreadCount: number }>({
     queryKey: ["notifications"],

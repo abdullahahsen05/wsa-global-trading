@@ -8,16 +8,19 @@ import {
   GhostButton,
   InlineStatusStrip,
   Panel,
-  PageActionGroup,
   PrimaryButton,
   WorkspacePage,
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
-import { SelectField } from "@/components/app/FormFields";
 import { queryKeys } from "@/lib/data/queryKeys";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
+import {
+  isLiveConnectedAccount,
+  resolveLiveSelectedAccountId,
+} from "@/lib/accounts/lifecycle";
+import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 const SUGGESTED_PROMPTS = [
   "Analyze my current account risk.",
@@ -71,6 +74,8 @@ export default function AiAssistantPage() {
 }
 
 function AiAssistantContent() {
+  const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
+
   // ── Account context (for the selector + context cards) ─────────────────────
   const { data: accounts = [] } = useQuery<TraderAccountSummary[]>({
     queryKey: queryKeys.accounts,
@@ -82,11 +87,23 @@ function AiAssistantContent() {
     },
   });
 
-  const [accountId, setAccountId] = useState<string>("");
-  const selectedAccount = useMemo(
-    () => accounts.find((a) => a.accountId === accountId) ?? null,
-    [accounts, accountId],
+  const connectedAccounts = useMemo(
+    () => accounts.filter(isLiveConnectedAccount),
+    [accounts],
   );
+  const accountId =
+    resolveLiveSelectedAccountId(accounts, selectedAccountId) ?? "";
+  const selectedAccount = useMemo(
+    () => connectedAccounts.find((account) => account.accountId === accountId) ?? null,
+    [accountId, connectedAccounts],
+  );
+
+  useEffect(() => {
+    const effectiveAccountId = accountId || null;
+    if (selectedAccountId !== effectiveAccountId) {
+      setSelectedAccountId(effectiveAccountId);
+    }
+  }, [accountId, selectedAccountId, setSelectedAccountId]);
 
   // ── Chat state ─────────────────────────────────────────────────────────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -112,9 +129,8 @@ function AiAssistantContent() {
         if (id) {
           const raw = localStorage.getItem(CHAT_STORAGE_PREFIX + id);
           if (raw) {
-            const saved = JSON.parse(raw) as { messages?: ChatMessage[]; accountId?: string };
+            const saved = JSON.parse(raw) as { messages?: ChatMessage[] };
             if (Array.isArray(saved.messages)) setMessages(saved.messages);
-            if (typeof saved.accountId === "string") setAccountId(saved.accountId);
           }
         }
       } catch {
@@ -134,12 +150,12 @@ function AiAssistantContent() {
     try {
       localStorage.setItem(
         CHAT_STORAGE_PREFIX + userId,
-        JSON.stringify({ messages: messages.slice(-MAX_PERSISTED_MESSAGES), accountId }),
+        JSON.stringify({ messages: messages.slice(-MAX_PERSISTED_MESSAGES) }),
       );
     } catch {
       // storage full / unavailable — non-fatal
     }
-  }, [messages, accountId, userId]);
+  }, [messages, userId]);
 
   function clearChat() {
     setMessages([]);
@@ -204,24 +220,6 @@ function AiAssistantContent() {
       eyebrow="Assistant"
       title="WSA Assistant"
       description="Your built-in trading copilot. Ask about your account risk, performance, exposure, and upcoming news — grounded in your live WSA Global data."
-      action={
-        <PageActionGroup>
-          <div className="w-full min-w-0 sm:min-w-[220px]">
-            <SelectField
-              label="Account context"
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-            >
-              <option value="">All my accounts</option>
-              {accounts.map((a) => (
-                <option key={a.accountId} value={a.accountId}>
-                  {a.accountName} — {a.brokerName}
-                </option>
-              ))}
-            </SelectField>
-          </div>
-        </PageActionGroup>
-      }
     >
       <InlineStatusStrip
         items={[
@@ -232,7 +230,7 @@ function AiAssistantContent() {
           },
           {
             label: "Account status",
-            value: selectedAccount ? selectedAccount.status : `${accounts.length} connected`,
+            value: selectedAccount ? selectedAccount.status : `${connectedAccounts.length} connected`,
           },
           {
             label: "Chats left today",
@@ -361,7 +359,7 @@ function AiAssistantContent() {
             <dl className="overflow-hidden rounded-[4px] border border-line bg-background">
               {[
                 ["Scope", selectedAccount?.accountName ?? "All connected accounts"],
-                ["Broker", selectedAccount?.brokerName ?? `${accounts.length} accounts available`],
+                ["Broker", selectedAccount?.brokerName ?? `${connectedAccounts.length} accounts available`],
                 ["Connection", selectedAccount?.status ?? "Mixed account scope"],
                 ["Platform", selectedAccount?.platform ?? "MT4 / MT5"],
                 ["Open trades", selectedAccount ? selectedAccount.openTradeCount.toString() : "Across all accounts"],
