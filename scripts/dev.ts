@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { loadEnvConfig } from "@next/env";
 
 const production = process.argv.includes("--production");
+const portArg = process.argv.find((arg, index) => index > 1 && /^\d+$/.test(arg));
 loadEnvConfig(process.cwd(), !production);
 const runWorkers = production || process.env.WSA_DEV_WORKERS === "true";
 
@@ -43,8 +44,17 @@ process.once("SIGTERM", () => shutdown(0));
 start(
   "Next.js",
   production
-    ? [resolve("node_modules/next/dist/bin/next"), "start"]
-    : [resolve("node_modules/next/dist/bin/next"), "dev", "--webpack"],
+    ? [
+      resolve("node_modules/next/dist/bin/next"),
+      "start",
+      ...(portArg ? ["-p", portArg] : []),
+    ]
+    : [
+      resolve("node_modules/next/dist/bin/next"),
+      "dev",
+      "--webpack",
+      ...(portArg ? ["-p", portArg] : []),
+    ],
 );
 
 if (runWorkers && process.env.WSA_BACKGROUND_WORKER_ENABLED !== "false") {
@@ -78,7 +88,14 @@ if (
 
 if (
   runWorkers &&
-  process.env.METAAPI_TOKEN &&
+  (
+    process.env.BROKER_PROVIDER === "api2trade"
+      ? Boolean(
+        process.env.API2TRADE_BASE_URL &&
+        (process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD)),
+      )
+      : Boolean(process.env.METAAPI_TOKEN)
+  ) &&
   process.env.WSA_RISK_ENGINE_ENABLED !== "false"
 ) {
   start("WSA risk worker", [resolve("node_modules/tsx/dist/cli.mjs"), resolve("scripts/wsa-risk-worker.ts")]);
@@ -86,7 +103,7 @@ if (
 } else {
   console.warn(
     production
-      ? "[dev] WSA live risk worker is disabled or METAAPI_TOKEN is missing."
+      ? "[dev] WSA live risk worker is disabled or broker provider credentials are missing."
       : "[dev] WSA live risk worker is disabled in development. Set WSA_DEV_WORKERS=true to enable it.",
   );
 }

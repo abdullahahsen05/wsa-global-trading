@@ -5,8 +5,10 @@ if (typeof window !== "undefined") {
 import type { TradeDto, TraderAccountSummary } from "@/lib/domain/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  BROKER_EXEC_ERROR,
   type BrokerAdapter,
   type BrokerConnectionHealth,
+  BrokerExecutionError,
   type BrokerExecutionResult,
   type CloseTradeRequest,
   type ModifyTradeRequest,
@@ -39,25 +41,6 @@ const SUCCESS_STRING = new Set([
 
 let sharedExecutionApi: any | null = null;
 const sharedExecutionConnections = new Map<string, Promise<any>>();
-
-export const BROKER_EXEC_ERROR = {
-  PROVIDER_NOT_CONFIGURED: "BROKER_PROVIDER_NOT_CONFIGURED",
-  ACCOUNT_NOT_FOUND: "BROKER_ACCOUNT_NOT_FOUND",
-  ACCOUNT_NOT_CONNECTED: "BROKER_ACCOUNT_NOT_CONNECTED",
-  PROVIDER_ERROR: "BROKER_PROVIDER_ERROR",
-  NOT_IMPLEMENTED: "BROKER_EXECUTION_NOT_IMPLEMENTED",
-} as const;
-
-export class BrokerExecutionError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-    public readonly statusCode: number = 502,
-  ) {
-    super(message);
-    this.name = "BrokerExecutionError";
-  }
-}
 
 export class MetaApiBrokerAdapter implements BrokerAdapter {
   private readonly token = process.env.METAAPI_TOKEN;

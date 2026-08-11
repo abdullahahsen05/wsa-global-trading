@@ -204,7 +204,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       if (data.needsSync) {
         setNotice({ type: "info", text: "Account has not been synced yet. Run Sync Account first." });
       } else if (data.connected) {
-        setNotice({ type: "success", text: "Connection verified. MetaAPI is connected to your broker account." });
+        setNotice({ type: "success", text: "Connection verified. The broker provider is connected to your account." });
       } else {
         setNotice({ type: "error", text: data.message ?? "Connection verification failed." });
       }
@@ -223,7 +223,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         statusPollCount.current = 0;
         setNotice({
           type: "info",
-          text: data.message ?? "MetaAPI is still deploying. Check back in a moment.",
+          text: data.message ?? "The broker provider is still connecting. Check back in a moment.",
         });
       } else {
         setNotice({
@@ -322,7 +322,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         </div>
         <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-            MetaAPI account
+            Broker provider account
           </p>
           <p className="mt-1 text-sm font-semibold text-foreground">
             {credStatus?.providerAccountId ? "Provisioned" : "Not yet synced"}
@@ -552,7 +552,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
             </div>
           ) : null}
           <p className="text-xs text-muted">
-            Server options combine the WSA Global broker catalog with MetaApi discovery. You can enter the exact server manually when needed.
+            Server options combine the WSA Global broker catalog with broker-provider discovery. You can enter the exact server manually when needed.
           </p>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <p className="text-xs text-muted">

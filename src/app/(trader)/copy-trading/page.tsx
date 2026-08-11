@@ -107,7 +107,9 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
   const { data: subscriptions = [] } = useQuery<CopyFollowerDto[]>({
     queryKey: ["copy-my-subscriptions"],
     queryFn: () => api("/api/copy/my-subscriptions"),
+    staleTime: 5_000,
     refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
   });
   const { data: selfCopy = { relationships: [] } } = useQuery<SelfCopyResponse>({
     queryKey: ["self-copy-relationships"],
@@ -116,7 +118,9 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
   const { data: copyLogs = [], isLoading: copyLogsLoading } = useQuery<CopyLogDto[]>({
     queryKey: ["copy-logs"],
     queryFn: () => api("/api/copy/logs"),
+    staleTime: 5_000,
     refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
   });
   const connectedAccounts = useMemo(
     () => accounts.filter((account) => account.status === "CONNECTED"),

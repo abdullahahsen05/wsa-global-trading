@@ -19,7 +19,7 @@ export interface BrokerServerDto {
   brokerProviderId: string;
   platform: BrokerPlatform;
   serverName: string;
-  source: "MANUAL" | "METAAPI";
+  source: "MANUAL" | "METAAPI" | "API2TRADE";
   isActive: boolean;
   lastRefreshedAt: string | null;
   createdAt: string;
@@ -41,7 +41,7 @@ function mapServer(row: Record<string, unknown>): BrokerServerDto {
     brokerProviderId: row.broker_provider_id as string,
     platform: row.platform as BrokerPlatform,
     serverName: row.server_name as string,
-    source: row.source as "MANUAL" | "METAAPI",
+    source: row.source as "MANUAL" | "METAAPI" | "API2TRADE",
     isActive: row.is_active as boolean,
     lastRefreshedAt: row.last_refreshed_at as string | null,
     createdAt: row.created_at as string,

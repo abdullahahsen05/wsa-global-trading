@@ -5,7 +5,8 @@ import {
   reverseFollowerSide,
 } from "@/lib/copy/settings";
 import { COPY_ERROR, CopyError } from "@/lib/copy/types";
-import { MetaApiBrokerAdapter, BrokerExecutionError } from "@/lib/broker/MetaApiBrokerAdapter";
+import { BrokerExecutionError } from "@/lib/broker/BrokerAdapter";
+import { createBrokerAdapter } from "@/lib/broker/provider";
 import type { FollowerSettingsPatch } from "@/lib/services/copyTradingService";
 import { getCopyGlobalSettings } from "@/lib/services/copyTradingService";
 import { writeAuditLog } from "@/lib/services/auditService";
@@ -342,13 +343,13 @@ export interface SelfCopyPositionEvent {
 }
 
 /**
- * Executes one real MetaApi position event across every matching self-copy
+ * Executes one real broker position event across every matching self-copy
  * relationship. A copied public-strategy position is just another real source
  * position, so it naturally continues through A -> B -> C chains.
  */
 export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent) {
   const supabase = createAdminClient();
-  const adapter = new MetaApiBrokerAdapter();
+  const adapter = createBrokerAdapter();
   const global = await getCopyGlobalSettings();
   const result = { attempted: 0, success: 0, failed: 0, skipped: 0 };
 

@@ -966,6 +966,7 @@ async function ensurePaidOrderProvisioned(
         throw new Error(`Failed to activate copy entitlement: ${updateError.message}`);
       }
     }
+    await ensureActiveCopyFollowerForPaidOrder(order);
     return;
   }
 
@@ -1012,6 +1013,79 @@ async function ensurePaidOrderProvisioned(
         throw new Error(`Failed to activate bot access: ${updateError.message}`);
       }
     }
+  }
+}
+
+async function ensureActiveCopyFollowerForPaidOrder(order: PaidOrderProvisionRow): Promise<void> {
+  if (!order.copy_strategy_id || !order.trading_account_id) return;
+  const supabase = createAdminClient();
+  const now = new Date().toISOString();
+
+  const [{ data: strategy }, { data: account }] = await Promise.all([
+    supabase
+      .from("copy_strategies")
+      .select("id, status, live_enabled, engine_status")
+      .eq("id", order.copy_strategy_id)
+      .maybeSingle(),
+    supabase
+      .from("trading_accounts")
+      .select("id, user_id, status, account_usage, provider_account_id")
+      .eq("id", order.trading_account_id)
+      .maybeSingle(),
+  ]);
+
+  if (!strategy || strategy.status !== "ACTIVE" || !strategy.live_enabled || strategy.engine_status !== "LIVE") return;
+  if (
+    !account
+    || account.user_id !== order.user_id
+    || account.account_usage !== "TRADER"
+    || account.status !== "CONNECTED"
+    || !account.provider_account_id
+  ) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from("copy_strategy_followers")
+    .upsert(
+      {
+        strategy_id: order.copy_strategy_id,
+        follower_account_id: order.trading_account_id,
+        trader_id: order.user_id,
+        tier: order.tier ?? "NORMAL",
+        status: "ACTIVE",
+        scaling_mode: "EQUITY_PROPORTIONAL",
+        copy_enabled: true,
+        copy_mode: "LOT_MULTIPLIER",
+        lot_multiplier: 1,
+        risk_multiplier: 1,
+        copy_new_trades_only: true,
+        copy_existing_trades: false,
+        pause_on_disconnect: true,
+        emergency_stop: false,
+        engine_status: "LIVE",
+        engine_error: null,
+        engine_synced_at: now,
+        consent_accepted_at: now,
+        paused_at: null,
+      },
+      { onConflict: "strategy_id,follower_account_id" },
+    );
+  if (error) throw new Error(`Failed to activate copy follower: ${error.message}`);
+}
+
+async function activateVerifiedPaidCopyFollowers(userId: string): Promise<void> {
+  const supabase = createAdminClient();
+  const { data: paidOrders } = await supabase
+    .from("payment_orders")
+    .select("id, user_id, product_id, status, amount, currency, trading_account_id, copy_strategy_id, tier, bot_product_id")
+    .eq("user_id", userId)
+    .eq("status", "PAID")
+    .not("trading_account_id", "is", null)
+    .not("copy_strategy_id", "is", null);
+
+  for (const order of paidOrders ?? []) {
+    await ensureActiveCopyFollowerForPaidOrder(order as PaidOrderProvisionRow);
   }
 }
 
@@ -1601,6 +1675,7 @@ export async function getTraderAccessSummary(userId: string): Promise<UserBillin
   await Promise.all([
     activateVerifiedPaidPlatformSubscriptions(userId),
     activateVerifiedPaidBotAccess(userId),
+    activateVerifiedPaidCopyFollowers(userId),
   ]);
   const supabase = createAdminClient();
 

@@ -82,7 +82,7 @@ export default function BillingReturnPage() {
     <WorkspacePage
       eyebrow="Billing"
       title="Payment status"
-      description={isMock ? "Returned from the local mock checkout flow." : "Returned securely from Stripe Checkout."}
+      description={isMock ? "Payment confirmation is being finalized." : "Returned securely from Stripe Checkout."}
     >
       <Panel className="max-w-2xl overflow-hidden">
         <div className="border-b border-line bg-[radial-gradient(circle_at_top_right,rgba(196,255,77,0.12),transparent_45%)] px-1 pb-6">

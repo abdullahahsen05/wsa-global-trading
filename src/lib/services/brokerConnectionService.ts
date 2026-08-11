@@ -4,6 +4,7 @@ import {
   type BrokerCredentialPayload,
 } from "@/lib/services/brokerCredentialService";
 import { syncTradingAccount } from "@/lib/services/brokerSyncService";
+import { getBrokerProviderLabel } from "@/lib/broker/provider";
 
 export interface BrokerConnectionResult {
   accountId: string;
@@ -27,6 +28,7 @@ export async function connectBrokerAccount(params: {
   brokerProviderId?: string;
   connectNow?: boolean;
 }): Promise<BrokerConnectionResult> {
+  const providerLabel = getBrokerProviderLabel();
   await storeBrokerCredentials(params.accountId, params.credentials);
 
   const platform = (params.credentials.platform ?? "mt5").toUpperCase();
@@ -75,7 +77,7 @@ export async function connectBrokerAccount(params: {
         ? "Broker account connected and synchronized."
         : sync.pendingMessage ?? sync.error ??
           (sync.status === "PENDING"
-            ? "MetaApi is still deploying this account. Check status again shortly."
+            ? `${providerLabel} is still connecting this account. Check status again shortly.`
             : "Broker connection failed."),
   };
 }

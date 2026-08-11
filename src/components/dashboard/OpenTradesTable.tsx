@@ -13,7 +13,7 @@ export function OpenTradesTable({
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Open trades</h3>
-          <p className="mt-1 text-xs text-muted">Refreshing from the mock broker feed</p>
+          <p className="mt-1 text-xs text-muted">Refreshing from the live broker ledger</p>
         </div>
         <span className="rounded-[4px] bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
           {updatedAt ? `Updated ${updatedAt}` : "Live refresh"}

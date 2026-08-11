@@ -1,20 +1,28 @@
 import { jsonFail, jsonOk } from "@/lib/api/envelope";
 import { requireAdmin, AuthError } from "@/lib/auth/session";
 import { getCopyGlobalSettings, updateCopyGlobalSettings } from "@/lib/services/copyTradingService";
-import { MetaApiBrokerAdapter } from "@/lib/broker/MetaApiBrokerAdapter";
+import { brokerProviderConfigured, createBrokerAdapter, getBrokerProviderId, getBrokerProviderLabel } from "@/lib/broker/provider";
 import { copyGlobalSettingsSchema } from "@/lib/validation/schemas";
 
 export async function GET() {
   try {
     await requireAdmin();
     const settings = await getCopyGlobalSettings();
-    const adapter = new MetaApiBrokerAdapter();
-    // executionConfigured: token present AND BROKER_EXECUTION_ENABLED=true
+    const adapter = createBrokerAdapter();
     const executionConfigured = adapter.executionAvailable();
-    // metaapiTokenConfigured: token present regardless of execution flag
+    const providerConfigured = brokerProviderConfigured();
     const metaapiTokenConfigured = Boolean(process.env.METAAPI_TOKEN);
     const encryptionConfigured = Boolean(process.env.ENCRYPTION_KEY);
-    return jsonOk({ ...settings, executionConfigured, metaapiTokenConfigured, encryptionConfigured });
+    return jsonOk({
+      ...settings,
+      brokerProvider: getBrokerProviderId(),
+      brokerProviderLabel: getBrokerProviderLabel(),
+      executionConfigured,
+      providerConfigured,
+      metaapiTokenConfigured,
+      api2TradeConfigured: getBrokerProviderId() === "api2trade" ? providerConfigured : false,
+      encryptionConfigured,
+    });
   } catch (err) {
     if (err instanceof AuthError) return jsonFail(err.code, err.message, err.statusCode);
     throw err;

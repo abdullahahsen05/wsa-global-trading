@@ -4,7 +4,7 @@ import {
   getDecryptedCredentials,
   BrokerCredentialError,
 } from "@/lib/services/brokerCredentialService";
-import { MetaApiBrokerAdapter } from "@/lib/broker/MetaApiBrokerAdapter";
+import { brokerProviderConfigured, createBrokerAdapter, getBrokerProviderId, getBrokerProviderLabel } from "@/lib/broker/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 
@@ -20,7 +20,7 @@ async function writeBrokerOpLog(
     account_id: accountId,
     user_id: userId,
     operation: "VERIFY_CONNECTION",
-    provider: "metaapi",
+    provider: getBrokerProviderId(),
     status,
     error_code: errorCode,
     error_message: errorMessage ? errorMessage.slice(0, 300) : null,
@@ -59,11 +59,13 @@ export async function POST(
       );
     }
 
-    // Confirm MetaAPI is configured
-    if (!process.env.METAAPI_TOKEN) {
+    const providerLabel = getBrokerProviderLabel();
+    const providerId = getBrokerProviderId();
+
+    if (!brokerProviderConfigured()) {
       return jsonFail(
         "BROKER_PROVIDER_NOT_CONFIGURED",
-        "METAAPI_TOKEN is not configured. Set this environment variable to enable broker connectivity.",
+        `${providerLabel} is not configured. Set the active broker provider environment variables to enable broker connectivity.`,
         503,
       );
     }
@@ -77,7 +79,7 @@ export async function POST(
 
     const checkedAt = new Date().toISOString();
 
-    // MetaAPI verifyConnection requires a provider_account_id (set during first sync).
+    // Provider verification requires a provider_account_id (set during first sync).
     // If the account hasn't been synced yet, direct the user to sync first.
     if (!account?.provider_account_id) {
       await writeBrokerOpLog(
@@ -85,21 +87,21 @@ export async function POST(
         user.id,
         "FAILED",
         "BROKER_ACCOUNT_NOT_CONNECTED",
-        "Account has not been synced yet. No MetaAPI account ID stored.",
+        `Account has not been synced yet. No ${providerLabel} account ID stored.`,
       );
 
       return jsonOk({
         connected: false,
-        provider: "metaapi",
+        provider: providerId,
         accountId,
         checkedAt,
         needsSync: true,
         message:
-          "Account has not been synced yet. Run 'Sync Account' first to establish the MetaAPI connection.",
+          `Account has not been synced yet. Run 'Sync Account' first to establish the ${providerLabel} connection.`,
       });
     }
 
-    const adapter = new MetaApiBrokerAdapter();
+    const adapter = createBrokerAdapter();
     const health = await adapter.verifyConnection(accountId);
 
     await writeBrokerOpLog(

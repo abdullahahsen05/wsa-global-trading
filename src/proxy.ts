@@ -1,103 +1,117 @@
-import { createServerClient } from '@supabase/ssr'
-import { NextResponse, type NextRequest } from 'next/server'
-import { parseUserRole } from '@/lib/auth/rbac'
-import {
-  AUTH_ROUTE_PREFIXES,
-  PUBLIC_ROUTE_PREFIXES,
-  pathMatches,
-  workspaceRedirect,
-} from '@/lib/auth/routeAccess'
+import { NextResponse, type NextRequest } from "next/server";
 
-export async function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl
+type WindowBucket = {
+  count: number;
+  resetAt: number;
+};
 
-  // Allow public assets and Next internals
-  if (
-    pathname.startsWith('/_next') ||
-    pathname.startsWith('/api/auth') ||
-    pathname.includes('.') // static files
-  ) {
-    return NextResponse.next()
+type RateRule = {
+  name: string;
+  limit: number;
+  windowMs: number;
+};
+
+const buckets = new Map<string, WindowBucket>();
+let lastSweepAt = 0;
+
+const minute = 60_000;
+
+function clientIp(request: NextRequest): string {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]?.trim() || "unknown";
+  return request.headers.get("x-real-ip") ?? "unknown";
+}
+
+function ruleFor(pathname: string, method: string): RateRule {
+  if (pathname.startsWith("/api/webhooks/stripe")) {
+    return { name: "stripe-webhook", limit: 240, windowMs: minute };
   }
+  if (pathname.startsWith("/api/worker/")) {
+    return { name: "worker", limit: 90, windowMs: minute };
+  }
+  if (pathname.startsWith("/api/ai/")) {
+    return { name: "ai", limit: 30, windowMs: minute };
+  }
+  if (pathname.startsWith("/api/auth/")) {
+    return { name: "auth", limit: 45, windowMs: minute };
+  }
+  if (pathname.startsWith("/api/billing/checkout") || pathname.startsWith("/api/billing/portal")) {
+    return { name: "billing-mutation", limit: 20, windowMs: minute };
+  }
+  if (
+    pathname.includes("/sync") ||
+    pathname.includes("sync-trades") ||
+    pathname.includes("broker-credentials") ||
+    pathname.includes("connect")
+  ) {
+    return { name: "broker-sync", limit: 18, windowMs: minute };
+  }
+  if (pathname.startsWith("/api/admin/")) {
+    return method === "GET"
+      ? { name: "admin-read", limit: 240, windowMs: minute }
+      : { name: "admin-write", limit: 90, windowMs: minute };
+  }
+  if (method !== "GET") {
+    return { name: "api-write", limit: 75, windowMs: minute };
+  }
+  return { name: "api-read", limit: 360, windowMs: minute };
+}
 
-  let response = NextResponse.next({
-    request,
-  })
+function sweepExpired(now: number) {
+  if (now - lastSweepAt < minute) return;
+  lastSweepAt = now;
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) buckets.delete(key);
+  }
+}
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          response = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options as Parameters<typeof response.cookies.set>[2])
-          )
+export function proxy(request: NextRequest) {
+  const now = Date.now();
+  sweepExpired(now);
+
+  const { pathname } = request.nextUrl;
+  const rule = ruleFor(pathname, request.method);
+  const ip = clientIp(request);
+  const key = `${rule.name}:${ip}`;
+  const current = buckets.get(key);
+  const bucket =
+    current && current.resetAt > now
+      ? current
+      : { count: 0, resetAt: now + rule.windowMs };
+
+  bucket.count += 1;
+  buckets.set(key, bucket);
+
+  const remaining = Math.max(0, rule.limit - bucket.count);
+  if (bucket.count > rule.limit) {
+    const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+    return NextResponse.json(
+      {
+        ok: false,
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many requests. Please wait a moment and try again.",
         },
       },
-    }
-  )
-
-  // Get session (refreshes if needed)
-  const { data: { user } } = await supabase.auth.getUser()
-
-  const isAuthRoute = pathMatches(pathname, AUTH_ROUTE_PREFIXES)
-  const isPublicRoute = pathMatches(pathname, PUBLIC_ROUTE_PREFIXES)
-  const isApiRoute = pathname.startsWith('/api/')
-
-  // Not authenticated
-  if (!user) {
-    if (isAuthRoute || isPublicRoute || isApiRoute) return response
-    // Redirect unauthenticated users to login
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('redirectTo', pathname)
-    return NextResponse.redirect(loginUrl)
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(retryAfter),
+          "X-RateLimit-Limit": String(rule.limit),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(Math.ceil(bucket.resetAt / 1000)),
+        },
+      },
+    );
   }
 
-  // Authenticated: get profile role
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role, status')
-    .eq('id', user.id)
-    .single()
-
-  const role = parseUserRole(profile?.role)
-  const status = profile?.status ?? 'ACTIVE'
-
-  if (!role) {
-    await supabase.auth.signOut()
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('error', 'profile')
-    return NextResponse.redirect(loginUrl)
-  }
-
-  // Suspended users get signed out
-  if (status === 'SUSPENDED') {
-    await supabase.auth.signOut()
-    const loginUrl = new URL('/login', request.url)
-    loginUrl.searchParams.set('error', 'suspended')
-    return NextResponse.redirect(loginUrl)
-  }
-
-  // API handlers perform their own secure role checks and must return JSON,
-  // never an HTML redirect from Proxy.
-  if (isApiRoute) return response
-
-  const redirectTo = workspaceRedirect(role, pathname)
-  if (redirectTo) return NextResponse.redirect(new URL(redirectTo, request.url))
-
-  return response
+  const response = NextResponse.next();
+  response.headers.set("X-RateLimit-Limit", String(rule.limit));
+  response.headers.set("X-RateLimit-Remaining", String(remaining));
+  response.headers.set("X-RateLimit-Reset", String(Math.ceil(bucket.resetAt / 1000)));
+  return response;
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
-  ],
-}
+  matcher: ["/api/:path*"],
+};

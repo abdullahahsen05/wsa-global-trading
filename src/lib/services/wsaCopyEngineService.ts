@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { enqueueJob } from "@/lib/services/backgroundJobService";
+import { brokerProviderConfigured, getBrokerProviderId } from "@/lib/broker/provider";
 
 type StrategyRecord = {
   id: string;
@@ -54,12 +55,12 @@ async function ensureStrategyBillingProduct(
 }
 
 export function getWsaCopyEngineRuntimeStatus() {
-  const configured = Boolean(process.env.METAAPI_TOKEN?.trim())
-    && process.env.WSA_COPY_ENGINE_ENABLED === "true";
+  const configured = brokerProviderConfigured() && process.env.WSA_COPY_ENGINE_ENABLED === "true";
   return {
     configured,
     enabled: process.env.WSA_COPY_ENGINE_ENABLED === "true",
     executionEnabled: process.env.BROKER_EXECUTION_ENABLED === "true",
+    brokerProvider: getBrokerProviderId(),
     provider: "WSA_ENGINE" as const,
   };
 }
@@ -87,7 +88,7 @@ export async function publishWsaStrategy(strategyId: string, actorUserId: string
   }
   if (!getWsaCopyEngineRuntimeStatus().configured) {
     throw new WsaCopyEngineConfigurationError(
-      "The WSA copy engine is not configured. Set METAAPI_TOKEN and WSA_COPY_ENGINE_ENABLED=true.",
+      "The WSA copy engine is not configured. Set the active broker provider credentials and WSA_COPY_ENGINE_ENABLED=true.",
     );
   }
 

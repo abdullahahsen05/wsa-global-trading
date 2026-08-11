@@ -58,10 +58,10 @@ export function Topbar({
       return json.data;
     },
     enabled: role === "TRADER",
-    staleTime: 0,
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
   });
   const connectedAccounts = tradingAccounts.filter(isLiveConnectedAccount);
   const effectiveSelectedAccountId = resolveLiveSelectedAccountId(
@@ -77,7 +77,9 @@ export function Topbar({
       if (!json.ok) return { notifications: [], unreadCount: 0 };
       return json.data;
     },
-    refetchInterval: 30_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 
   const notifications = notifData?.notifications ?? [];

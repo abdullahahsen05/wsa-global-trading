@@ -51,7 +51,9 @@ function TradesContent() {
 
   const { data: tradeList = [], isLoading, isError } = useQuery<TradeDto[]>({
     queryKey: ["trades"],
+    staleTime: 5_000,
     refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
     queryFn: async () => {
       const res = await fetch("/api/trades");
       const json = await res.json();

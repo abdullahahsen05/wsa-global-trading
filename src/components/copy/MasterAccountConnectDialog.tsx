@@ -31,6 +31,7 @@ export function MasterAccountConnectDialog({
   const [platform, setPlatform] = useState<Platform>("MT5");
   const [providerId, setProviderId] = useState("");
   const [serverSelection, setServerSelection] = useState("");
+  const [serverQuery, setServerQuery] = useState("");
   const [manualBroker, setManualBroker] = useState("");
   const [customServer, setCustomServer] = useState("");
   const [accountLabel, setAccountLabel] = useState("");
@@ -46,8 +47,12 @@ export function MasterAccountConnectDialog({
     enabled: open,
   });
   const servers = useQuery<{ servers: BrokerServer[] }>({
-    queryKey: ["broker-servers", "copy-master-connect", providerId, platform],
-    queryFn: () => api(`/api/brokers/${providerId}/servers?platform=${platform}`),
+    queryKey: ["broker-servers", "copy-master-connect", providerId, platform, serverQuery],
+    queryFn: () => {
+      const params = new URLSearchParams({ platform });
+      if (serverQuery.trim().length >= 2) params.set("query", serverQuery.trim());
+      return api(`/api/brokers/${providerId}/servers?${params.toString()}`);
+    },
     enabled: open && Boolean(providerId && providerId !== CUSTOM),
   });
 
@@ -55,6 +60,7 @@ export function MasterAccountConnectDialog({
     setPlatform("MT5");
     setProviderId("");
     setServerSelection("");
+    setServerQuery("");
     setManualBroker("");
     setCustomServer("");
     setAccountLabel("");
@@ -117,7 +123,7 @@ export function MasterAccountConnectDialog({
       if (connection.connected) {
         onConnected(`Master account connected and synchronized. ${connection.tradesUpserted ?? 0} trade(s) updated.`);
       } else if (connection.status === "PENDING" || connection.status === "SYNCING") {
-        onConnected(connection.message ?? "Master credentials were stored securely. MetaApi is deploying the connection; use Check status on the account card shortly.");
+        onConnected(connection.message ?? "Master credentials were stored securely. The broker provider is connecting; use Check status on the account card shortly.");
       } else {
         setError(connection.message ?? "Credentials were stored, but the broker connection did not complete. Check the values and try again.");
         return;
@@ -155,13 +161,38 @@ export function MasterAccountConnectDialog({
           <form onSubmit={submit} className="mt-6 space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Account label" value={accountLabel} onChange={setAccountLabel} placeholder="e.g. Gold Master" disabled={Boolean(createdAccountId)} />
-              <label className="space-y-2 text-sm font-semibold text-foreground">Platform<select value={platform} disabled={Boolean(createdAccountId)} onChange={(event) => { setPlatform(event.target.value as Platform); setProviderId(""); setServerSelection(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="MT5">MetaTrader 5</option><option value="MT4">MetaTrader 4</option></select></label>
+              <label className="space-y-2 text-sm font-semibold text-foreground">Platform<select value={platform} disabled={Boolean(createdAccountId)} onChange={(event) => { setPlatform(event.target.value as Platform); setProviderId(""); setServerSelection(""); setServerQuery(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="MT5">MetaTrader 5</option><option value="MT4">MetaTrader 4</option></select></label>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="space-y-2 text-sm font-semibold text-foreground">Broker<select required value={providerId} disabled={Boolean(createdAccountId) || providers.isFetching} onChange={(event) => { setProviderId(event.target.value); setServerSelection(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="">Select broker...</option>{providerOptions.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}<option value={CUSTOM}>Enter another broker</option></select></label>
-              {customBroker ? <Field label="Broker name" value={manualBroker} onChange={setManualBroker} placeholder="Broker name" disabled={Boolean(createdAccountId)} /> : <label className="space-y-2 text-sm font-semibold text-foreground">Server<select required value={serverSelection} onChange={(event) => setServerSelection(event.target.value)} disabled={!providerId || servers.isFetching} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="">Select server...</option>{serverOptions.map((server) => <option key={server.id} value={server.serverName}>{server.serverName}</option>)}<option value={CUSTOM}>Enter another server</option></select></label>}
+              <label className="space-y-2 text-sm font-semibold text-foreground">Broker<select required value={providerId} disabled={Boolean(createdAccountId) || providers.isFetching} onChange={(event) => { setProviderId(event.target.value); setServerSelection(""); setServerQuery(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="">Select broker...</option>{providerOptions.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}<option value={CUSTOM}>Enter another broker</option></select></label>
+              {customBroker ? <Field label="Broker name" value={manualBroker} onChange={setManualBroker} placeholder="Broker name" disabled={Boolean(createdAccountId)} /> : <div className="space-y-2">
+                <label className="text-sm font-semibold text-foreground" htmlFor="master-server-search">Search server</label>
+                <input
+                  id="master-server-search"
+                  type="search"
+                  value={serverQuery}
+                  disabled={!providerId || Boolean(createdAccountId)}
+                  onChange={(event) => { setServerQuery(event.target.value); setServerSelection(""); }}
+                  placeholder="Type broker/server e.g. MetaQuotes"
+                  className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm outline-none placeholder:text-muted/50 focus:border-accent disabled:opacity-60"
+                />
+              </div>}
             </div>
+
+            {!customBroker ? (
+              <label className="block space-y-2 text-sm font-semibold text-foreground">
+                Server
+                <select required value={serverSelection} onChange={(event) => setServerSelection(event.target.value)} disabled={!providerId || servers.isFetching} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm">
+                  <option value="">{servers.isFetching ? "Searching servers..." : "Select server..."}</option>
+                  {serverOptions.map((server) => <option key={server.id} value={server.serverName}>{server.serverName}</option>)}
+                  <option value={CUSTOM}>Enter another server</option>
+                </select>
+                <span className="block text-xs font-normal text-muted">
+                  {serverQuery.trim().length >= 2 ? "Showing API2Trade-discovered and admin-configured matches." : "Type at least 2 characters to search API2Trade servers, or choose a configured server."}
+                </span>
+              </label>
+            ) : null}
 
             {customServerSelected ? <Field label="Broker server" value={customServer} onChange={setCustomServer} placeholder="Exact MT4/MT5 server name" /> : null}
 

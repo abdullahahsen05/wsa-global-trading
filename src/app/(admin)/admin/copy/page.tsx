@@ -113,7 +113,7 @@ export default function AdminCopyPage() {
         tone: "ok",
         text: wasEditing
           ? "Strategy details updated."
-          : "Draft strategy created. Publish it only after its master account is connected.",
+          : "Draft strategy created. It is not visible to traders until you click Publish live.",
       });
     },
     onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
@@ -260,7 +260,7 @@ export default function AdminCopyPage() {
     >
       <div className={`mb-5 rounded-[4px] border px-4 py-3 text-sm ${runtime?.configured ? "border-lime/30 bg-lime/10 text-lime" : "border-accent/30 bg-accent/10 text-accent"}`}>
         <strong>WSA engine:</strong> {runtime?.configured ? "configured for explicit live publishing" : "not enabled on this server"}.
-        {!runtime?.configured ? " Set METAAPI_TOKEN and WSA_COPY_ENGINE_ENABLED=true before publishing; no order will be copied until then." : runtime.executionEnabled ? " Live execution is enabled and can affect connected brokerage accounts." : " Monitoring is configured, but broker execution is still disabled."}
+        {!runtime?.configured ? " Set the active broker provider credentials and WSA_COPY_ENGINE_ENABLED=true before publishing; no order will be copied until then." : runtime.executionEnabled ? " Live execution is enabled and can affect connected brokerage accounts." : " Monitoring is configured, but broker execution is still disabled."}
       </div>
 
       {notice ? <div className={`mb-5 rounded-[4px] border px-4 py-3 text-sm ${notice.tone === "ok" ? "border-lime/30 bg-lime/10 text-lime" : "border-danger/30 bg-danger/10 text-danger"}`}>{notice.text}</div> : null}
@@ -507,9 +507,9 @@ export default function AdminCopyPage() {
         {!editingStrategyId ? (
           <Field label="Currency" value={strategyForm.currency} onChange={(value) => setStrategyForm((current) => ({ ...current, currency: value.toUpperCase() }))} />
         ) : null}
-        <p className="text-xs leading-5 text-muted">Standard dispatches at about 2.5 seconds; Premium/Fast targets 250 ms. Broker and network latency are additional.</p>
+        <p className="text-xs leading-5 text-muted">Standard targets 1.5 seconds; Premium/Fast uses immediate dispatch with 0 ms platform delay. Broker and network latency are additional.</p>
         <PrimaryButton type="button" disabled={saveStrategy.isPending || !strategyForm.masterAccountId} onClick={() => saveStrategy.mutate()}>
-          {saveStrategy.isPending ? "Saving..." : editingStrategyId ? "Save changes" : "Create draft"}
+          {saveStrategy.isPending ? "Saving..." : editingStrategyId ? "Save changes" : "Create draft — hidden from traders"}
         </PrimaryButton>
       </SimpleDialog>
     </WorkspacePage>

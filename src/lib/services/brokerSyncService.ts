@@ -9,6 +9,16 @@ import { evaluateAndPersistRiskEvents } from '@/lib/services/riskEvaluationServi
 import { createNotification } from '@/lib/services/notificationService';
 import { resolveAccountLifecycleStatus } from '@/lib/accounts/lifecycle';
 import { publicMetaApiError } from '@/lib/broker/metaApiErrors';
+import { Api2TradeBrokerAdapter } from '@/lib/broker/Api2TradeBrokerAdapter';
+import { publicApi2TradeError } from '@/lib/broker/api2TradeErrors';
+import { acquireOperationalLock } from '@/lib/services/operationalLockService';
+import {
+  brokerProviderConfigured,
+  createBrokerAdapter,
+  getBrokerProviderId,
+  getBrokerProviderLabel,
+} from '@/lib/broker/provider';
+import type { TradeDto, TraderAccountSummary } from '@/lib/domain/types';
 
 // MetaAPI can return dates as Date objects, ISO strings, or Unix timestamps
 // depending on the build variant. Always use this helper.
@@ -17,6 +27,40 @@ function safeIso(val: unknown, fallback?: string): string {
   if (val == null) return fb;
   const d = val instanceof Date ? val : new Date(typeof val === 'number' ? val * 1000 : String(val));
   return isNaN(d.getTime()) ? fb : d.toISOString();
+}
+
+async function loadCachedTradeRefreshSummary(
+  supabase: ReturnType<typeof createAdminClient>,
+  accountId: string,
+  providerAccountId: string,
+  message = 'A broker sync is already running for this account. Showing the latest stored ledger snapshot.',
+): Promise<TradeRefreshSummary> {
+  const [snapshotResult, openTradesResult] = await Promise.all([
+    supabase
+      .from('account_snapshots')
+      .select('balance, equity')
+      .eq('trading_account_id', accountId)
+      .order('captured_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('trades')
+      .select('id', { count: 'exact', head: true })
+      .eq('trading_account_id', accountId)
+      .eq('status', 'OPEN'),
+  ]);
+  const snapshot = snapshotResult.data;
+  return {
+    accountId,
+    providerAccountId,
+    snapshotInserted: false,
+    openPositions: openTradesResult.count ?? 0,
+    tradesUpserted: 0,
+    balance: Number(snapshot?.balance ?? 0),
+    equity: Number(snapshot?.equity ?? 0),
+    currency: 'USD',
+    error: message,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,7 +196,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function liveRiskProjectionEnabled(): boolean {
-  return Boolean(process.env.METAAPI_TOKEN)
+  return getBrokerProviderId() !== 'api2trade'
+    && Boolean(process.env.METAAPI_TOKEN)
     && process.env.WSA_RISK_ENGINE_ENABLED === 'true';
 }
 
@@ -222,6 +267,90 @@ function normalizeDeals(value: unknown): MetaApiDeal[] {
 
 export function isClosingDeal(entryType: string | undefined): boolean {
   return entryType === 'DEAL_ENTRY_OUT' || entryType === 'DEAL_ENTRY_OUT_BY';
+}
+
+function tradeDtoToRow(trade: TradeDto, currency: string) {
+  return {
+    trading_account_id: trade.accountId,
+    external_trade_id: trade.id,
+    symbol: trade.symbol,
+    side: trade.side,
+    status: trade.status,
+    volume: trade.volume,
+    open_price: trade.openPrice,
+    close_price: trade.closePrice,
+    profit: trade.profit.amount,
+    currency: trade.profit.currency || currency,
+    opened_at: trade.openedAt,
+    closed_at: trade.closedAt,
+  };
+}
+
+async function persistBrokerSnapshotAndTrades(params: {
+  supabase: ReturnType<typeof createAdminClient>;
+  accountId: string;
+  snapshot: TraderAccountSummary;
+  openTrades: TradeDto[];
+  closedTrades: TradeDto[];
+}): Promise<{ tradesUpserted: number; openPositions: number; currency: string; balance: number; equity: number }> {
+  const { supabase, accountId, snapshot, openTrades, closedTrades } = params;
+  const currency = snapshot.equity.currency || snapshot.balance.currency || 'USD';
+  const balance = snapshot.balance.amount;
+  const equity = snapshot.equity.amount;
+  await supabase.from('account_snapshots').insert({
+    trading_account_id: accountId,
+    balance,
+    equity,
+    floating_pnl: snapshot.floatingPnl.amount,
+    drawdown_percent: snapshot.drawdownPercent,
+  });
+
+  const rows = [
+    ...openTrades.map((trade) => tradeDtoToRow(trade, currency)),
+    ...closedTrades.map((trade) => tradeDtoToRow(trade, currency)),
+  ];
+  const externalIds = [...new Set(rows.map((row) => row.external_trade_id).filter(Boolean))];
+  const existingMap = new Map<string, string>();
+  if (externalIds.length > 0) {
+    const { data: existing } = await supabase
+      .from('trades')
+      .select('id, external_trade_id')
+      .eq('trading_account_id', accountId)
+      .in('external_trade_id', externalIds);
+    for (const row of existing ?? []) {
+      if (row.external_trade_id) existingMap.set(row.external_trade_id as string, row.id as string);
+    }
+  }
+
+  let tradesUpserted = 0;
+  const toInsert = rows.filter((row) => !existingMap.has(row.external_trade_id));
+  if (toInsert.length > 0) {
+    const { data, error } = await supabase.from('trades').insert(toInsert).select('id');
+    if (error) throw new Error(`Trade insert failed: ${error.message}`);
+    tradesUpserted += data?.length ?? 0;
+  }
+  for (const row of rows.filter((item) => existingMap.has(item.external_trade_id))) {
+    const { error } = await supabase
+      .from('trades')
+      .update({
+        symbol: row.symbol,
+        side: row.side,
+        status: row.status,
+        volume: row.volume,
+        open_price: row.open_price,
+        close_price: row.close_price,
+        profit: row.profit,
+        currency: row.currency,
+        opened_at: row.opened_at,
+        closed_at: row.closed_at,
+      })
+      .eq('trading_account_id', accountId)
+      .eq('external_trade_id', row.external_trade_id);
+    if (error) throw new Error(`Trade update failed: ${error.message}`);
+    tradesUpserted++;
+  }
+
+  return { tradesUpserted, openPositions: openTrades.length, currency, balance, equity };
 }
 
 async function loadMetaApi(): Promise<MetaApiConstructor> {
@@ -545,6 +674,133 @@ async function runMetaApiSync(params: {
 // Public: sync one account
 // ─────────────────────────────────────────────────────────────────────────────
 
+async function runApi2TradeSync(params: {
+  accountId: string;
+  supabase: ReturnType<typeof createAdminClient>;
+  actorUserId: string | null;
+  credentials: BrokerCredentialPayload;
+  platform: 'mt4' | 'mt5';
+  existingProviderAccountId: string | null;
+  preserveRestricted: boolean;
+  previousStatus: string;
+}): Promise<SyncSummary> {
+  const {
+    accountId,
+    supabase,
+    actorUserId,
+    credentials,
+    platform,
+    existingProviderAccountId,
+    preserveRestricted,
+    previousStatus,
+  } = params;
+  const provider = 'api2trade';
+  const adapter = new Api2TradeBrokerAdapter();
+
+  try {
+    if (!adapter.configured()) {
+      return {
+        accountId,
+        status: 'DISCONNECTED',
+        snapshotInserted: false,
+        tradesUpserted: 0,
+        error: 'API2Trade is not configured.',
+      };
+    }
+
+    let providerAccountId = existingProviderAccountId;
+    if (!providerAccountId) {
+      providerAccountId = await adapter.registerAccount({
+        accountId,
+        login: credentials.login,
+        password: credentials.password,
+        server: credentials.server,
+        platform,
+        name: credentials.brokerName?.trim() || `WSA-${accountId.slice(0, 8)}`,
+      });
+      await supabase
+        .from('trading_accounts')
+        .update({
+          provider_account_id: providerAccountId,
+          provider,
+          sync_error: null,
+        })
+        .eq('id', accountId);
+    } else {
+      await supabase
+        .from('trading_accounts')
+        .update({ provider, sync_error: null })
+        .eq('id', accountId);
+    }
+
+    const health = await adapter.verifyConnection(accountId);
+    if (!health.ok) {
+      const message = health.message || 'API2Trade account is not connected yet.';
+      const preservedConnectedStatus = await markFailed(supabase, accountId, message, previousStatus);
+      return {
+        accountId,
+        status: preservedConnectedStatus ? 'CONNECTED' : 'PENDING',
+        snapshotInserted: false,
+        tradesUpserted: 0,
+        pendingMessage: message,
+      };
+    }
+
+    const [snapshot, openTrades, closedTrades] = await Promise.all([
+      adapter.fetchSnapshot(accountId),
+      adapter.fetchOpenTrades(accountId),
+      adapter.fetchTradeHistory(accountId),
+    ]);
+    const persisted = await persistBrokerSnapshotAndTrades({
+      supabase,
+      accountId,
+      snapshot,
+      openTrades,
+      closedTrades,
+    });
+
+    await supabase
+      .from('trading_accounts')
+      .update({
+        status: preserveRestricted ? 'RESTRICTED' : 'CONNECTED',
+        last_synced_at: new Date().toISOString(),
+        sync_error: null,
+        provider,
+        provider_account_id: providerAccountId,
+        broker_name: snapshot.brokerName?.trim() || credentials.brokerName?.trim() || 'WSA GLOBAL',
+        broker_server: snapshot.serverName?.trim() || credentials.server,
+        broker_platform: platform.toUpperCase(),
+      })
+      .eq('id', accountId);
+
+    void writeAuditLog({
+      actorUserId,
+      action: 'ACCOUNT_SYNC_COMPLETED',
+      entityType: 'trading_account',
+      entityId: accountId,
+      metadata: { provider, tradesUpserted: persisted.tradesUpserted, snapshotInserted: true },
+    });
+
+    return {
+      accountId,
+      status: 'CONNECTED',
+      snapshotInserted: true,
+      tradesUpserted: persisted.tradesUpserted,
+    };
+  } catch (error) {
+    const diagnosticMessage = sanitizeMessage(publicApi2TradeError(error), credentials);
+    console.error('[API2TRADE_SYNC_ERROR]', { tradingAccountId: accountId, message: diagnosticMessage });
+    const preservedConnectedStatus = await markFailed(supabase, accountId, diagnosticMessage, previousStatus);
+    return {
+      accountId,
+      status: preservedConnectedStatus ? 'CONNECTED' : 'DISCONNECTED',
+      snapshotInserted: false,
+      tradesUpserted: 0,
+      error: diagnosticMessage,
+    };
+  }
+}
+
 export async function syncTradingAccount(
   accountId: string,
   actorUserId: string | null,
@@ -600,10 +856,15 @@ export async function syncTradingAccount(
   // Old credentials without `platform` field will have undefined here; default to mt5.
   const platform: 'mt4' | 'mt5' = credentials.platform ?? 'mt5';
 
-  // 4. Check MetaAPI token
-  const token = process.env.METAAPI_TOKEN;
-  if (!token) {
-    return { accountId, status: 'DISCONNECTED', snapshotInserted: false, tradesUpserted: 0, error: 'METAAPI_TOKEN is not configured.' };
+  const activeProvider = getBrokerProviderId();
+  if (!brokerProviderConfigured()) {
+    return {
+      accountId,
+      status: 'DISCONNECTED',
+      snapshotInserted: false,
+      tradesUpserted: 0,
+      error: `${getBrokerProviderLabel(activeProvider)} is not configured.`,
+    };
   }
 
   // Keep live accounts selectable while refreshing. SYNCING is only an
@@ -621,13 +882,10 @@ export async function syncTradingAccount(
     action: 'ACCOUNT_SYNC_TRIGGERED',
     entityType: 'trading_account',
     entityId: accountId,
-    metadata: { provider: credentials.provider, platform },
+    metadata: { provider: activeProvider, platform },
   });
 
-  // Await the SDK operation to completion. Returning while it kept running
-  // allowed the worker to open another overlapping websocket session.
-  const result = await runMetaApiSync({
-    token,
+  const commonSyncParams = {
     accountId,
     supabase,
     actorUserId,
@@ -636,7 +894,13 @@ export async function syncTradingAccount(
     existingProviderAccountId: account.provider_account_id ?? null,
     preserveRestricted: account.status === 'RESTRICTED',
     previousStatus: account.status,
-  });
+  };
+  const result = activeProvider === 'api2trade'
+    ? await runApi2TradeSync(commonSyncParams)
+    : await runMetaApiSync({
+        ...commonSyncParams,
+        token: process.env.METAAPI_TOKEN!,
+      });
 
 
   // ── Post-sync: risk evaluation and notifications ──────────────────────────
@@ -709,6 +973,53 @@ export async function getBrokerConnectionStatus(
     serverName: account.broker_server,
     platform: account.broker_platform,
   });
+  const activeProvider = getBrokerProviderId();
+
+  if (activeProvider === 'api2trade') {
+    if (!account.provider_account_id || !brokerProviderConfigured()) {
+      return {
+        accountId,
+        status: effectiveLocalStatus,
+        providerState: account.provider_account_id ? 'CONFIG_MISSING' : null,
+        providerConnectionStatus: null,
+        providerReady: false,
+        lastSyncedAt: account.last_synced_at,
+        message: account.provider_account_id
+          ? 'API2Trade status is unavailable because the provider is not configured.'
+          : effectiveLocalStatus === 'PENDING'
+            ? 'Account setup is incomplete. Add broker credentials to start the connection.'
+            : 'The API2Trade account has not been provisioned yet.',
+      };
+    }
+    const adapter = createBrokerAdapter();
+    const health = await adapter.verifyConnection(accountId);
+    const synchronized = effectiveLocalStatus === 'CONNECTED' || effectiveLocalStatus === 'RESTRICTED';
+    const status = health.ok
+      ? effectiveLocalStatus === 'INACTIVE'
+        ? 'INACTIVE'
+        : synchronized
+          ? effectiveLocalStatus
+          : 'SYNCING'
+      : effectiveLocalStatus === 'DISCONNECTED' || effectiveLocalStatus === 'INACTIVE'
+        ? effectiveLocalStatus
+        : 'SYNCING';
+    return {
+      accountId,
+      status,
+      providerState: health.ok ? 'READY' : 'CONNECTING',
+      providerConnectionStatus: health.ok ? 'CONNECTED' : 'UNKNOWN',
+      providerReady: health.ok,
+      lastSyncedAt: account.last_synced_at,
+      message: status === 'INACTIVE'
+        ? 'This account has had no successful broker activity for 10 days. Re-enter or confirm the credentials, then sync it to reconnect.'
+        : health.ok
+          ? synchronized
+            ? 'API2Trade is connected and the account has synchronized.'
+            : 'API2Trade is connected, but the first account-data sync has not completed. Run Sync account to finish connecting.'
+          : health.message,
+    };
+  }
+
   const token = process.env.METAAPI_TOKEN;
 
   if (!account.provider_account_id || !token) {
@@ -798,7 +1109,7 @@ export async function refreshAccountTrades(
   }
 
   if (!account.provider_account_id) {
-    return { accountId, providerAccountId: '', snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: 'Account has not been synced by an admin yet. No MetaAPI account ID stored.' };
+    return { accountId, providerAccountId: '', snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: `Account has not been synced yet. No ${getBrokerProviderLabel()} account ID stored.` };
   }
 
   if (
@@ -833,12 +1144,98 @@ export async function refreshAccountTrades(
     };
   }
 
+  if (getBrokerProviderId() === 'api2trade') {
+    if (!brokerProviderConfigured()) {
+      return {
+        accountId,
+        providerAccountId: account.provider_account_id,
+        snapshotInserted: false,
+        openPositions: 0,
+        tradesUpserted: 0,
+        balance: 0,
+        equity: 0,
+        currency: 'USD',
+        error: 'API2Trade is not configured.',
+      };
+    }
+    const lock = await acquireOperationalLock(`account-sync:${accountId}`, 90);
+    if (!lock) {
+      return loadCachedTradeRefreshSummary(supabase, accountId, account.provider_account_id);
+    }
+    try {
+      const adapter = createBrokerAdapter();
+      const [snapshot, openTrades, closedTrades] = await Promise.all([
+        adapter.fetchSnapshot(accountId),
+        adapter.fetchOpenTrades(accountId),
+        adapter.fetchTradeHistory(accountId),
+      ]);
+      const persisted = await persistBrokerSnapshotAndTrades({
+        supabase,
+        accountId,
+        snapshot,
+        openTrades,
+        closedTrades,
+      });
+      await supabase
+        .from('trading_accounts')
+        .update({
+          last_synced_at: new Date().toISOString(),
+          sync_error: null,
+          broker_name: snapshot.brokerName?.trim() || 'WSA GLOBAL',
+          broker_server: snapshot.serverName?.trim() || null,
+        })
+        .eq('id', accountId);
+      void writeAuditLog({
+        actorUserId,
+        action: 'ACCOUNT_SYNC_COMPLETED',
+        entityType: 'trading_account',
+        entityId: accountId,
+        metadata: { source: 'trader-refresh', provider: 'api2trade', tradesUpserted: persisted.tradesUpserted, openPositions: persisted.openPositions },
+      });
+      void evaluateAndPersistRiskEvents(accountId, actorUserId).catch((err) =>
+        console.error('[REFRESH_RISK_EVAL_ERROR]', { accountId, err })
+      );
+      return {
+        accountId,
+        providerAccountId: account.provider_account_id,
+        snapshotInserted: true,
+        openPositions: persisted.openPositions,
+        tradesUpserted: persisted.tradesUpserted,
+        balance: persisted.balance,
+        equity: persisted.equity,
+        currency: persisted.currency,
+      };
+    } catch (error) {
+      const msg = publicApi2TradeError(error);
+      await supabase.from('trading_accounts').update({ sync_error: msg }).eq('id', accountId);
+      return {
+        accountId,
+        providerAccountId: account.provider_account_id,
+        snapshotInserted: false,
+        openPositions: 0,
+        tradesUpserted: 0,
+        balance: 0,
+        equity: 0,
+        currency: 'USD',
+        error: msg,
+      };
+    } finally {
+      await lock.release();
+    }
+  }
+
   const token = process.env.METAAPI_TOKEN;
   if (!token) {
     return { accountId, providerAccountId: account.provider_account_id, snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: 'METAAPI_TOKEN is not configured.' };
   }
 
-  const refreshPromise = (async (): Promise<TradeRefreshSummary> => {
+  const lock = await acquireOperationalLock(`account-sync:${accountId}`, 120);
+  if (!lock) {
+    return loadCachedTradeRefreshSummary(supabase, accountId, account.provider_account_id);
+  }
+
+  try {
+    const refreshPromise = (async (): Promise<TradeRefreshSummary> => {
     // '/node' subpath → dists/cjs/index.js (Node CJS bundle, no window references).
     // Default import() follows the "import" exports condition → dists/esm-web/index.js which references window.
     const MetaApi = await loadMetaApi();
@@ -1072,15 +1469,18 @@ export async function refreshAccountTrades(
 
   // Do not abandon the SDK promise behind a local timeout. The abandoned
   // refresh retained its sockets and could overlap the next manual refresh.
-  const result = await refreshPromise;
+    const result = await refreshPromise;
 
-  if (result.snapshotInserted) {
-    void evaluateAndPersistRiskEvents(accountId, actorUserId).catch((err) =>
-      console.error('[REFRESH_RISK_EVAL_ERROR]', { accountId, err })
-    );
+    if (result.snapshotInserted) {
+      void evaluateAndPersistRiskEvents(accountId, actorUserId).catch((err) =>
+        console.error('[REFRESH_RISK_EVAL_ERROR]', { accountId, err })
+      );
+    }
+
+    return result;
+  } finally {
+    await lock.release();
   }
-
-  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

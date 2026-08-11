@@ -37,7 +37,7 @@ type BrokerServerOption = {
   id: string;
   serverName: string;
   brokerName?: string;
-  source: "MANUAL" | "METAAPI";
+  source: "MANUAL" | "METAAPI" | "API2TRADE";
 };
 
 const CUSTOM_BROKER_OPTION = "__custom__";
@@ -263,7 +263,8 @@ function AccountsContent() {
     const usesCustomServer =
       !pendingBrokerProviderId ||
       serverSelection === CUSTOM_BROKER_OPTION ||
-      selectedServer?.source === "METAAPI";
+      selectedServer?.source === "METAAPI" ||
+      selectedServer?.source === "API2TRADE";
     const server = !pendingBrokerProviderId || serverSelection === CUSTOM_BROKER_OPTION
       ? customServer
       : serverSelection;
@@ -528,10 +529,10 @@ function AccountsContent() {
                               setServerSearchQuery(serverSearchDraft.trim());
                             }}
                           >
-                            Search MetaApi
+                            Search servers
                           </GhostButton>
                           <p className="text-xs leading-5 text-muted md:col-span-2">
-                            WSA Global is the platform company. MetaApi searches known {selectedPlatform} broker
+                            WSA Global is the platform company. The active broker provider searches known {selectedPlatform} broker
                             servers and combines them with servers configured by your administrator.
                           </p>
                         </div>
@@ -568,8 +569,8 @@ function AccountsContent() {
                             {(brokerServersQuery.data?.servers ?? []).map((server) => (
                               <option key={server.id} value={server.serverName}>
                                 {server.serverName}
-                                {server.source === "METAAPI"
-                                  ? ` — ${server.brokerName ?? "MetaApi"}`
+                                {server.source === "METAAPI" || server.source === "API2TRADE"
+                                  ? ` — ${server.brokerName ?? "Broker provider"}`
                                   : " — WSA configured"}
                               </option>
                             ))}

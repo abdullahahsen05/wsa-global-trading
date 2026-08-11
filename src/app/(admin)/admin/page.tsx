@@ -445,8 +445,9 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
-    refetchInterval: 15_000,
-    refetchIntervalInBackground: true,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const {
@@ -468,8 +469,9 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const { data: traderDirectory } = useQuery<TraderCrmDirectoryDto>({
@@ -494,8 +496,9 @@ export default function AdminOverviewPage() {
       return json.data;
     },
     placeholderData: (previous) => previous,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    staleTime: 15_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
   const traders = useMemo(
     () => traderDirectory?.items ?? [],
@@ -516,8 +519,9 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const {
@@ -537,8 +541,9 @@ export default function AdminOverviewPage() {
 
       return json.data;
     },
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
 
   const equityCurve = equityTimeline?.points ?? [];

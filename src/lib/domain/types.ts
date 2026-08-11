@@ -102,7 +102,7 @@ export interface RiskEnforcementStateDto {
     action: RiskRuleAction;
     threshold: number;
   }>;
-  source: "SYNC" | "METAAPI_STREAM" | "COPY_PREFLIGHT";
+  source: "SYNC" | "METAAPI_STREAM" | "API2TRADE_POLL" | "COPY_PREFLIGHT";
   lastEvaluatedAt: string;
 }
 

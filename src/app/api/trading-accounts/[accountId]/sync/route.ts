@@ -2,6 +2,7 @@ import { jsonFail, jsonOk } from "@/lib/api/envelope";
 import { requireAuth, assertCanAccessAccount, AuthError } from "@/lib/auth/session";
 import { syncTradingAccount } from "@/lib/services/brokerSyncService";
 import { getDecryptedCredentials } from "@/lib/services/brokerCredentialService";
+import { brokerProviderConfigured, getBrokerProviderLabel } from "@/lib/broker/provider";
 
 export async function POST(
   _req: Request,
@@ -27,10 +28,11 @@ export async function POST(
       );
     }
 
-    if (!process.env.METAAPI_TOKEN) {
+    const providerLabel = getBrokerProviderLabel();
+    if (!brokerProviderConfigured()) {
       return jsonFail(
         "BROKER_PROVIDER_NOT_CONFIGURED",
-        "METAAPI_TOKEN is not configured. Set this environment variable to enable broker sync.",
+        `${providerLabel} is not configured. Set the active broker provider environment variables to enable broker sync.`,
         503,
       );
     }
@@ -50,7 +52,7 @@ export async function POST(
         tradesUpserted: 0,
         message:
           result.pendingMessage ??
-          "MetaApi is still deploying or synchronizing. Status checks can continue safely.",
+          `${providerLabel} is still connecting or synchronizing. Status checks can continue safely.`,
       }, { status: 202 });
     }
 

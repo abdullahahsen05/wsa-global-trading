@@ -1,8 +1,11 @@
 import { createAdminClient } from "../src/lib/supabase/admin";
 import { enqueueJob } from "../src/lib/services/backgroundJobService";
 import { runWorkerOnce } from "../src/lib/workers/jobProcessor";
+import { executeCopyForEvent, warmCopyStrategyAccounts, type LinkedEvent } from "../src/lib/services/copyTradingService";
 import { executeSelfCopyPositionEvent } from "../src/lib/services/selfCopyService";
 import { expireStaleTradingAccounts } from "../src/lib/services/tradingAccountLifecycleService";
+import { Api2TradeLiveAccountSource } from "../src/lib/broker/api2TradeLiveSource";
+import { createBrokerAdapter, getBrokerProviderId } from "../src/lib/broker/provider";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -24,7 +27,9 @@ type LiveSelfCopySource = {
   trading_accounts: { provider_account_id: string | null } | null;
 };
 
-const pollMs = Math.max(500, Number.parseInt(process.env.WSA_COPY_POLL_MS ?? "1000", 10) || 1_000);
+const defaultCopyPollMs = getBrokerProviderId() === "api2trade" ? "100" : "1000";
+const pollMs = Math.max(100, Number.parseInt(process.env.WSA_COPY_POLL_MS ?? defaultCopyPollMs, 10) || Number(defaultCopyPollMs));
+const warmupMs = Math.max(5_000, Number.parseInt(process.env.WSA_COPY_WARMUP_MS ?? "5000", 10) || 5_000);
 const workerId = `wsa-copy-${process.pid}`;
 const streams = new Map<string, StreamHandle>();
 const selfCopyStreams = new Map<string, StreamHandle>();
@@ -38,7 +43,11 @@ function retryDelayMs(): number {
 
 function iso(value?: Date | string) {
   if (!value) return new Date().toISOString();
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() < 2000) {
+    return new Date().toISOString();
+  }
+  return date.toISOString();
 }
 function changed(previous: Position, current: Position) {
   return Number(previous.volume) !== Number(current.volume)
@@ -47,6 +56,7 @@ function changed(previous: Position, current: Position) {
 }
 
 async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY" | "CLOSE", position: Position, previous?: Position) {
+  const startedAt = Date.now();
   const supabase = createAdminClient();
   const positionId = String(position.id);
   const eventTime = iso(position.updateTime ?? position.time);
@@ -70,14 +80,44 @@ async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY"
     event_time: eventTime,
     dedupe_key: dedupeKey,
     source_sequence: fingerprint,
-    source: "WSA_STREAM",
-    raw_payload: { source: "METAAPI_STREAM", eventType },
+    source: getBrokerProviderId() === "api2trade" ? "API2TRADE_LIVE_SOURCE" : "WSA_STREAM",
+    raw_payload: { source: getBrokerProviderId() === "api2trade" ? "API2TRADE_LIVE_SOURCE" : "METAAPI_STREAM", eventType },
   }).select("id").single();
   if (error) {
     if ((error as { code?: string }).code === "23505") return;
     throw new Error(`Master event could not be stored: ${error.message}`);
   }
-  console.log(`[copy-worker] detected ${eventType} ${position.symbol} ${Number(position.volume ?? 0)} lot(s)`);
+  const brokerEventAgeMs = Date.now() - new Date(eventTime).getTime();
+  console.log(
+    `[copy-worker] detected ${eventType} ${position.symbol} ${Number(position.volume ?? 0)} lot(s) in ${Date.now() - startedAt}ms; broker event age ${brokerEventAgeMs}ms`,
+  );
+  if (getBrokerProviderId() === "api2trade" && process.env.WSA_COPY_DIRECT_EXECUTION !== "false") {
+    try {
+      const result = await executeCopyForEvent({
+        id: data.id,
+        strategy_id: strategy.id,
+        event_type: eventType,
+        master_trade_id: positionId,
+        symbol: position.symbol,
+        side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
+        volume: Number(position.volume ?? 0),
+        previous_volume: previous ? Number(previous.volume ?? 0) : null,
+        stop_loss: position.stopLoss ?? null,
+        take_profit: position.takeProfit ?? null,
+        event_time: eventTime,
+      } satisfies LinkedEvent, null, startedAt);
+      console.log(
+        `[copy-worker] direct copy event ${data.id} finished in ${Date.now() - startedAt}ms: ${result.success} succeeded, ${result.failed} failed, ${result.skipped} skipped`,
+      );
+      return;
+    } catch (error) {
+      console.error(
+        `[copy-worker] direct copy event failed for ${data.id}; queued retry: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+      );
+    }
+  }
   await enqueueJob({
     type: "EXECUTE_COPY_EVENT",
     payload: { masterEventId: data.id },
@@ -88,7 +128,60 @@ async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY"
 
 async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle> {
   const providerAccountId = strategy.trading_accounts?.provider_account_id;
-  if (!providerAccountId) throw new Error("Master account has no MetaApi provider account.");
+  if (!providerAccountId) throw new Error("Master account has no broker provider account.");
+  if (getBrokerProviderId() === "api2trade") {
+    const adapter = createBrokerAdapter();
+    const health = await adapter.verifyConnection(strategy.master_account_id);
+    if (!health.ok) throw new Error(health.message);
+    const source = Api2TradeLiveAccountSource.fromEnv(providerAccountId);
+    await source.reconnect();
+    let lastWarmupAt = 0;
+    let warmupInFlight: Promise<void> | null = null;
+    const warmStrategyAccounts = async (force = false) => {
+      if (!force && Date.now() - lastWarmupAt < warmupMs) return;
+      if (warmupInFlight) return warmupInFlight;
+      lastWarmupAt = Date.now();
+      warmupInFlight = warmCopyStrategyAccounts(strategy.id, strategy.master_account_id, adapter)
+        .then((result) => {
+          if (result.warmed > 0) {
+            console.log(`[copy-worker] prewarmed ${result.warmed} API2Trade account session(s) for strategy ${strategy.id}`);
+          }
+        })
+        .catch((error) => {
+          console.error(`[copy-worker] API2Trade prewarm failed for strategy ${strategy.id}: ${error instanceof Error ? error.message : "unknown error"}`);
+        })
+        .finally(() => {
+          warmupInFlight = null;
+        });
+      return warmupInFlight;
+    };
+    await warmStrategyAccounts(true);
+    const warmTicker = setInterval(() => {
+      void warmStrategyAccounts(false);
+    }, warmupMs);
+    const handle: StreamHandle = {
+      async reconcile() {
+        const events = await source.reconcile({ emitExistingAsOpen: true });
+        for (const event of events) {
+          await persistEvent(strategy, event.eventType, event.position, event.previous);
+        }
+        await createAdminClient().from("copy_strategies").update({
+          engine_status: "LIVE",
+          engine_error: null,
+          engine_heartbeat_at: new Date().toISOString(),
+        }).eq("id", strategy.id);
+      },
+      async close() {
+        clearInterval(warmTicker);
+        await source.close();
+      },
+    };
+    await handle.reconcile();
+    console.log(
+      `[copy-worker] API2Trade ${source.usingWebSocket() ? "websocket" : "polling fallback"} synchronized for strategy ${strategy.id}`,
+    );
+    return handle;
+  }
   const sdk = await import("metaapi.cloud-sdk/node") as unknown as {
     default: new (authToken: string) => {
       metatraderAccountApi: { getAccount(id: string): Promise<any> }; close(): void;
@@ -188,7 +281,50 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
 
 async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHandle> {
   const providerAccountId = source.trading_accounts?.provider_account_id;
-  if (!providerAccountId) throw new Error("Self-copy source has no MetaApi provider account.");
+  if (!providerAccountId) throw new Error("Self-copy source has no broker provider account.");
+  if (getBrokerProviderId() === "api2trade") {
+    const health = await createBrokerAdapter().verifyConnection(source.source_account_id);
+    if (!health.ok) throw new Error(health.message);
+    const liveSource = Api2TradeLiveAccountSource.fromEnv(providerAccountId);
+    await liveSource.reconnect();
+    let queue = Promise.resolve();
+    const dispatch = (eventType: "OPEN" | "MODIFY" | "CLOSE", position: Position, previous?: Position) => {
+      queue = queue.then(async () => {
+        const outcome = await executeSelfCopyPositionEvent({
+          sourceAccountId: source.source_account_id,
+          eventType,
+          sourcePositionId: String(position.id),
+          symbol: position.symbol,
+          side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
+          volume: Number(position.volume ?? 0),
+          previousVolume: previous ? Number(previous.volume ?? 0) : null,
+          stopLoss: position.stopLoss ?? null,
+          takeProfit: position.takeProfit ?? null,
+        });
+        if (outcome.attempted || outcome.failed) {
+          console.log(`[self-copy] ${eventType} ${position.symbol}: ${outcome.success} succeeded, ${outcome.failed} failed, ${outcome.skipped} skipped`);
+        }
+      }).catch((error) => {
+        console.error(`[self-copy] ${eventType} failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      });
+      return queue;
+    };
+    const handle: StreamHandle = {
+      async reconcile() {
+        const events = await liveSource.reconcile({ emitExistingAsOpen: true });
+        for (const event of events) {
+          await dispatch(event.eventType, event.position, event.previous);
+        }
+      },
+      async close() {
+        await queue;
+        await liveSource.close();
+      },
+    };
+    await handle.reconcile();
+    console.log(`[self-copy] API2Trade live source synchronized for ${source.source_account_id}`);
+    return handle;
+  }
   const sdk = await import("metaapi.cloud-sdk/node") as unknown as {
     default: new (authToken: string) => {
       metatraderAccountApi: { getAccount(id: string): Promise<any> }; close(): void;
@@ -416,7 +552,15 @@ async function shutdown() {
 }
 
 async function main() {
-  if (!process.env.METAAPI_TOKEN || process.env.WSA_COPY_ENGINE_ENABLED !== "true") {
+  if (process.env.WSA_COPY_ENGINE_ENABLED !== "true") {
+    throw new Error("WSA copy worker is disabled.");
+  }
+  if (getBrokerProviderId() === "api2trade") {
+    if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))) {
+      throw new Error("API2Trade copy worker requires API2TRADE_BASE_URL plus API key or Basic Auth credentials.");
+    }
+    console.log("[copy-worker] API2Trade websocket-first source enabled; WSA engine remains local.");
+  } else if (!process.env.METAAPI_TOKEN) {
     throw new Error("WSA copy worker is disabled or METAAPI_TOKEN is missing.");
   }
   if (process.env.BROKER_EXECUTION_ENABLED !== "true") {

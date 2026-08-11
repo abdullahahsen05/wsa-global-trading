@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin, AuthError } from "@/lib/auth/session";
-import { MetaApiBrokerAdapter } from "@/lib/broker/MetaApiBrokerAdapter";
+import { createBrokerAdapter, getBrokerProviderLabel } from "@/lib/broker/provider";
 import { logBrokerOperation } from "@/lib/services/brokerOperationLog";
 
 export async function POST(
@@ -41,10 +41,12 @@ export async function POST(
   let providerError: string | null = null;
 
   if (account.provider_account_id) {
-    const adapter = new MetaApiBrokerAdapter();
+    const adapter = createBrokerAdapter();
     if (adapter.executionAvailable()) {
       try {
-        await adapter.deactivateAccount(account.provider_account_id);
+        if ("deactivateAccount" in adapter && typeof adapter.deactivateAccount === "function") {
+          await adapter.deactivateAccount(account.provider_account_id);
+        }
         providerResult = "undeployed";
       } catch (err) {
         providerError = err instanceof Error ? err.message.slice(0, 300) : "Unknown error";

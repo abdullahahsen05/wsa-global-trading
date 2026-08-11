@@ -4,6 +4,7 @@ import {
   BrokerCredentialError,
 } from "@/lib/services/brokerCredentialService";
 import { connectBrokerAccount } from "@/lib/services/brokerConnectionService";
+import { getBrokerProviderId } from "@/lib/broker/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { brokerConnectionSchema } from "@/lib/validation/schemas";
@@ -138,7 +139,7 @@ export async function POST(
         password,
         server,
         platform: platform.toLowerCase() as "mt4" | "mt5",
-        provider: process.env.BROKER_PROVIDER ?? "metaapi",
+        provider: getBrokerProviderId(),
         brokerName: resolvedBrokerName,
       },
     });

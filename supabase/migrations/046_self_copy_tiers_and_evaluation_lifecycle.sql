@@ -7,7 +7,7 @@ ALTER TABLE public.copy_strategies
   ADD COLUMN IF NOT EXISTS premium_monthly_price NUMERIC(12,2),
   ADD COLUMN IF NOT EXISTS standard_billing_product_id UUID REFERENCES public.billing_products(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS premium_billing_product_id UUID REFERENCES public.billing_products(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS standard_delay_ms INTEGER NOT NULL DEFAULT 2500,
+  ADD COLUMN IF NOT EXISTS standard_delay_ms INTEGER NOT NULL DEFAULT 1500,
   ADD COLUMN IF NOT EXISTS premium_delay_ms INTEGER NOT NULL DEFAULT 250;
 
 UPDATE public.copy_strategies

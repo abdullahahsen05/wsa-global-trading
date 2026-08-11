@@ -6,6 +6,10 @@ import {
 } from "../src/lib/services/riskEvaluationService";
 import { expireStaleTradingAccounts } from "../src/lib/services/tradingAccountLifecycleService";
 import { publicMetaApiError } from "../src/lib/broker/metaApiErrors";
+import { publicApi2TradeError } from "../src/lib/broker/api2TradeErrors";
+import { createBrokerAdapter } from "../src/lib/broker/provider";
+import { refreshAccountTrades } from "../src/lib/services/brokerSyncService";
+import { hasExecutionPriority } from "../src/lib/copy/executionPriority";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -22,9 +26,10 @@ const snapshotMs = Math.max(
   10_000,
   Number.parseInt(process.env.WSA_RISK_SNAPSHOT_MS ?? "30000", 10) || 30_000,
 );
+const defaultTradeReconcileMs = process.env.BROKER_PROVIDER === "api2trade" ? 15_000 : 5_000;
 const tradeReconcileMs = Math.max(
-  2_000,
-  Number.parseInt(process.env.WSA_TRADE_RECONCILE_MS ?? "5000", 10) || 5_000,
+  process.env.BROKER_PROVIDER === "api2trade" ? 10_000 : 2_000,
+  Number.parseInt(process.env.WSA_TRADE_RECONCILE_MS ?? String(defaultTradeReconcileMs), 10) || defaultTradeReconcileMs,
 );
 const liveCopyStreamEnabled =
   process.env.WSA_COPY_ENGINE_ENABLED === "true"
@@ -32,6 +37,7 @@ const liveCopyStreamEnabled =
 const streams = new Map<string, StreamHandle>();
 const streamFailureCounts = new Map<string, number>();
 const streamRetryAfter = new Map<string, number>();
+const api2TradeLastRefreshAt = new Map<string, number>();
 let stopping = false;
 let nextLifecycleScanAt = 0;
 
@@ -542,24 +548,107 @@ async function reconcileStreams() {
   }
 }
 
+async function reconcileApi2TradeRiskAccounts() {
+  if (Date.now() >= nextLifecycleScanAt) {
+    const expired = await expireStaleTradingAccounts();
+    if (expired > 0) {
+      console.log(`[risk-worker] moved ${expired} stale or incomplete account(s) out of live status`);
+    }
+    nextLifecycleScanAt = Date.now() + 60 * 60 * 1_000;
+  }
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("trading_accounts")
+    .select("id, provider_account_id")
+    .not("provider_account_id", "is", null)
+    .in("status", ["CONNECTED", "RESTRICTED"])
+    .limit(2_000);
+  if (error) throw new Error(`API2Trade risk accounts could not be loaded: ${error.message}`);
+
+  const adapter = createBrokerAdapter();
+  for (const accountRow of (data ?? []) as RiskAccount[]) {
+    if ((streamRetryAfter.get(accountRow.id) ?? 0) > Date.now()) continue;
+    if (hasExecutionPriority(accountRow.id)) continue;
+    try {
+      const snapshot = await adapter.fetchSnapshot(accountRow.id);
+      const values: LiveRiskValues = {
+        balance: snapshot.balance.amount,
+        equity: snapshot.equity.amount,
+        openTradeCount: snapshot.openTradeCount,
+        dailyProfit: 0,
+      };
+      const result = await evaluateAndEnforceRiskValues({
+        accountId: accountRow.id,
+        actorUserId: null,
+        source: "API2TRADE_POLL",
+        values,
+      });
+      if (result.blockedNewTrades) {
+        console.warn(`[risk-worker] ${accountRow.id} blocked by ${result.breachedRuleNames.join(", ")}`);
+      }
+
+      const lastRefreshAt = api2TradeLastRefreshAt.get(accountRow.id) ?? 0;
+      if (Date.now() - lastRefreshAt >= tradeReconcileMs) {
+        api2TradeLastRefreshAt.set(accountRow.id, Date.now());
+        const refresh = await refreshAccountTrades(accountRow.id, null);
+        if (refresh.error) {
+          throw new Error(refresh.error);
+        }
+        if (refresh.tradesUpserted > 0) {
+          console.log(`[risk-worker] API2Trade projected ${refresh.tradesUpserted} trade change(s) for ${accountRow.id}`);
+        }
+      }
+
+      streamFailureCounts.delete(accountRow.id);
+      streamRetryAfter.delete(accountRow.id);
+    } catch (error) {
+      const failures = (streamFailureCounts.get(accountRow.id) ?? 0) + 1;
+      const retryAt = Date.now() + retryDelayMs(failures);
+      streamFailureCounts.set(accountRow.id, failures);
+      streamRetryAfter.set(accountRow.id, retryAt);
+      const publicMessage = publicApi2TradeError(error);
+      console.error(
+        `[risk-worker] API2Trade account failed for ${accountRow.id}; retrying at ${new Date(retryAt).toISOString()}: ${publicMessage}`,
+      );
+      await supabase
+        .from("trading_accounts")
+        .update({ sync_error: publicMessage })
+        .eq("id", accountRow.id)
+        .in("status", ["CONNECTED", "RESTRICTED"]);
+    }
+  }
+}
+
 async function shutdown() {
   stopping = true;
   await Promise.allSettled([...streams.values()].map((stream) => stream.close()));
   streams.clear();
   streamFailureCounts.clear();
   streamRetryAfter.clear();
+  api2TradeLastRefreshAt.clear();
 }
 
 async function main() {
-  if (!process.env.METAAPI_TOKEN) {
+  if (process.env.BROKER_PROVIDER === "api2trade") {
+    if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))) {
+      throw new Error("API2Trade risk worker requires API2TRADE_BASE_URL plus API key or Basic Auth credentials.");
+    }
+    console.log(`[risk-worker] API2Trade polling source started; reconciling every ${reconcileMs}ms`);
+  } else if (!process.env.METAAPI_TOKEN) {
     throw new Error("METAAPI_TOKEN is required for the WSA live risk worker.");
+  } else {
+    console.log(`[risk-worker] started; reconciling every ${reconcileMs}ms`);
   }
-  console.log(`[risk-worker] started; reconciling every ${reconcileMs}ms`);
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
   while (!stopping) {
     try {
-      await reconcileStreams();
+      if (process.env.BROKER_PROVIDER === "api2trade") {
+        await reconcileApi2TradeRiskAccounts();
+      } else {
+        await reconcileStreams();
+      }
     } catch (error) {
       console.error(
         `[risk-worker] reconcile cycle failed; retrying in ${reconcileMs}ms: ${

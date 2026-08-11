@@ -15,6 +15,7 @@ import {
 } from "@/lib/services/copyTradingService";
 import { COPY_ERROR, CopyError } from "@/lib/copy/types";
 import type { BackgroundJob, JobResult, JobType } from "@/lib/jobs/types";
+import { brokerProviderConfigured } from "@/lib/broker/provider";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Job processor (server-only). Dispatches a claimed job to the right existing
@@ -44,10 +45,10 @@ function requireId(job: BackgroundJob, key: string): string {
 async function dispatch(job: BackgroundJob): Promise<JobResult> {
   const actor = job.createdBy;
   const liveRiskProjectionEnabled =
-    Boolean(process.env.METAAPI_TOKEN)
+    brokerProviderConfigured()
     && process.env.WSA_RISK_ENGINE_ENABLED === "true";
   const liveCopyStreamEnabled =
-    Boolean(process.env.METAAPI_TOKEN)
+    brokerProviderConfigured()
     && process.env.WSA_COPY_ENGINE_ENABLED === "true"
     && process.env.BROKER_EXECUTION_ENABLED === "true";
 
