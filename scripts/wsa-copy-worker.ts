@@ -31,7 +31,7 @@ const brokerProviderId = getBrokerProviderId();
 const defaultCopyPollMs = brokerProviderId === "api2trade" ? "100" : "1000";
 const pollMs = Math.max(100, Number.parseInt(process.env.WSA_COPY_POLL_MS ?? defaultCopyPollMs, 10) || Number(defaultCopyPollMs));
 const defaultWarmupMs = brokerProviderId === "api2trade" ? "30000" : "5000";
-const minWarmupMs = brokerProviderId === "api2trade" ? 15_000 : 5_000;
+const minWarmupMs = brokerProviderId === "api2trade" ? 30_000 : 5_000;
 const warmupMs = Math.max(
   minWarmupMs,
   Number.parseInt(process.env.WSA_COPY_WARMUP_MS ?? defaultWarmupMs, 10) || Number(defaultWarmupMs),
