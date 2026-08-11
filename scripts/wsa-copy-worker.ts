@@ -27,9 +27,15 @@ type LiveSelfCopySource = {
   trading_accounts: { provider_account_id: string | null } | null;
 };
 
-const defaultCopyPollMs = getBrokerProviderId() === "api2trade" ? "100" : "1000";
+const brokerProviderId = getBrokerProviderId();
+const defaultCopyPollMs = brokerProviderId === "api2trade" ? "100" : "1000";
 const pollMs = Math.max(100, Number.parseInt(process.env.WSA_COPY_POLL_MS ?? defaultCopyPollMs, 10) || Number(defaultCopyPollMs));
-const warmupMs = Math.max(5_000, Number.parseInt(process.env.WSA_COPY_WARMUP_MS ?? "5000", 10) || 5_000);
+const defaultWarmupMs = brokerProviderId === "api2trade" ? "30000" : "5000";
+const minWarmupMs = brokerProviderId === "api2trade" ? 15_000 : 5_000;
+const warmupMs = Math.max(
+  minWarmupMs,
+  Number.parseInt(process.env.WSA_COPY_WARMUP_MS ?? defaultWarmupMs, 10) || Number(defaultWarmupMs),
+);
 const workerId = `wsa-copy-${process.pid}`;
 const streams = new Map<string, StreamHandle>();
 const selfCopyStreams = new Map<string, StreamHandle>();

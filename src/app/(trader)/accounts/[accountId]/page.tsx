@@ -1,13 +1,14 @@
 import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
-import { DataTable, InlineStatusStrip, Panel, StatusPill, WorkspacePage } from "@/components/app/WorkspaceUI";
+import { InlineStatusStrip, WorkspacePage } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
 import { AccountConnectionActions } from "@/components/accounts/AccountConnectionActions";
 import { BrokerConnectPanel } from "@/components/accounts/BrokerConnectPanel";
+import { LiveAccountTradesTable } from "@/components/accounts/LiveAccountTradesTable";
 import { requireAuth } from "@/lib/auth/session";
 import { getPlatformSubscriptionAccess } from "@/lib/services/billingService";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
-import type { TraderAccountSummary, TradeDto } from "@/lib/domain/types";
+import type { TraderAccountSummary } from "@/lib/domain/types";
 
 async function fetchAccount(accountId: string): Promise<TraderAccountSummary | null> {
   try {
@@ -23,23 +24,6 @@ async function fetchAccount(accountId: string): Promise<TraderAccountSummary | n
     return json.ok ? json.data : null;
   } catch {
     return null;
-  }
-}
-
-async function fetchTrades(accountId: string): Promise<TradeDto[]> {
-  try {
-    const cookieStore = await cookies();
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/api/trades?accountId=${accountId}`,
-      {
-        headers: { Cookie: cookieStore.toString() },
-        cache: "no-store",
-      },
-    );
-    const json = await res.json();
-    return json.ok ? json.data : [];
-  } catch {
-    return [];
   }
 }
 
@@ -67,10 +51,7 @@ export default async function AccountDetailPage({
   }
 
   const { accountId } = await params;
-  const [account, accountTrades] = await Promise.all([
-    fetchAccount(accountId),
-    fetchTrades(accountId),
-  ]);
+  const account = await fetchAccount(accountId);
 
   if (!account) notFound();
 
@@ -106,27 +87,8 @@ export default async function AccountDetailPage({
       </div>
 
       <div className="mt-5">
-        <Panel>
-          <h2 className="text-lg font-semibold text-foreground">Recent trades</h2>
-          <div className="mt-4">
-            <DataTable
-              headers={["Trade ID", "Symbol", "Side", "Status", "Profit", "Close price", "Closed"]}
-              paginated
-              initialPageSize={10}
-              rows={accountTrades.map((trade) => [
-                <span key="trade-id" className="font-mono text-xs text-muted">{trade.shortTradeId}</span>,
-                <span key="symbol" className="font-semibold text-foreground">{trade.symbol}</span>,
-                trade.side,
-                <StatusPill key="status" tone={trade.status === "OPEN" ? "accent" : "muted"}>{trade.status}</StatusPill>,
-                <span key="profit" className={trade.profit.amount >= 0 ? "font-semibold text-accent-2" : "font-semibold text-danger"}>{formatMoney(trade.profit)}</span>,
-                trade.closePrice ?? "—",
-                trade.closedAt ? new Date(trade.closedAt).toLocaleString() : "—",
-              ])}
-            />
-          </div>
-        </Panel>
+        <LiveAccountTradesTable accountId={accountId} />
       </div>
-
     </WorkspacePage>
   );
 }
