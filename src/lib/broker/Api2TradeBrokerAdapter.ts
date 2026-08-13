@@ -128,6 +128,17 @@ function isMissingApi2TradeClient(error: unknown): boolean {
     || message.includes("not found");
 }
 
+function isRecoverableApi2TradeSessionError(error: unknown): boolean {
+  const message = publicApi2TradeError(error).toLowerCase();
+  return isMissingApi2TradeClient(error)
+    || message.includes("403")
+    || message.includes("forbidden")
+    || message.includes("401")
+    || message.includes("unauthorized")
+    || message.includes("checkconnect")
+    || message.includes("connectionstatus");
+}
+
 const WARM_SESSION_TTL_MS = Math.max(
   30_000,
   Number.parseInt(process.env.API2TRADE_WARM_SESSION_TTL_MS ?? "300000", 10) || 300_000,
@@ -213,15 +224,18 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     try {
       if (await this.checkApi2TradeSession(providerAccountId)) return true;
     } catch (error) {
-      if (!isMissingApi2TradeClient(error)) throw error;
-      await this.reconnectWithStoredCredentials(accountId, providerAccountId);
+      if (!isRecoverableApi2TradeSessionError(error)) throw error;
+      const reconnected = await client.connectByToken(providerAccountId)
+        .then(() => true)
+        .catch(async () => this.reconnectWithStoredCredentials(accountId, providerAccountId));
+      if (!reconnected) throw error;
       return this.checkApi2TradeSession(providerAccountId).catch(() => true);
     }
 
     const tokenReconnectOk = await client.connectByToken(providerAccountId)
       .then(() => true)
       .catch(async (error) => {
-        if (!isMissingApi2TradeClient(error)) return false;
+        if (!isRecoverableApi2TradeSessionError(error)) return false;
         return this.reconnectWithStoredCredentials(accountId, providerAccountId);
       });
     if (!tokenReconnectOk) return false;
@@ -250,7 +264,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     try {
       return await operation(providerAccountId);
     } catch (error) {
-      if (!isMissingApi2TradeClient(error)) throw error;
+      if (!isRecoverableApi2TradeSessionError(error)) throw error;
       warmedSessions.delete(accountId);
       await this.ensureApi2TradeSession(accountId, providerAccountId);
       warmedSessions.set(accountId, {
