@@ -572,6 +572,18 @@ async function reconcileApi2TradeRiskAccounts() {
     if (hasExecutionPriority(accountRow.id)) continue;
     try {
       const snapshot = await adapter.fetchSnapshot(accountRow.id);
+      await supabase.from("account_snapshots").insert({
+        trading_account_id: accountRow.id,
+        balance: snapshot.balance.amount,
+        equity: snapshot.equity.amount,
+        floating_pnl: snapshot.floatingPnl.amount,
+        drawdown_percent: snapshot.drawdownPercent,
+      });
+      await supabase
+        .from("trading_accounts")
+        .update({ last_synced_at: new Date().toISOString(), sync_error: null })
+        .eq("id", accountRow.id)
+        .in("status", ["CONNECTED", "RESTRICTED"]);
       const values: LiveRiskValues = {
         balance: snapshot.balance.amount,
         equity: snapshot.equity.amount,
