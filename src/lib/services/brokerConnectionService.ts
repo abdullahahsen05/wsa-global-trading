@@ -4,11 +4,15 @@ import {
   type BrokerCredentialPayload,
 } from "@/lib/services/brokerCredentialService";
 import { syncTradingAccount } from "@/lib/services/brokerSyncService";
-import { getBrokerProviderLabel } from "@/lib/broker/provider";
+import {
+  api2TradeUsesDashboardAccounts,
+  getBrokerProviderId,
+  getBrokerProviderLabel,
+} from "@/lib/broker/provider";
 
 export interface BrokerConnectionResult {
   accountId: string;
-  credentialsStored: true;
+  credentialsStored: boolean;
   connected: boolean;
   status: "CONNECTED" | "DISCONNECTED" | "PENDING";
   snapshotStored: boolean;
@@ -26,22 +30,37 @@ export async function connectBrokerAccount(params: {
   actorUserId: string;
   credentials: BrokerCredentialPayload;
   brokerProviderId?: string;
+  providerAccountId?: string;
   connectNow?: boolean;
 }): Promise<BrokerConnectionResult> {
   const providerLabel = getBrokerProviderLabel();
-  await storeBrokerCredentials(params.accountId, params.credentials);
+  const providerId = getBrokerProviderId();
+  const usesDashboardUuidMode =
+    providerId === "api2trade"
+    && api2TradeUsesDashboardAccounts()
+    && Boolean(params.providerAccountId);
+
+  if (!usesDashboardUuidMode) {
+    await storeBrokerCredentials(params.accountId, params.credentials);
+  }
 
   const platform = (params.credentials.platform ?? "mt5").toUpperCase();
   const supabase = createAdminClient();
   const metadata: Record<string, string> = {
-    broker_server: params.credentials.server,
     broker_platform: platform,
   };
+  if (params.credentials.server?.trim()) {
+    metadata.broker_server = params.credentials.server.trim();
+  }
   if (params.brokerProviderId) {
     metadata.broker_provider_id = params.brokerProviderId;
   }
   if (params.credentials.brokerName?.trim()) {
     metadata.broker_name = params.credentials.brokerName.trim();
+  }
+  if (usesDashboardUuidMode && params.providerAccountId) {
+    metadata.provider_account_id = params.providerAccountId;
+    metadata.provider = providerId;
   }
 
   const { error: metadataError } = await supabase
@@ -55,19 +74,21 @@ export async function connectBrokerAccount(params: {
   if (params.connectNow === false) {
     return {
       accountId: params.accountId,
-      credentialsStored: true,
+      credentialsStored: !usesDashboardUuidMode,
       connected: false,
       status: "PENDING",
       snapshotStored: false,
       tradesUpserted: 0,
-      message: "Credentials stored. Broker connection has not been started.",
+      message: usesDashboardUuidMode
+        ? "API2Trade account UUID stored. Broker sync has not been started."
+        : "Credentials stored. Broker connection has not been started.",
     };
   }
 
   const sync = await syncTradingAccount(params.accountId, params.actorUserId);
   return {
     accountId: params.accountId,
-    credentialsStored: true,
+    credentialsStored: !usesDashboardUuidMode,
     connected: sync.status === "CONNECTED",
     status: sync.status,
     snapshotStored: sync.snapshotInserted,

@@ -14,6 +14,7 @@ import { publicApi2TradeError } from '@/lib/broker/api2TradeErrors';
 import { acquireOperationalLock } from '@/lib/services/operationalLockService';
 import { calculatePartnerRebatesForTradingAccounts } from '@/lib/services/partnerRebateCalculationService';
 import {
+  api2TradeUsesDashboardAccounts,
   brokerProviderConfigured,
   createBrokerAdapter,
   getBrokerProviderId,
@@ -825,7 +826,7 @@ export async function syncTradingAccount(
   // 1. Load account — do NOT select a `name` column (it may not exist)
   const { data: account, error: loadErr } = await supabase
     .from('trading_accounts')
-    .select('id, broker_name, status, provider_account_id, user_id')
+    .select('id, broker_name, broker_server, broker_platform, status, provider_account_id, user_id')
     .eq('id', accountId)
     .single();
 
@@ -858,17 +859,41 @@ export async function syncTradingAccount(
     };
   }
 
+  const activeProvider = getBrokerProviderId();
+
   // 2. Load and decrypt credentials (never logged)
   const credentials = await getDecryptedCredentials(accountId);
-  if (!credentials) {
-    return { accountId, status: 'PENDING', snapshotInserted: false, tradesUpserted: 0, error: 'No broker credentials stored for this account.' };
+  const allowsProviderTokenOnly =
+    activeProvider === 'api2trade'
+    && api2TradeUsesDashboardAccounts()
+    && Boolean(account.provider_account_id);
+  const effectiveCredentials = credentials ?? (
+    allowsProviderTokenOnly
+      ? {
+          login: '',
+          password: '',
+          server: account.broker_server ?? '',
+          platform: ((account.broker_platform ?? 'MT5') as string).toLowerCase() as 'mt4' | 'mt5',
+          provider: 'api2trade',
+          brokerName: account.broker_name ?? undefined,
+        }
+      : null
+  );
+  if (!effectiveCredentials) {
+    return {
+      accountId,
+      status: 'PENDING',
+      snapshotInserted: false,
+      tradesUpserted: 0,
+      error: activeProvider === 'api2trade' && api2TradeUsesDashboardAccounts()
+        ? 'No API2Trade account UUID is linked yet. Add the MT account in API2Trade first, then enter its UUID in WSA.'
+        : 'No broker credentials stored for this account.',
+    };
   }
 
   // 3. Resolve platform — use stored value, fall back to MT5 for modern brokers
   // Old credentials without `platform` field will have undefined here; default to mt5.
-  const platform: 'mt4' | 'mt5' = credentials.platform ?? 'mt5';
-
-  const activeProvider = getBrokerProviderId();
+  const platform: 'mt4' | 'mt5' = effectiveCredentials.platform ?? 'mt5';
   if (!brokerProviderConfigured()) {
     return {
       accountId,
@@ -901,7 +926,7 @@ export async function syncTradingAccount(
     accountId,
     supabase,
     actorUserId,
-    credentials,
+    credentials: effectiveCredentials,
     platform,
     existingProviderAccountId: account.provider_account_id ?? null,
     preserveRestricted: account.status === 'RESTRICTED',

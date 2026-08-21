@@ -2,7 +2,13 @@ import { jsonFail, jsonOk } from "@/lib/api/envelope";
 import { requireAuth, assertCanAccessAccount, AuthError } from "@/lib/auth/session";
 import { syncTradingAccount } from "@/lib/services/brokerSyncService";
 import { getDecryptedCredentials } from "@/lib/services/brokerCredentialService";
-import { brokerProviderConfigured, getBrokerProviderLabel } from "@/lib/broker/provider";
+import {
+  api2TradeUsesDashboardAccounts,
+  brokerProviderConfigured,
+  getBrokerProviderId,
+  getBrokerProviderLabel,
+} from "@/lib/broker/provider";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(
   _req: Request,
@@ -20,10 +26,23 @@ export async function POST(
 
     // Guard: credentials must be stored before sync can run
     const creds = await getDecryptedCredentials(accountId);
-    if (!creds) {
+    const activeProvider = getBrokerProviderId();
+    let providerAccountId: string | null = null;
+    if (!creds && activeProvider === "api2trade" && api2TradeUsesDashboardAccounts()) {
+      const supabase = createAdminClient();
+      const { data } = await supabase
+        .from("trading_accounts")
+        .select("provider_account_id")
+        .eq("id", accountId)
+        .maybeSingle();
+      providerAccountId = data?.provider_account_id ?? null;
+    }
+    if (!creds && !providerAccountId) {
       return jsonFail(
         "BROKER_CREDENTIALS_NOT_FOUND",
-        "No broker credentials stored for this account. Store credentials first.",
+        activeProvider === "api2trade" && api2TradeUsesDashboardAccounts()
+          ? "No API2Trade account UUID is linked yet. Add the MT account in API2Trade first, then enter its UUID here."
+          : "No broker credentials stored for this account. Store credentials first.",
         404,
       );
     }

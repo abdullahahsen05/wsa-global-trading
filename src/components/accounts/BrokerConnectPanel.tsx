@@ -10,6 +10,7 @@ interface CredentialStatus {
   credentialsStored: boolean;
   provider: string | null;
   providerAccountId: string | null;
+  connectionMode?: "DIRECT_CREDENTIALS" | "API2TRADE_DASHBOARD_UUID";
   lastSyncedAt: string | null;
   syncError: string | null;
   status: string | null;
@@ -89,6 +90,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
   const [form, setForm] = useState({
     platform: "MT5",
     brokerProviderId: "",
+    providerAccountId: "",
     login: "",
     password: "",
     server: "",
@@ -102,6 +104,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
     queryFn: () => apiFetch(`/api/trading-accounts/${accountId}/broker-credentials`),
     refetchOnWindowFocus: false,
   });
+  const dashboardUuidMode = credStatus?.connectionMode === "API2TRADE_DASHBOARD_UUID";
 
   const providersQuery = useQuery<{ providers: BrokerProvider[]; sourceLabel: string }>({
     queryKey: ["broker-providers", form.platform],
@@ -130,7 +133,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       return result;
     },
     enabled: Boolean(
-      credStatus?.credentialsStored &&
+      (credStatus?.credentialsStored || credStatus?.providerAccountId) &&
       (credStatus.status === "PENDING" || credStatus.status === "SYNCING"),
     ),
     refetchInterval: (query) => {
@@ -144,6 +147,21 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
 
   const storeMutation = useMutation({
     mutationFn: () => {
+      if (dashboardUuidMode) {
+        return apiFetch<ConnectionResult>(`/api/trading-accounts/${accountId}/broker-credentials`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            platform: form.platform,
+            providerAccountId: form.providerAccountId.trim(),
+            login: "",
+            password: "",
+            server: "",
+            brokerName: "API2Trade Dashboard Account",
+            useCustomBrokerServer: true,
+          }),
+        });
+      }
       const selectedServer = serversQuery.data?.servers.find(
         (server) => server.serverName === form.server,
       );
@@ -172,7 +190,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       queryClient.invalidateQueries({ queryKey: ["broker-cred-status", accountId] });
       queryClient.invalidateQueries({ queryKey: ["trading-accounts"] });
       setFormOpen(false);
-      setForm({ platform: "MT5", brokerProviderId: "", login: "", password: "", server: "", customServer: "" });
+      setForm({ platform: "MT5", brokerProviderId: "", providerAccountId: "", login: "", password: "", server: "", customServer: "" });
       if (data.connected) {
         setNotice({
           type: "success",
@@ -288,9 +306,11 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
           </p>
           <h2 className="mt-2 text-lg font-semibold text-foreground">MT4 / MT5 connection</h2>
           <p className="mt-1 text-sm text-muted">
-            Store broker credentials and run the initial read-only account sync.
+            {dashboardUuidMode
+              ? "Link the API2Trade dashboard UUID, then run the initial read-only account sync."
+              : "Store broker credentials and run the initial read-only account sync."}
           </p>
-          {credStatus?.credentialsStored ? (
+          {(credStatus?.credentialsStored || credStatus?.providerAccountId) ? (
             <p className="mt-2 text-xs text-muted">
               {[credStatus.brokerName, credStatus.platform, credStatus.serverName]
                 .filter(Boolean)
@@ -307,16 +327,18 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
-            Credentials
+            {dashboardUuidMode ? "API2Trade link" : "Credentials"}
           </p>
           <div className="mt-1 flex items-center gap-1.5">
-            {credStatus?.credentialsStored ? (
+            {(credStatus?.credentialsStored || credStatus?.providerAccountId) ? (
               <CheckCircle2 className="h-4 w-4 text-accent-2" />
             ) : (
               <div className="h-4 w-4 rounded-full border-2 border-line" />
             )}
             <span className="text-sm font-semibold text-foreground">
-              {credStatus?.credentialsStored ? "Stored" : "Not stored"}
+              {dashboardUuidMode
+                ? credStatus?.providerAccountId ? "UUID linked" : "Not linked"
+                : credStatus?.credentialsStored ? "Stored" : "Not stored"}
             </span>
           </div>
         </div>
@@ -379,9 +401,11 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       {/* Actions */}
       <div className="mt-4 flex flex-wrap gap-3">
         <GhostButton type="button" onClick={() => { setFormOpen((o) => !o); setNotice(null); }}>
-          {credStatus?.credentialsStored ? "Update connection" : "Add broker connection"}
+          {dashboardUuidMode
+            ? credStatus?.providerAccountId ? "Update API2Trade link" : "Link API2Trade account"
+            : credStatus?.credentialsStored ? "Update connection" : "Add broker connection"}
         </GhostButton>
-        {credStatus?.credentialsStored ? (
+        {(credStatus?.credentialsStored || credStatus?.providerAccountId) ? (
           <>
             <GhostButton
               type="button"
@@ -419,7 +443,9 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       {formOpen ? (
         <form onSubmit={handleSubmit} className="mt-5 grid gap-4 border-t border-line pt-5">
           <p className="text-sm text-muted">
-            Your password is encrypted (AES-256-GCM) before storage. It is never returned or logged.
+            {dashboardUuidMode
+              ? "This API2Trade account uses dashboard-managed UUID linking. Add the MT4/MT5 account inside API2Trade first, then paste the generated UUID here."
+              : "Your password is encrypted (AES-256-GCM) before storage. It is never returned or logged."}
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -432,6 +458,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                   ...f,
                   platform: e.target.value,
                   brokerProviderId: "",
+                  providerAccountId: "",
                   server: "",
                   customServer: "",
                 }))}
@@ -441,122 +468,144 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 <option value="MT4">MT4</option>
               </select>
             </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                Broker provider <span className="text-danger">*</span>
-              </label>
-              <select
-                required
-                value={form.brokerProviderId}
-                onChange={(e) => setForm((f) => ({
-                  ...f,
-                  brokerProviderId: e.target.value,
-                  server: "",
-                  customServer: "",
-                }))}
-                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-              >
-                <option value="">Select configured broker</option>
-                {(providersQuery.data?.providers ?? []).map((provider) => (
-                  <option key={provider.id} value={provider.id}>{provider.displayName}</option>
-                ))}
-              </select>
-            </div>
+            {dashboardUuidMode ? (
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                  API2Trade account UUID <span className="text-danger">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={form.providerAccountId}
+                  onChange={(e) => setForm((f) => ({ ...f, providerAccountId: e.target.value }))}
+                  placeholder="Paste the UUID from the API2Trade dashboard"
+                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                  Broker provider <span className="text-danger">*</span>
+                </label>
+                <select
+                  required
+                  value={form.brokerProviderId}
+                  onChange={(e) => setForm((f) => ({
+                    ...f,
+                    brokerProviderId: e.target.value,
+                    server: "",
+                    customServer: "",
+                  }))}
+                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                >
+                  <option value="">Select configured broker</option>
+                  {(providersQuery.data?.providers ?? []).map((provider) => (
+                    <option key={provider.id} value={provider.id}>{provider.displayName}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
-          {providersQuery.isSuccess && providersQuery.data.providers.length === 0 ? (
+          {!dashboardUuidMode && providersQuery.isSuccess && providersQuery.data.providers.length === 0 ? (
             <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
               No broker providers are configured for {form.platform}. Contact support or an administrator.
             </div>
           ) : null}
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-              Login <span className="text-danger">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={form.login}
-              onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
-              placeholder="MT5 account number"
-              maxLength={50}
-              className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                Password <span className="text-danger">*</span>
-              </label>
-              <input
-                type="password"
-                required
-                value={form.password}
-                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                placeholder="Main or investor password"
-                maxLength={200}
-                autoComplete="new-password"
-                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-              />
-            </div>
-            <div>
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                  Server <span className="text-danger">*</span>
+          {!dashboardUuidMode ? (
+            <>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                  Login <span className="text-danger">*</span>
                 </label>
-                <button
-                  type="button"
-                  disabled={!form.brokerProviderId || serversQuery.isFetching}
-                  onClick={() => void serversQuery.refetch()}
-                  className="text-xs font-semibold text-accent disabled:opacity-40"
-                >
-                  {serversQuery.isFetching ? "Refreshing…" : "Refresh configured list"}
-                </button>
+                <input
+                  type="text"
+                  required
+                  value={form.login}
+                  onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
+                  placeholder="MT5 account number"
+                  maxLength={50}
+                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                />
               </div>
-              <select
-                required
-                disabled={!form.brokerProviderId || serversQuery.isFetching}
-                value={form.server}
-                onChange={(e) => setForm((f) => ({ ...f, server: e.target.value }))}
-                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-50"
-              >
-                <option value="">
-                  {!form.brokerProviderId ? "Select a broker first" : "Select configured server"}
-                </option>
-                {(serversQuery.data?.servers ?? []).map((server) => (
-                  <option key={server.id} value={server.serverName}>{server.serverName}</option>
-                ))}
-                <option value={CUSTOM_SERVER_OPTION}>Enter server manually</option>
-              </select>
-            </div>
-          </div>
-          {form.server === CUSTOM_SERVER_OPTION ? (
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                Custom server name <span className="text-danger">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={form.customServer}
-                onChange={(event) => setForm((current) => ({ ...current, customServer: event.target.value }))}
-                placeholder="Exact MetaTrader server name"
-                maxLength={100}
-                autoComplete="off"
-                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-              />
-            </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                    Password <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    placeholder="Main or investor password"
+                    maxLength={200}
+                    autoComplete="new-password"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  />
+                </div>
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                      Server <span className="text-danger">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={!form.brokerProviderId || serversQuery.isFetching}
+                      onClick={() => void serversQuery.refetch()}
+                      className="text-xs font-semibold text-accent disabled:opacity-40"
+                    >
+                      {serversQuery.isFetching ? "Refreshing…" : "Refresh configured list"}
+                    </button>
+                  </div>
+                  <select
+                    required
+                    disabled={!form.brokerProviderId || serversQuery.isFetching}
+                    value={form.server}
+                    onChange={(e) => setForm((f) => ({ ...f, server: e.target.value }))}
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-50"
+                  >
+                    <option value="">
+                      {!form.brokerProviderId ? "Select a broker first" : "Select configured server"}
+                    </option>
+                    {(serversQuery.data?.servers ?? []).map((server) => (
+                      <option key={server.id} value={server.serverName}>{server.serverName}</option>
+                    ))}
+                    <option value={CUSTOM_SERVER_OPTION}>Enter server manually</option>
+                  </select>
+                </div>
+              </div>
+              {form.server === CUSTOM_SERVER_OPTION ? (
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                    Custom server name <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.customServer}
+                    onChange={(event) => setForm((current) => ({ ...current, customServer: event.target.value }))}
+                    placeholder="Exact MetaTrader server name"
+                    maxLength={100}
+                    autoComplete="off"
+                    className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+                  />
+                </div>
+              ) : null}
+              {form.brokerProviderId && serversQuery.isSuccess && serversQuery.data.servers.length === 0 ? (
+                <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
+                  No servers are configured for this broker and platform. Contact support or an administrator.
+                </div>
+              ) : null}
+              <p className="text-xs text-muted">
+                Server options combine the WSA Global broker catalog with broker-provider discovery. You can enter the exact server manually when needed.
+              </p>
+            </>
           ) : null}
-          {form.brokerProviderId && serversQuery.isSuccess && serversQuery.data.servers.length === 0 ? (
-            <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
-              No servers are configured for this broker and platform. Contact support or an administrator.
-            </div>
-          ) : null}
-          <p className="text-xs text-muted">
-            Server options combine the WSA Global broker catalog with broker-provider discovery. You can enter the exact server manually when needed.
-          </p>
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <p className="text-xs text-muted">
-              Saving new credentials replaces existing ones for this account.
+              {dashboardUuidMode
+                ? "Updating the UUID changes which API2Trade dashboard account this workspace account follows."
+                : "Saving new credentials replaces existing ones for this account."}
             </p>
             <div className="flex gap-3">
               <GhostButton
@@ -569,12 +618,14 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 type="submit"
                 disabled={
                   busy ||
-                  !form.brokerProviderId ||
-                  !form.server ||
-                  (form.server === CUSTOM_SERVER_OPTION && !form.customServer.trim())
+                  (dashboardUuidMode
+                    ? !form.providerAccountId.trim()
+                    : !form.brokerProviderId ||
+                      !form.server ||
+                      (form.server === CUSTOM_SERVER_OPTION && !form.customServer.trim()))
                 }
               >
-                {storeMutation.isPending ? "Connecting…" : "Connect and sync"}
+                {storeMutation.isPending ? "Connecting…" : dashboardUuidMode ? "Link and sync" : "Connect and sync"}
               </PrimaryButton>
             </div>
           </div>

@@ -15,23 +15,46 @@ export const brokerConnectionSchema = z
       .enum(["MT5", "MT4", "mt5", "mt4"])
       .transform((value) => value.toUpperCase() as "MT4" | "MT5")
       .default("MT5"),
-    login: z.string().min(1, "Login is required").max(50).trim(),
-    password: z.string().min(1, "Password is required").max(200),
-    server: z.string().min(1, "Server is required").max(100).trim(),
+    login: z.string().trim().max(50).default(""),
+    password: z.string().max(200).default(""),
+    server: z.string().trim().max(100).default(""),
+    providerAccountId: z.string().uuid("Provider account UUID is invalid").optional(),
     brokerProviderId: z.string().uuid("Broker provider is invalid").optional(),
     brokerName: z.string().trim().min(2, "Broker name is required").max(100).optional(),
     useCustomBrokerServer: z.boolean().default(false),
     connectNow: z.boolean().default(true),
   })
   .superRefine((value, context) => {
-    if (!value.useCustomBrokerServer && !value.brokerProviderId) {
+    const usesDashboardUuid = Boolean(value.providerAccountId);
+    if (!usesDashboardUuid && !value.login) {
+      context.addIssue({
+        code: "custom",
+        path: ["login"],
+        message: "Login is required",
+      });
+    }
+    if (!usesDashboardUuid && !value.password) {
+      context.addIssue({
+        code: "custom",
+        path: ["password"],
+        message: "Password is required",
+      });
+    }
+    if (!usesDashboardUuid && !value.server) {
+      context.addIssue({
+        code: "custom",
+        path: ["server"],
+        message: "Server is required",
+      });
+    }
+    if (!usesDashboardUuid && !value.useCustomBrokerServer && !value.brokerProviderId) {
       context.addIssue({
         code: "custom",
         path: ["brokerProviderId"],
         message: "Broker provider is required",
       });
     }
-    if (value.useCustomBrokerServer && !value.brokerName) {
+    if (!usesDashboardUuid && value.useCustomBrokerServer && !value.brokerName) {
       context.addIssue({
         code: "custom",
         path: ["brokerName"],

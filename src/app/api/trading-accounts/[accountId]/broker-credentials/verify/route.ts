@@ -4,7 +4,13 @@ import {
   getDecryptedCredentials,
   BrokerCredentialError,
 } from "@/lib/services/brokerCredentialService";
-import { brokerProviderConfigured, createBrokerAdapter, getBrokerProviderId, getBrokerProviderLabel } from "@/lib/broker/provider";
+import {
+  api2TradeUsesDashboardAccounts,
+  brokerProviderConfigured,
+  createBrokerAdapter,
+  getBrokerProviderId,
+  getBrokerProviderLabel,
+} from "@/lib/broker/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 
@@ -49,18 +55,10 @@ export async function POST(
 
     await assertCanAccessAccount(accountId);
 
-    // Confirm credentials are stored (no decryption — just presence check)
-    const creds = await getDecryptedCredentials(accountId);
-    if (!creds) {
-      return jsonFail(
-        "BROKER_CREDENTIALS_NOT_FOUND",
-        "No broker credentials stored for this account. Store credentials first.",
-        404,
-      );
-    }
-
     const providerLabel = getBrokerProviderLabel();
     const providerId = getBrokerProviderId();
+    const usesDashboardUuidMode =
+      providerId === "api2trade" && api2TradeUsesDashboardAccounts();
 
     if (!brokerProviderConfigured()) {
       return jsonFail(
@@ -73,11 +71,21 @@ export async function POST(
     const supabase = createAdminClient();
     const { data: account } = await supabase
       .from("trading_accounts")
-      .select("provider_account_id")
+      .select("provider_account_id, broker_server, broker_platform")
       .eq("id", accountId)
       .maybeSingle();
 
     const checkedAt = new Date().toISOString();
+
+    const creds = await getDecryptedCredentials(accountId);
+
+    if (!usesDashboardUuidMode && !creds) {
+      return jsonFail(
+        "BROKER_CREDENTIALS_NOT_FOUND",
+        "No broker credentials stored for this account. Store credentials first.",
+        404,
+      );
+    }
 
     // Provider verification requires a provider_account_id (set during first sync).
     // If the account hasn't been synced yet, direct the user to sync first.
@@ -97,7 +105,9 @@ export async function POST(
         checkedAt,
         needsSync: true,
         message:
-          `Account has not been synced yet. Run 'Sync Account' first to establish the ${providerLabel} connection.`,
+          usesDashboardUuidMode
+            ? `No API2Trade account UUID is linked yet. Add the MT account in API2Trade first, then enter its UUID here.`
+            : `Account has not been synced yet. Run 'Sync Account' first to establish the ${providerLabel} connection.`,
       });
     }
 

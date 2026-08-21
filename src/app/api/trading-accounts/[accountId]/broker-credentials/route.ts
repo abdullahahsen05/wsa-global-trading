@@ -4,7 +4,10 @@ import {
   BrokerCredentialError,
 } from "@/lib/services/brokerCredentialService";
 import { connectBrokerAccount } from "@/lib/services/brokerConnectionService";
-import { getBrokerProviderId } from "@/lib/broker/provider";
+import {
+  api2TradeUsesDashboardAccounts,
+  getBrokerProviderId,
+} from "@/lib/broker/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { brokerConnectionSchema } from "@/lib/validation/schemas";
@@ -68,6 +71,10 @@ export async function GET(
       brokerProviderId: accountRow.data?.broker_provider_id ?? null,
       serverName: accountRow.data?.broker_server ?? null,
       platform: accountRow.data?.broker_platform ?? null,
+      connectionMode:
+        getBrokerProviderId() === "api2trade" && api2TradeUsesDashboardAccounts()
+          ? "API2TRADE_DASHBOARD_UUID"
+          : "DIRECT_CREDENTIALS",
     });
   } catch (err) {
     if (err instanceof AuthError) return jsonFail(err.code, err.message, err.statusCode);
@@ -105,13 +112,14 @@ export async function POST(
       login,
       password,
       server,
+      providerAccountId,
       brokerProviderId,
       brokerName,
       useCustomBrokerServer,
       connectNow,
     } = parsed.data;
     let resolvedBrokerName = brokerName;
-    if (brokerProviderId) {
+    if (brokerProviderId && !providerAccountId) {
       try {
         const brokerSelection = await resolveBrokerSelection({
           brokerProviderId,
@@ -133,6 +141,7 @@ export async function POST(
       accountId,
       actorUserId: user.id,
       brokerProviderId,
+      providerAccountId,
       connectNow,
       credentials: {
         login,

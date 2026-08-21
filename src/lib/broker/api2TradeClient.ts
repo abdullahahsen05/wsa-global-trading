@@ -3,6 +3,10 @@ if (typeof window !== "undefined") {
 }
 
 import { publicApi2TradeError } from "./api2TradeErrors";
+import {
+  getResolvedApi2TradeBaseUrl,
+  getResolvedApi2TradeEventsUrl,
+} from "./provider";
 
 export interface Api2TradeConfig {
   baseUrl: string;
@@ -133,8 +137,8 @@ function toBasicAuth(username: string, password: string): string {
 }
 
 export function loadApi2TradeConfig(): Api2TradeConfig | null {
-  const baseUrl = process.env.API2TRADE_BASE_URL?.trim();
-  const eventsUrl = process.env.API2TRADE_EVENTS_URL?.trim();
+  const baseUrl = getResolvedApi2TradeBaseUrl();
+  const eventsUrl = getResolvedApi2TradeEventsUrl();
   const apiKey = process.env.API2TRADE_API_KEY?.trim();
   const username = process.env.API2TRADE_USERNAME?.trim();
   const password = process.env.API2TRADE_PASSWORD?.trim();
