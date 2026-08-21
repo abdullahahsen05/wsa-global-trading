@@ -158,10 +158,13 @@ export class Api2TradeClient {
   constructor(private readonly config: Api2TradeConfig) {}
 
   private headers(): HeadersInit {
+    if (this.config.apiKey) {
+      return { "x-api-key": this.config.apiKey };
+    }
     if (this.config.username && this.config.password) {
       return { Authorization: `Basic ${toBasicAuth(this.config.username, this.config.password)}` };
     }
-    return { "x-api-key": this.config.apiKey ?? "" };
+    return {};
   }
 
   authHeaders(): HeadersInit {

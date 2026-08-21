@@ -20,8 +20,7 @@ export function getBrokerProviderLabel(provider = getBrokerProviderId()): string
 
 export function api2TradeUsesDashboardAccounts(): boolean {
   return getBrokerProviderId() === "api2trade"
-    && Boolean(process.env.API2TRADE_API_KEY?.trim())
-    && !(process.env.API2TRADE_USERNAME?.trim() && process.env.API2TRADE_PASSWORD?.trim());
+    && Boolean(process.env.API2TRADE_API_KEY?.trim());
 }
 
 export function getResolvedApi2TradeBaseUrl(): string | null {
