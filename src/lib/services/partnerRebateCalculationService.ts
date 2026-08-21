@@ -1,5 +1,3 @@
-import "server-only";
-
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 
