@@ -84,12 +84,12 @@ export default function PartnerOverviewPage() {
     return (
       <WorkspacePage
         eyebrow="Partner"
-        title="Partner setup unavailable"
-        description="Your partner profile could not be loaded. No trader or commission data was requested."
+        title="Partner access is being prepared"
+        description="Your partner profile could not be loaded yet. No trader, Rebate / CPA / Hybrid, or payout data was requested."
       >
         <Panel>
           <p className="text-sm leading-6 text-muted">
-            Refresh the page to retry. If this continues, ask an administrator to verify your partner profile.
+            Refresh the page to retry. If this continues, ask an administrator to verify your partner role and profile.
           </p>
         </Panel>
       </WorkspacePage>
@@ -101,11 +101,11 @@ export default function PartnerOverviewPage() {
       <WorkspacePage
         eyebrow="Partner"
         title="Partner setup incomplete"
-        description="Your account has the partner role, but its partner profile has not been provisioned yet."
+        description="Your account has the partner role, but its Rebate / CPA / Hybrid profile has not been provisioned yet."
       >
         <Panel>
           <p className="text-sm leading-6 text-muted">
-            An administrator needs to complete partner setup before referral, trader, commission, and payout data can load.
+            An administrator needs to complete partner setup before referral, trader, Rebate / CPA / Hybrid, and payout data can load.
           </p>
         </Panel>
       </WorkspacePage>
@@ -132,7 +132,7 @@ export default function PartnerOverviewPage() {
           </h2>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted">
             Your partner application has been received. Once approved, you&apos;ll get access to your
-            referral link, referred trader list, commission ledger, and payout history.
+            referral link, referred trader list, Rebate / CPA / Hybrid ledger, and payout history.
           </p>
 
           <div className="mx-auto mt-8 max-w-sm space-y-3 text-left">
@@ -179,7 +179,7 @@ export default function PartnerOverviewPage() {
       >
         <Panel>
           <p className="text-sm leading-6 text-muted">
-            Contact an administrator to review your partner access. Trader and commission data has not been loaded.
+            Contact an administrator to review your partner access. Trader and Rebate / CPA / Hybrid data has not been loaded.
           </p>
         </Panel>
       </WorkspacePage>
@@ -200,7 +200,7 @@ export default function PartnerOverviewPage() {
     <WorkspacePage
       eyebrow="Partner"
       title={`Welcome, ${sessionUser?.name?.trim() || "Partner"}`}
-      description="Monitor your assigned traders, activity, risk, and commissions."
+      description="Monitor your assigned traders, activity, risk, and Rebate / CPA / Hybrid earnings."
     >
       <InlineStatusStrip
         items={[
@@ -217,17 +217,47 @@ export default function PartnerOverviewPage() {
             tone: (summary?.aggregateFloatingPnl.amount ?? 0) < 0 ? "danger" : "lime",
           },
           {
+            label: "Team volume",
+            value: summary ? `${summary.totalTeamLots.toFixed(2)} lots` : "-",
+            tone: "accent",
+          },
+          {
+            label: "Rebates earned",
+            value: summary ? formatMoney(summary.totalRebatesEarned) : "-",
+            tone: "lime",
+          },
+          {
             label: "Open risk events",
             value: isLoading ? "..." : summary?.openRiskEvents ?? 0,
             tone: (summary?.openRiskEvents ?? 0) > 0 ? "danger" : undefined,
           },
           {
-            label: "Pending commission",
+            label: "Pending earnings",
             value: summary ? formatMoney(summary.pendingCommission) : "-",
             tone: "accent",
           },
         ]}
       />
+
+      {summary ? (
+        <div className="mt-5 grid gap-4 md:grid-cols-3">
+          <Panel>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">IB volume rebates</p>
+            <p className="mt-3 text-2xl font-semibold text-foreground">{formatMoney(summary.ibEarnings)}</p>
+            <p className="mt-1 text-xs text-muted">Calculated from referred traders&apos; closed lots.</p>
+          </Panel>
+          <Panel>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">CPA rewards</p>
+            <p className="mt-3 text-2xl font-semibold text-foreground">{formatMoney(summary.cpaEarnings)}</p>
+            <p className="mt-1 text-xs text-muted">Triggered once qualification volume and deposit tier are met.</p>
+          </Panel>
+          <Panel>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Total team volume</p>
+            <p className="mt-3 text-2xl font-semibold text-foreground">{summary.totalTeamLots.toFixed(2)} lots</p>
+            <p className="mt-1 text-xs text-muted">Real trade volume across assigned trader accounts.</p>
+          </Panel>
+        </div>
+      ) : null}
 
       {(summary?.referralCode ?? profile?.referralCode) ? (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[4px] border border-line bg-panel px-4 py-3">
@@ -237,7 +267,7 @@ export default function PartnerOverviewPage() {
               {summary?.referralCode ?? profile?.referralCode}
             </p>
             <p className="mt-0.5 text-xs text-muted">
-              Share this link with traders. Valid signups are attributed to your account and eligible purchases create commission records.
+              Share this link with traders. Valid signups are attributed to your account and eligible activity creates Rebate / CPA / Hybrid records.
             </p>
             <p className="mt-1 truncate font-mono text-xs text-foreground">
               {siteUrl

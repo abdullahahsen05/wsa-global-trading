@@ -12,6 +12,7 @@ import { publicMetaApiError } from '@/lib/broker/metaApiErrors';
 import { Api2TradeBrokerAdapter } from '@/lib/broker/Api2TradeBrokerAdapter';
 import { publicApi2TradeError } from '@/lib/broker/api2TradeErrors';
 import { acquireOperationalLock } from '@/lib/services/operationalLockService';
+import { calculatePartnerRebatesForTradingAccounts } from '@/lib/services/partnerRebateCalculationService';
 import {
   brokerProviderConfigured,
   createBrokerAdapter,
@@ -348,6 +349,17 @@ async function persistBrokerSnapshotAndTrades(params: {
       .eq('external_trade_id', row.external_trade_id);
     if (error) throw new Error(`Trade update failed: ${error.message}`);
     tradesUpserted++;
+  }
+
+  if (tradesUpserted > 0) {
+    try {
+      await calculatePartnerRebatesForTradingAccounts([accountId]);
+    } catch (error) {
+      console.warn(
+        `[partner-rebates] skipped automatic rebate calculation for ${accountId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   return { tradesUpserted, openPositions: openTrades.length, currency, balance, equity };

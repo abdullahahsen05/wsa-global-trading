@@ -66,6 +66,6 @@ export const navItems: NavItem[] = [
   { href: "/partner", label: "Overview", role: "PARTNER", icon: Gauge },
   { href: "/partner/traders", label: "Traders", role: "PARTNER", icon: Users },
   { href: "/partner/crm", label: "CRM", role: "PARTNER", icon: MessageSquare },
-  { href: "/partner/commissions", label: "Commissions", role: "PARTNER", icon: BadgeDollarSign },
+  { href: "/partner/commissions", label: "Rebates & CPA", role: "PARTNER", icon: BadgeDollarSign },
   { href: "/partner/payouts", label: "Payouts", role: "PARTNER", icon: WalletCards },
 ];

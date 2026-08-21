@@ -206,6 +206,21 @@ export const partnerRebateCreateSchema = z.object({
   description: z.string().trim().max(500).nullable().optional(),
 });
 
+export const partnerBrokerConfigurationSchema = z.object({
+  brokerProviderId: z.string().uuid().nullable().optional(),
+  modelType: z.enum(["IB", "CPA", "HYBRID"]),
+  rebateRatePerLot: z.number().min(0).max(1_000_000),
+  cpaQualificationLots: z.number().min(0).max(1_000_000).default(1),
+  cpaTier1Deposit: z.number().min(0).max(100_000_000).default(300),
+  cpaTier1Payout: z.number().min(0).max(100_000_000).default(350),
+  cpaTier2Deposit: z.number().min(0).max(100_000_000).default(500),
+  cpaTier2Payout: z.number().min(0).max(100_000_000).default(550),
+  cpaTier3Deposit: z.number().min(0).max(100_000_000).default(1000),
+  cpaTier3Payout: z.number().min(0).max(100_000_000).default(750),
+  currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).default("USD"),
+  isActive: z.boolean().default(true),
+});
+
 export const referralClaimSchema = z.object({
   code: z.string().trim().min(2).max(40),
 });

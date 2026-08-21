@@ -10,6 +10,7 @@ import { publicApi2TradeError } from "../src/lib/broker/api2TradeErrors";
 import { createBrokerAdapter } from "../src/lib/broker/provider";
 import { refreshAccountTrades } from "../src/lib/services/brokerSyncService";
 import { hasExecutionPriority } from "../src/lib/copy/executionPriority";
+import { calculatePartnerRebatesForTradingAccounts } from "../src/lib/services/partnerRebateCalculationService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -321,6 +322,15 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
             .from("trading_accounts")
             .update({ last_synced_at: new Date().toISOString(), sync_error: null })
             .eq("id", accountRow.id);
+          try {
+            await calculatePartnerRebatesForTradingAccounts([accountRow.id]);
+          } catch (error) {
+            console.warn(
+              `[partner-rebates] skipped automatic rebate calculation for ${accountRow.id}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
           console.log(
             `[risk-worker] projected ${changedTrades} trade change(s) for ${accountRow.id}; ${openRows.length} open position(s)`,
           );

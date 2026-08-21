@@ -709,6 +709,7 @@ export async function createPartnerRebate(params: {
       trader_id: params.traderId ?? null,
       payment_order_id: params.paymentOrderId ?? null,
       source_type: params.sourceType.trim(),
+      calculation_type: params.sourceType === "ADMIN_ADJUSTMENT" ? "ADMIN_ADJUSTMENT" : null,
       amount: Number(params.amount.toFixed(2)),
       currency: params.currency.toUpperCase(),
       status: params.status,

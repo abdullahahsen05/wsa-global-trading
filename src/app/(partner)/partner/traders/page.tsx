@@ -80,6 +80,7 @@ export default function PartnerTradersPage() {
       <InlineStatusStrip
         items={[
           { label: "Assigned traders", value: isLoading ? "..." : traders.length, tone: "accent" },
+          { label: "Team lots", value: `${traders.reduce((sum, t) => sum + t.totalLotsTraded, 0).toFixed(2)}` },
           { label: "At risk", value: traders.filter((t) => t.riskStatus === "AT_RISK").length, tone: "accent" },
           { label: "Restricted", value: traders.filter((t) => t.riskStatus === "RESTRICTED").length, tone: "danger" },
         ]}
@@ -116,7 +117,7 @@ export default function PartnerTradersPage() {
             <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-full">
               <div className="invisible-scrollbar min-h-0 flex-1 overflow-auto">
                 <DataTable
-                headers={["Trader", "Joined", "Accounts", "Equity", "Risk", ""]}
+                headers={["Trader", "Joined", "Accounts", "Total lots", "Equity", "Risk", ""]}
                 rows={filtered.map((t) => [
                   <div key="n" className="min-w-0">
                     <p className="truncate text-sm font-semibold text-foreground">{t.name}</p>
@@ -126,6 +127,7 @@ export default function PartnerTradersPage() {
                     {t.registeredAt ? new Date(t.registeredAt).toLocaleDateString() : "-"}
                   </span>,
                   <span key="a">{t.connectedAccounts}/{t.accountCount}</span>,
+                  <span key="lots" className="font-semibold text-foreground">{t.totalLotsTraded.toFixed(2)}</span>,
                   <span key="e">{formatMoney(t.totalEquity)}</span>,
                   <StatusPill key="r" tone={RISK_TONE[t.riskStatus]}>{t.riskStatus}</StatusPill>,
                   <GhostButton key="b" type="button" onClick={() => setSelectedId(t.traderId)}>
@@ -152,6 +154,7 @@ export default function PartnerTradersPage() {
                   <Stat label="Accounts" value={`${selected.connectedAccounts}/${selected.accountCount}`} />
                   <Stat label="Team equity" value={formatMoney(selected.totalEquity)} />
                   <Stat label="Floating PnL" value={formatMoney(selected.floatingPnl)} />
+                  <Stat label="Total lots traded" value={selected.totalLotsTraded.toFixed(2)} />
                   <Stat label="Max drawdown" value={`${selected.maxDrawdownPercent}%`} />
                   <Stat label="Open risk events" value={selected.openRiskEvents} />
                   <Stat label="Referred / assigned" value={selected.assignedAt ? new Date(selected.assignedAt).toLocaleDateString() : "-"} />

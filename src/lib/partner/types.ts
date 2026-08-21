@@ -56,6 +56,7 @@ export interface PartnerTraderDto {
   riskStatus: TraderRiskStatus;
   assignedAt: string | null;
   registeredAt: string | null;
+  totalLotsTraded: number;
   accounts?: PartnerAccountStatusSummary[];
 }
 
@@ -68,6 +69,10 @@ export interface PartnerSummaryDto {
   openRiskEvents: number;
   pendingCommission: MoneyValue;
   earnedCommission: MoneyValue;
+  totalTeamLots: number;
+  totalRebatesEarned: MoneyValue;
+  ibEarnings: MoneyValue;
+  cpaEarnings: MoneyValue;
   commissionPercent: number;
   referralCode: string | null;
 }

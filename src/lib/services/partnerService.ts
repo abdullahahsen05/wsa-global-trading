@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mapTradeToDto } from "@/lib/mappers/tradeMapper";
+import { listPartnerTradeRebateLogs } from "@/lib/services/partnerRebateCalculationService";
 import {
   PARTNER_ERROR,
   PartnerError,
@@ -52,6 +53,7 @@ interface AssignedContext {
   snapshotByAccount: Map<string, SnapshotRow>;
   openRiskByAccount: Map<string, number>;
   accountToTraderUserId: Map<string, string>;
+  tradeLotsByTraderUserId: Map<string, number>;
   allAccountIds: string[];
 }
 
@@ -78,6 +80,7 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
       snapshotByAccount: new Map(),
       openRiskByAccount: new Map(),
       accountToTraderUserId: new Map(),
+      tradeLotsByTraderUserId: new Map(),
       allAccountIds: [],
     };
   }
@@ -95,9 +98,10 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
 
   const snapshotByAccount = new Map<string, SnapshotRow>();
   const openRiskByAccount = new Map<string, number>();
+  const tradeLotsByTraderUserId = new Map<string, number>();
 
   if (allAccountIds.length > 0) {
-    const [{ data: snaps }, { data: riskRows }] = await Promise.all([
+    const [{ data: snaps }, { data: riskRows }, { data: tradeRows }] = await Promise.all([
       supabase
         .from("latest_account_snapshots")
         .select("trading_account_id, balance, equity, floating_pnl, drawdown_percent")
@@ -108,14 +112,27 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
         .is("acknowledged_at", null)
         .in("trading_account_id", allAccountIds)
         .limit(5000),
+      supabase
+        .from("trades")
+        .select("trading_account_id, volume")
+        .in("trading_account_id", allAccountIds)
+        .limit(20000),
     ]);
     for (const s of (snaps ?? []) as SnapshotRow[]) snapshotByAccount.set(s.trading_account_id, s);
     for (const r of riskRows ?? []) {
       openRiskByAccount.set(r.trading_account_id, (openRiskByAccount.get(r.trading_account_id) ?? 0) + 1);
     }
+    for (const trade of tradeRows ?? []) {
+      const traderUserId = accountToTraderUserId.get(trade.trading_account_id as string);
+      if (!traderUserId) continue;
+      tradeLotsByTraderUserId.set(
+        traderUserId,
+        (tradeLotsByTraderUserId.get(traderUserId) ?? 0) + Math.abs(Number(trade.volume ?? 0)),
+      );
+    }
   }
 
-  return { profiles, accounts, snapshotByAccount, openRiskByAccount, accountToTraderUserId, allAccountIds };
+  return { profiles, accounts, snapshotByAccount, openRiskByAccount, accountToTraderUserId, tradeLotsByTraderUserId, allAccountIds };
 }
 
 function buildTraderDto(
@@ -175,6 +192,7 @@ function buildTraderDto(
     riskStatus,
     assignedAt: profile.partner_assigned_at,
     registeredAt: profile.profiles?.created_at ?? null,
+    totalLotsTraded: Number((ctx.tradeLotsByTraderUserId.get(profile.user_id) ?? 0).toFixed(2)),
     accounts: accountStatuses,
   };
 }
@@ -190,6 +208,17 @@ export async function getPartnerSummary(partnerUserId: string): Promise<PartnerS
   const activeTraders = traders.filter((t) => t.status === "ACTIVE").length;
 
   const commission = await getPartnerCommissionSummary(partnerUserId);
+  const rebateLogs = await listPartnerTradeRebateLogs(partnerUserId, 5000);
+  const totalTeamLots = traders.reduce((sum, trader) => sum + trader.totalLotsTraded, 0);
+  const ibEarnings = rebateLogs
+    .filter((row) => row.calculationType === "IB_VOLUME")
+    .reduce((sum, row) => sum + row.rebateAmount, 0);
+  const cpaEarnings = rebateLogs
+    .filter((row) => row.calculationType === "CPA_TIER")
+    .reduce((sum, row) => sum + row.rebateAmount, 0);
+  const totalRebatesEarned = rebateLogs
+    .filter((row) => row.status === "APPROVED" || row.status === "PAID")
+    .reduce((sum, row) => sum + row.rebateAmount, 0);
 
   const supabase = createAdminClient();
   const { data: profileRow } = await supabase
@@ -207,6 +236,10 @@ export async function getPartnerSummary(partnerUserId: string): Promise<PartnerS
     openRiskEvents,
     pendingCommission: commission.pending,
     earnedCommission: { amount: commission.approved.amount + commission.paid.amount, currency: commission.currency },
+    totalTeamLots: Number(totalTeamLots.toFixed(2)),
+    totalRebatesEarned: { amount: Number(totalRebatesEarned.toFixed(2)), currency: commission.currency },
+    ibEarnings: { amount: Number(ibEarnings.toFixed(2)), currency: commission.currency },
+    cpaEarnings: { amount: Number(cpaEarnings.toFixed(2)), currency: commission.currency },
     commissionPercent: commission.commissionPercent,
     referralCode: (profileRow?.referral_code as string | null) ?? null,
   };

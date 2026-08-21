@@ -60,10 +60,10 @@ export default function PartnerPayoutsPage() {
   const hasActive = withdrawals.some((row) => row.status === "PENDING_REVIEW" || row.status === "APPROVED");
 
   return (
-    <WorkspacePage eyebrow="Partner" title="Withdrawals" description="Request payment from approved commission balance and track every review step.">
+    <WorkspacePage eyebrow="Partner" title="Payouts" description="Request payment from approved Rebate / CPA / Hybrid balances and track every review step.">
       <InlineStatusStrip items={[
         { label: "Withdrawable", value: balance ? formatMoney({ amount: balance.available, currency: balance.currency }) : "…", tone: "lime" },
-        { label: "Approved unpaid commissions", value: data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidCommissions, currency: data.ledger.currency }) : "…", tone: "lime" },
+        { label: "Approved unpaid CPA", value: data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidCommissions, currency: data.ledger.currency }) : "…", tone: "lime" },
         { label: "Approved unpaid rebates", value: data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidRebates, currency: data.ledger.currency }) : "…", tone: "lime" },
         { label: "Reserved / reconciled", value: balance ? formatMoney({ amount: balance.reserved, currency: balance.currency }) : "…", tone: "accent" },
       ]} />
@@ -71,7 +71,7 @@ export default function PartnerPayoutsPage() {
       <div className="mt-5 grid items-stretch gap-5 xl:h-[620px] xl:grid-cols-[0.8fr_1.2fr]">
         <Panel className="invisible-scrollbar min-h-0 overflow-y-auto xl:h-full">
           <h2 className="text-lg font-semibold text-foreground">Request withdrawal</h2>
-          <p className="mt-1 text-sm leading-6 text-muted">Only approved, unpaid commissions and rebates that are not already locked are withdrawable. One active request is allowed at a time.</p>
+          <p className="mt-1 text-sm leading-6 text-muted">Only approved, unpaid Rebate / CPA / Hybrid earnings that are not already locked are withdrawable. One active request is allowed at a time.</p>
           {message ? <p className="mt-4 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">{message}</p> : null}
           {error ? <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
           <form onSubmit={submit} className="mt-5 grid gap-4">
@@ -112,13 +112,13 @@ export default function PartnerPayoutsPage() {
       </div>
 
       <Panel className="mt-5">
-        <h2 className="text-lg font-semibold text-foreground">Commission and rebate ledger</h2>
+        <h2 className="text-lg font-semibold text-foreground">Rebate / CPA / Hybrid ledger</h2>
         <p className="mt-1 text-sm text-muted">
           Pending, paid, cancelled, and reversed entries are visible but are not withdrawable.
         </p>
         <div className="mt-4">
           {(data?.ledger.items.length ?? 0) === 0 ? (
-            <EmptyState title="No ledger entries" description="Commission and rebate entries will appear here." />
+            <EmptyState title="No ledger entries" description="Rebate / CPA / Hybrid entries will appear here." />
           ) : (
             <DataTable
               headers={["Date", "Type", "Source", "Amount", "Status", "Reference"]}

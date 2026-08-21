@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Search } from "lucide-react";
 import {
   DataTable,
@@ -21,6 +21,32 @@ import type {
   PartnerWithdrawalDto,
   PartnerWithdrawalStatus,
 } from "@/lib/partner/withdrawals";
+
+type PartnerModelType = "IB" | "CPA" | "HYBRID";
+
+interface BrokerOption {
+  id: string;
+  display_name: string;
+  name: string;
+  is_active: boolean;
+}
+
+interface PartnerBrokerConfigurationDto {
+  id: string;
+  brokerProviderId: string | null;
+  brokerName: string;
+  modelType: PartnerModelType;
+  rebateRatePerLot: number;
+  cpaQualificationLots: number;
+  cpaTier1Deposit: number;
+  cpaTier1Payout: number;
+  cpaTier2Deposit: number;
+  cpaTier2Payout: number;
+  cpaTier3Deposit: number;
+  cpaTier3Payout: number;
+  currency: string;
+  isActive: boolean;
+}
 
 const TONES: Record<string, "lime" | "accent" | "danger" | "muted"> = {
   PENDING_REVIEW: "accent",
@@ -51,6 +77,18 @@ export default function AdminPartnerWithdrawalsPage() {
   const [rebateAmount, setRebateAmount] = useState("");
   const [rebateStatus, setRebateStatus] = useState<"PENDING" | "APPROVED">("PENDING");
   const [rebateDescription, setRebateDescription] = useState("");
+  const [configBrokerId, setConfigBrokerId] = useState("");
+  const [configModel, setConfigModel] = useState<PartnerModelType>("IB");
+  const [configCurrency, setConfigCurrency] = useState("USD");
+  const [rebateRatePerLot, setRebateRatePerLot] = useState("5");
+  const [cpaQualificationLots, setCpaQualificationLots] = useState("1");
+  const [cpaTier1Deposit, setCpaTier1Deposit] = useState("300");
+  const [cpaTier1Payout, setCpaTier1Payout] = useState("350");
+  const [cpaTier2Deposit, setCpaTier2Deposit] = useState("500");
+  const [cpaTier2Payout, setCpaTier2Payout] = useState("550");
+  const [cpaTier3Deposit, setCpaTier3Deposit] = useState("1000");
+  const [cpaTier3Payout, setCpaTier3Payout] = useState("750");
+  const [configActive, setConfigActive] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -117,6 +155,52 @@ export default function AdminPartnerWithdrawalsPage() {
     enabled: Boolean(selectedLedgerSummary?.partnerId),
   });
   const selectedLedger = ledgerDetail.data?.ledgers[0] ?? selectedLedgerSummary;
+  const brokerConfig = useQuery<{ brokers: BrokerOption[]; configurations: PartnerBrokerConfigurationDto[] }>({
+    queryKey: ["admin-partner-broker-config", selectedLedgerSummary?.partnerId],
+    queryFn: () => api(`/api/admin/partners/${selectedLedgerSummary?.partnerId}/broker-configurations`),
+    enabled: Boolean(selectedLedgerSummary?.partnerId),
+  });
+  const selectedConfig = useMemo(
+    () => brokerConfig.data?.configurations.find((config) => (config.brokerProviderId ?? "") === configBrokerId) ?? null,
+    [brokerConfig.data?.configurations, configBrokerId],
+  );
+
+  useEffect(() => {
+    if (!brokerConfig.data || configBrokerId) return;
+    setConfigBrokerId(
+      brokerConfig.data.configurations[0]?.brokerProviderId
+        ?? brokerConfig.data.brokers.find((broker) => broker.is_active)?.id
+        ?? "",
+    );
+  }, [brokerConfig.data, configBrokerId]);
+
+  useEffect(() => {
+    if (!selectedConfig) {
+      setConfigModel("IB");
+      setConfigCurrency(selectedLedger?.currency ?? "USD");
+      setRebateRatePerLot("5");
+      setCpaQualificationLots("1");
+      setCpaTier1Deposit("300");
+      setCpaTier1Payout("350");
+      setCpaTier2Deposit("500");
+      setCpaTier2Payout("550");
+      setCpaTier3Deposit("1000");
+      setCpaTier3Payout("750");
+      setConfigActive(true);
+      return;
+    }
+    setConfigModel(selectedConfig.modelType);
+    setConfigCurrency(selectedConfig.currency);
+    setRebateRatePerLot(String(selectedConfig.rebateRatePerLot));
+    setCpaQualificationLots(String(selectedConfig.cpaQualificationLots));
+    setCpaTier1Deposit(String(selectedConfig.cpaTier1Deposit));
+    setCpaTier1Payout(String(selectedConfig.cpaTier1Payout));
+    setCpaTier2Deposit(String(selectedConfig.cpaTier2Deposit));
+    setCpaTier2Payout(String(selectedConfig.cpaTier2Payout));
+    setCpaTier3Deposit(String(selectedConfig.cpaTier3Deposit));
+    setCpaTier3Payout(String(selectedConfig.cpaTier3Payout));
+    setConfigActive(selectedConfig.isActive);
+  }, [selectedConfig, selectedLedger?.currency]);
 
   async function refresh() {
     await Promise.all([
@@ -167,10 +251,44 @@ export default function AdminPartnerWithdrawalsPage() {
     },
     onError: (rebateError: Error) => setError(rebateError.message),
   });
+  const saveBrokerConfig = useMutation({
+    mutationFn: () => {
+      if (!selectedLedger) throw new Error("Select a partner first.");
+      return api(`/api/admin/partners/${selectedLedger.partnerId}/broker-configurations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          brokerProviderId: configBrokerId || null,
+          modelType: configModel,
+          rebateRatePerLot: Number(rebateRatePerLot),
+          cpaQualificationLots: Number(cpaQualificationLots),
+          cpaTier1Deposit: Number(cpaTier1Deposit),
+          cpaTier1Payout: Number(cpaTier1Payout),
+          cpaTier2Deposit: Number(cpaTier2Deposit),
+          cpaTier2Payout: Number(cpaTier2Payout),
+          cpaTier3Deposit: Number(cpaTier3Deposit),
+          cpaTier3Payout: Number(cpaTier3Payout),
+          currency: configCurrency,
+          isActive: configActive,
+        }),
+      });
+    },
+    onSuccess: async () => {
+      setError("");
+      setNotice("Partner broker model saved.");
+      await queryClient.invalidateQueries({ queryKey: ["admin-partner-broker-config", selectedLedger?.partnerId] });
+    },
+    onError: (configError: Error) => setError(configError.message),
+  });
 
   function createRebate(event: FormEvent) {
     event.preventDefault();
     rebate.mutate();
+  }
+
+  function saveConfiguration(event: FormEvent) {
+    event.preventDefault();
+    saveBrokerConfig.mutate();
   }
 
   return (
@@ -371,6 +489,59 @@ export default function AdminPartnerWithdrawalsPage() {
             </div>
             <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
               <div className="min-w-0 xl:col-span-2">
+                <form onSubmit={saveConfiguration} className="mb-5 rounded-[4px] border border-line bg-background p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Broker partnership model</p>
+                      <h3 className="mt-2 font-semibold text-foreground">Partner rate configuration</h3>
+                      <p className="mt-1 text-xs leading-5 text-muted">
+                        Select a broker and choose whether this partner earns IB volume rebates, CPA rewards, or both.
+                      </p>
+                    </div>
+                    <StatusPill tone={configActive ? "lime" : "muted"}>{configActive ? "ACTIVE" : "DISABLED"}</StatusPill>
+                  </div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <SelectField label="Broker" value={configBrokerId} onChange={(event) => setConfigBrokerId(event.target.value)}>
+                      <option value="">All brokers fallback</option>
+                      {(brokerConfig.data?.brokers ?? []).map((broker) => (
+                        <option key={broker.id} value={broker.id}>
+                          {broker.display_name || broker.name}{broker.is_active ? "" : " (inactive)"}
+                        </option>
+                      ))}
+                    </SelectField>
+                    <SelectField label="Partnership model" value={configModel} onChange={(event) => setConfigModel(event.target.value as PartnerModelType)}>
+                      <option value="IB">IB - volume rebate</option>
+                      <option value="CPA">CPA - qualified payout</option>
+                      <option value="HYBRID">Hybrid - IB + CPA</option>
+                    </SelectField>
+                    <TextField label="Currency" value={configCurrency} maxLength={3} onChange={(event) => setConfigCurrency(event.target.value.toUpperCase())} />
+                  </div>
+                  {(configModel === "IB" || configModel === "HYBRID") ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-3">
+                      <TextField label="Rebate rate per lot" type="number" min="0" step="0.01" value={rebateRatePerLot} onChange={(event) => setRebateRatePerLot(event.target.value)} />
+                    </div>
+                  ) : null}
+                  {(configModel === "CPA" || configModel === "HYBRID") ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-4">
+                      <TextField label="Qualification lots" type="number" min="0" step="0.01" value={cpaQualificationLots} onChange={(event) => setCpaQualificationLots(event.target.value)} />
+                      <TextField label="Tier 1 deposit" type="number" min="0" step="0.01" value={cpaTier1Deposit} onChange={(event) => setCpaTier1Deposit(event.target.value)} />
+                      <TextField label="Tier 1 payout" type="number" min="0" step="0.01" value={cpaTier1Payout} onChange={(event) => setCpaTier1Payout(event.target.value)} />
+                      <TextField label="Tier 2 deposit" type="number" min="0" step="0.01" value={cpaTier2Deposit} onChange={(event) => setCpaTier2Deposit(event.target.value)} />
+                      <TextField label="Tier 2 payout" type="number" min="0" step="0.01" value={cpaTier2Payout} onChange={(event) => setCpaTier2Payout(event.target.value)} />
+                      <TextField label="Tier 3 deposit" type="number" min="0" step="0.01" value={cpaTier3Deposit} onChange={(event) => setCpaTier3Deposit(event.target.value)} />
+                      <TextField label="Tier 3 payout" type="number" min="0" step="0.01" value={cpaTier3Payout} onChange={(event) => setCpaTier3Payout(event.target.value)} />
+                    </div>
+                  ) : null}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
+                    <label className="flex items-center gap-2 text-sm text-muted">
+                      <input type="checkbox" checked={configActive} onChange={(event) => setConfigActive(event.target.checked)} />
+                      Active for automatic rebate calculation
+                    </label>
+                    <PrimaryButton type="submit" disabled={saveBrokerConfig.isPending || brokerConfig.isLoading}>
+                      {saveBrokerConfig.isPending ? "Saving…" : "Save partner model"}
+                    </PrimaryButton>
+                  </div>
+                </form>
                 {ledgerDetail.isFetching ? (
                   <p className="rounded-[4px] border border-line bg-background px-4 py-5 text-sm text-muted">
                     Loading the selected partner&apos;s full ledger...
