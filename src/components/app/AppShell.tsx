@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Sidebar } from "@/components/app/Sidebar";
 import { Topbar } from "@/components/app/Topbar";
@@ -28,6 +28,7 @@ async function fetchSession(): Promise<SessionPayload | null> {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isShellFreeRoute =
     ["/login", "/register", "/forgot-password", "/reset-password"].includes(pathname) ||
@@ -48,8 +49,36 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : null;
   useRealtimeUpdates(!isShellFreeRoute);
 
+  useEffect(() => {
+    if (isShellFreeRoute) return;
+    if (sessionQuery.isLoading) return;
+    if (sessionQuery.data) return;
+    const nextPath = pathname && pathname !== "/" ? `?next=${encodeURIComponent(pathname)}` : "";
+    router.replace(`/login${nextPath}`);
+  }, [isShellFreeRoute, pathname, router, sessionQuery.data, sessionQuery.isLoading]);
+
   if (isShellFreeRoute) {
     return <div className="min-h-screen bg-background">{children}</div>;
+  }
+
+  if (!role && sessionQuery.isLoading) {
+    return (
+      <main className="relative min-h-screen min-w-0 overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5 md:px-5 lg:px-7 lg:py-6">
+        {children}
+      </main>
+    );
+  }
+
+  if (!role) {
+    return (
+      <main className="relative min-h-screen min-w-0 overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5 md:px-5 lg:px-7 lg:py-6">
+        <div className="mx-auto flex min-h-[60vh] max-w-xl items-center justify-center">
+          <div className="inner-surface w-full px-6 py-10 text-center">
+            <p className="text-sm text-muted">Redirecting to login…</p>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   return (
