@@ -285,15 +285,28 @@ export class Api2TradeClient {
   }
 
   async registerAccount(params: {
-    login: string;
+    user: string;
     password: string;
     server: string;
+    type: "MT4" | "MT5";
+    name: string;
   }): Promise<string> {
-    const result = await this.request<unknown>("POST", "RegisterAccount", {}, {
+    const normalizedType = params.type.toUpperCase() as "MT4" | "MT5";
+    const result = await this.request<unknown>("POST", "RegisterAccount", {
+      user: params.user,
+      login: params.user,
+      password: params.password,
+      server: params.server,
+      type: normalizedType,
+      name: params.name,
+    }, {
       body: {
-        login: params.login,
+        user: params.user,
+        login: params.user,
         password: params.password,
         server: params.server,
+        type: normalizedType,
+        name: params.name,
       },
     });
     if (typeof result === "string") {
