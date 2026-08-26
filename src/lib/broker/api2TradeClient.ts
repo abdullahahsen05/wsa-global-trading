@@ -292,12 +292,13 @@ export class Api2TradeClient {
     name: string;
   }): Promise<string> {
     const normalizedType = params.type.toUpperCase() as "MT4" | "MT5";
+    const providerType = normalizedType === "MT4" ? "Metatrader 4" : "Metatrader 5";
     const result = await this.request<unknown>("POST", "RegisterAccount", {
       user: params.user,
       login: params.user,
       password: params.password,
       server: params.server,
-      type: normalizedType,
+      type: providerType,
       name: params.name,
     }, {
       body: {
@@ -305,7 +306,7 @@ export class Api2TradeClient {
         login: params.user,
         password: params.password,
         server: params.server,
-        type: normalizedType,
+        type: providerType,
         name: params.name,
       },
     });
