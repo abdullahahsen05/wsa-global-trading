@@ -17,6 +17,7 @@ import {
 import {
   Api2TradeClient,
   type Api2TradeAccountDetails,
+  type Api2TradeConnectionStatus,
   type Api2TradeExecutionResponse,
   type Api2TradeOrder,
   loadApi2TradeConfig,
@@ -35,6 +36,11 @@ function safeIso(value: unknown, fallback = new Date().toISOString()): string {
 function isConnectedText(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return normalized === "connected" || normalized === "ok" || normalized.includes("connected");
+}
+
+function isConnectedStatus(value: Api2TradeConnectionStatus | string): boolean {
+  if (typeof value === "string") return isConnectedText(value);
+  return Boolean(value.isConnected);
 }
 
 function toSide(value: unknown): "BUY" | "SELL" {
@@ -194,52 +200,86 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
   private async reconnectWithStoredCredentials(
     accountId: string,
     providerAccountId: string,
-  ): Promise<boolean> {
+  ): Promise<string | null> {
     const client = this.client;
-    if (!client) return false;
+    if (!client) return null;
     const credentials = await getDecryptedCredentials(accountId);
-    if (!credentials) return false;
+    if (!credentials) return null;
 
-    await client.connectEx({
-      id: providerAccountId,
-      server: credentials.server,
-      user: credentials.login,
-      password: credentials.password,
-      downloadOrderHistory: true,
-    });
-    return true;
+    const nextProviderAccountId = client.usesApiKeyAuth()
+      ? await client.registerAccount({
+          login: credentials.login,
+          password: credentials.password,
+          server: credentials.server,
+        })
+      : await client.connectEx({
+          id: providerAccountId,
+          server: credentials.server,
+          user: credentials.login,
+          password: credentials.password,
+          downloadOrderHistory: true,
+        });
+
+    if (nextProviderAccountId && nextProviderAccountId !== providerAccountId) {
+      const supabase = createAdminClient();
+      await supabase
+        .from("trading_accounts")
+        .update({
+          provider_account_id: nextProviderAccountId,
+          provider: "api2trade",
+          sync_error: null,
+        })
+        .eq("id", accountId);
+    }
+
+    return nextProviderAccountId || providerAccountId;
   }
 
   private async checkApi2TradeSession(providerAccountId: string): Promise<boolean> {
     const client = this.assertConfigured();
-    const status = await client.connectionStatus(providerAccountId).catch(async () => {
-      const text = await client.checkConnect(providerAccountId);
-      return { isConnected: isConnectedText(text) };
-    });
-    return Boolean(status.isConnected);
+    const status = await client.connectionStatus(providerAccountId).catch(() => client.checkConnect(providerAccountId));
+    return isConnectedStatus(status);
   }
 
-  private async ensureApi2TradeSession(accountId: string, providerAccountId: string): Promise<boolean> {
+  private async ensureApi2TradeSession(accountId: string, providerAccountId: string): Promise<string> {
     const client = this.assertConfigured();
     try {
-      if (await this.checkApi2TradeSession(providerAccountId)) return true;
+      if (await this.checkApi2TradeSession(providerAccountId)) return providerAccountId;
     } catch (error) {
       if (!isRecoverableApi2TradeSessionError(error)) throw error;
+      if (client.usesApiKeyAuth()) {
+        const refreshedProviderAccountId = await this.reconnectWithStoredCredentials(accountId, providerAccountId);
+        if (!refreshedProviderAccountId) throw error;
+        await this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => true);
+        return refreshedProviderAccountId;
+      }
       const reconnected = await client.connectByToken(providerAccountId)
-        .then(() => true)
+        .then(() => providerAccountId)
         .catch(async () => this.reconnectWithStoredCredentials(accountId, providerAccountId));
       if (!reconnected) throw error;
-      return this.checkApi2TradeSession(providerAccountId).catch(() => true);
+      return this.checkApi2TradeSession(reconnected).catch(() => true).then(() => reconnected);
+    }
+
+    if (client.usesApiKeyAuth()) {
+      const refreshedProviderAccountId = await this.reconnectWithStoredCredentials(accountId, providerAccountId);
+      if (!refreshedProviderAccountId) {
+        throw new Error("API2Trade account is not connected and could not be re-registered.");
+      }
+      await this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => true);
+      return refreshedProviderAccountId;
     }
 
     const tokenReconnectOk = await client.connectByToken(providerAccountId)
       .then(() => true)
       .catch(async (error) => {
         if (!isRecoverableApi2TradeSessionError(error)) return false;
-        return this.reconnectWithStoredCredentials(accountId, providerAccountId);
+        return Boolean(await this.reconnectWithStoredCredentials(accountId, providerAccountId));
       });
-    if (!tokenReconnectOk) return false;
-    return this.checkApi2TradeSession(providerAccountId).catch(() => true);
+    if (!tokenReconnectOk) {
+      throw new Error("API2Trade account is not connected and reconnect by token failed.");
+    }
+    await this.checkApi2TradeSession(providerAccountId).catch(() => true);
+    return providerAccountId;
   }
 
   private async resolveReadyProviderAccountId(accountId: string): Promise<string> {
@@ -248,25 +288,25 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     if (warmed?.providerAccountId === providerAccountId && warmed.expiresAt > Date.now()) {
       return providerAccountId;
     }
-    await this.ensureApi2TradeSession(accountId, providerAccountId);
+    const readyProviderAccountId = await this.ensureApi2TradeSession(accountId, providerAccountId);
     warmedSessions.set(accountId, {
-      providerAccountId,
+      providerAccountId: readyProviderAccountId,
       expiresAt: Date.now() + WARM_SESSION_TTL_MS,
     });
-    return providerAccountId;
+    return readyProviderAccountId;
   }
 
   private async withSessionRetry<T>(
     accountId: string,
     operation: (providerAccountId: string) => Promise<T>,
   ): Promise<T> {
-    const providerAccountId = await this.resolveReadyProviderAccountId(accountId);
+    let providerAccountId = await this.resolveReadyProviderAccountId(accountId);
     try {
       return await operation(providerAccountId);
     } catch (error) {
       if (!isRecoverableApi2TradeSessionError(error)) throw error;
       warmedSessions.delete(accountId);
-      await this.ensureApi2TradeSession(accountId, providerAccountId);
+      providerAccountId = await this.ensureApi2TradeSession(accountId, providerAccountId);
       warmedSessions.set(accountId, {
         providerAccountId,
         expiresAt: Date.now() + WARM_SESSION_TTL_MS,
@@ -290,9 +330,9 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
 
     await Promise.all(rows.map(async (row) => {
       try {
-        await this.ensureApi2TradeSession(row.id, row.provider_account_id);
+        const readyProviderAccountId = await this.ensureApi2TradeSession(row.id, row.provider_account_id);
         warmedSessions.set(row.id, {
-          providerAccountId: row.provider_account_id,
+          providerAccountId: readyProviderAccountId,
           expiresAt: Date.now() + WARM_SESSION_TTL_MS,
         });
       } catch {
@@ -311,18 +351,20 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     name: string;
   }): Promise<string> {
     const client = this.assertConfigured();
-    // API2Trade/MT5API recommends that the client supplies a UUID v4 token in
-    // ConnectEx. Our trading account id is already a UUID and is stored as the
-    // provider_account_id so later calls can reconnect by token without sending
-    // MT credentials again.
-    const token = await client.connectEx({
+    if (client.usesApiKeyAuth()) {
+      return client.registerAccount({
+        login: params.login,
+        password: params.password,
+        server: params.server,
+      });
+    }
+    return client.connectEx({
       id: params.accountId,
       server: params.server,
       user: params.login,
       password: params.password,
       downloadOrderHistory: true,
     });
-    return token;
   }
 
   async verifyConnection(accountId: string): Promise<BrokerConnectionHealth> {
@@ -336,11 +378,11 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     }
     try {
       const providerAccountId = await this.resolveProviderAccountId(accountId);
-      const connected = await this.ensureApi2TradeSession(accountId, providerAccountId);
+      const connectedProviderAccountId = await this.ensureApi2TradeSession(accountId, providerAccountId);
       return {
-        ok: connected,
+        ok: Boolean(connectedProviderAccountId),
         provider: "api2trade",
-        message: connected ? "Connected to API2Trade." : "API2Trade account is reconnecting.",
+        message: connectedProviderAccountId ? "Connected to API2Trade." : "API2Trade account is reconnecting.",
       };
     } catch (error) {
       return { ok: false, provider: "api2trade", message: publicApi2TradeError(error) };

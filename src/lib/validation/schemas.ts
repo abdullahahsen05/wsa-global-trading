@@ -18,43 +18,41 @@ export const brokerConnectionSchema = z
     login: z.string().trim().max(50).default(""),
     password: z.string().max(200).default(""),
     server: z.string().trim().max(100).default(""),
-    providerAccountId: z.string().uuid("Provider account UUID is invalid").optional(),
     brokerProviderId: z.string().uuid("Broker provider is invalid").optional(),
     brokerName: z.string().trim().min(2, "Broker name is required").max(100).optional(),
     useCustomBrokerServer: z.boolean().default(false),
     connectNow: z.boolean().default(true),
   })
   .superRefine((value, context) => {
-    const usesDashboardUuid = Boolean(value.providerAccountId);
-    if (!usesDashboardUuid && !value.login) {
+    if (!value.login) {
       context.addIssue({
         code: "custom",
         path: ["login"],
         message: "Login is required",
       });
     }
-    if (!usesDashboardUuid && !value.password) {
+    if (!value.password) {
       context.addIssue({
         code: "custom",
         path: ["password"],
         message: "Password is required",
       });
     }
-    if (!usesDashboardUuid && !value.server) {
+    if (!value.server) {
       context.addIssue({
         code: "custom",
         path: ["server"],
         message: "Server is required",
       });
     }
-    if (!usesDashboardUuid && !value.useCustomBrokerServer && !value.brokerProviderId) {
+    if (!value.useCustomBrokerServer && !value.brokerProviderId) {
       context.addIssue({
         code: "custom",
         path: ["brokerProviderId"],
         message: "Broker provider is required",
       });
     }
-    if (!usesDashboardUuid && value.useCustomBrokerServer && !value.brokerName) {
+    if (value.useCustomBrokerServer && !value.brokerName) {
       context.addIssue({
         code: "custom",
         path: ["brokerName"],

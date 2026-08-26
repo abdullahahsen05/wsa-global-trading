@@ -20,23 +20,30 @@ export function getBrokerProviderLabel(provider = getBrokerProviderId()): string
 
 export function api2TradeUsesDashboardAccounts(): boolean {
   return getBrokerProviderId() === "api2trade"
+    && process.env.API2TRADE_CONNECTION_MODE?.trim().toLowerCase() === "dashboard-uuid";
+}
+
+export function api2TradeUsesApiKeyAuth(): boolean {
+  return getBrokerProviderId() === "api2trade"
     && Boolean(process.env.API2TRADE_API_KEY?.trim());
 }
 
 export function getResolvedApi2TradeBaseUrl(): string | null {
   const configured = process.env.API2TRADE_BASE_URL?.trim();
-  if (api2TradeUsesDashboardAccounts()) {
-    if (!configured || /mt5\.mt4api\.dev/i.test(configured)) {
-      return "https://api.api2trade.com";
+  if (api2TradeUsesApiKeyAuth()) {
+    if (!configured || /mt5\.mt4api\.dev|api\.api2trade\.com/i.test(configured)) {
+      return "https://api.metatraderapi.dev";
     }
+  } else if (!configured && process.env.API2TRADE_USERNAME?.trim() && process.env.API2TRADE_PASSWORD?.trim()) {
+    return "https://mt5.mt4api.dev";
   }
   return configured ?? null;
 }
 
 export function getResolvedApi2TradeEventsUrl(): string | undefined {
   const configured = process.env.API2TRADE_EVENTS_URL?.trim();
-  if (api2TradeUsesDashboardAccounts()) {
-    if (!configured || /mt5\.mt4api\.dev/i.test(configured)) {
+  if (api2TradeUsesApiKeyAuth()) {
+    if (!configured || /mt5\.mt4api\.dev|api\.api2trade\.com/i.test(configured)) {
       return undefined;
     }
   }

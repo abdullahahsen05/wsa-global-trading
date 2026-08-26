@@ -118,6 +118,12 @@ export interface Api2TradeExecutionResponse {
   success?: boolean;
 }
 
+export interface Api2TradeRegisteredAccount {
+  id?: string;
+  uuid?: string;
+  accountId?: string;
+}
+
 function shouldFallbackToSafeExecutionEndpoint(error: unknown): boolean {
   const message = publicApi2TradeError(error).toLowerCase();
   return message.includes("404")
@@ -157,17 +163,24 @@ function assertRecord(value: unknown, endpoint: string): Record<string, unknown>
 export class Api2TradeClient {
   constructor(private readonly config: Api2TradeConfig) {}
 
-  private headers(): HeadersInit {
-    if (this.config.apiKey) {
-      return { "x-api-key": this.config.apiKey };
-    }
-    if (this.config.username && this.config.password) {
-      return { Authorization: `Basic ${toBasicAuth(this.config.username, this.config.password)}` };
-    }
-    return {};
+  usesApiKeyAuth(): boolean {
+    return Boolean(this.config.apiKey);
   }
 
-  authHeaders(): HeadersInit {
+  private headers(): Record<string, string> {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+    if (this.config.apiKey) {
+      headers["x-api-key"] = this.config.apiKey;
+    }
+    if (this.config.username && this.config.password) {
+      headers.Authorization = `Basic ${toBasicAuth(this.config.username, this.config.password)}`;
+    }
+    return headers;
+  }
+
+  authHeaders(): Record<string, string> {
     return this.headers();
   }
 
@@ -190,25 +203,52 @@ export class Api2TradeClient {
     return url.toString();
   }
 
+  private accountParams(accountId: string): Record<string, string> {
+    if (this.config.apiKey) {
+      return {
+        id: accountId,
+        accountId,
+      };
+    }
+    return { id: accountId };
+  }
+
   private async request<T>(
+    method: "GET" | "POST" | "DELETE",
     endpoint: string,
     params: Record<string, string | number | boolean | null | undefined> = {},
-    options?: { expectText?: boolean },
+    options?: {
+      expectText?: boolean;
+      body?: Record<string, string | number | boolean | null | undefined>;
+    },
   ): Promise<T> {
     const url = new URL(`${this.config.baseUrl}/${endpoint.replace(/^\/+/, "")}`);
+    if (this.config.apiKey) {
+      url.searchParams.set("api_key", this.config.apiKey);
+    }
     for (const [key, value] of Object.entries(params)) {
       if (value !== undefined && value !== null && value !== "") {
         url.searchParams.set(key, String(value));
       }
     }
 
+    const headers = this.headers();
+    let body: string | undefined;
+    if (options?.body) {
+      body = JSON.stringify(Object.fromEntries(
+        Object.entries(options.body).filter(([, value]) => value !== undefined && value !== null && value !== ""),
+      ));
+      headers["Content-Type"] = "application/json";
+    }
+
     const response = await fetch(url, {
-      method: "GET",
-      headers: this.headers(),
+      method,
+      headers,
+      body,
       cache: "no-store",
     });
     const bodyText = await response.text();
-    if (!response.ok || response.status >= 201) {
+    if (!response.ok) {
       throw new Error(publicApi2TradeError(`API2Trade ${endpoint} failed (${response.status}): ${bodyText}`));
     }
     if (options?.expectText) return bodyText as T;
@@ -232,15 +272,40 @@ export class Api2TradeClient {
     primaryEndpoint: string,
     fallbackEndpoint: string,
     params: Record<string, string | number | boolean | null | undefined> = {},
+    body?: Record<string, string | number | boolean | null | undefined>,
   ): Promise<T> {
     try {
-      return await this.request<T>(primaryEndpoint, params);
+      return await this.request<T>("POST", primaryEndpoint, params, { body });
     } catch (error) {
       if (!shouldFallbackToSafeExecutionEndpoint(error)) {
         throw error;
       }
-      return this.request<T>(fallbackEndpoint, params);
+      return this.request<T>("POST", fallbackEndpoint, params, { body });
     }
+  }
+
+  async registerAccount(params: {
+    login: string;
+    password: string;
+    server: string;
+  }): Promise<string> {
+    const result = await this.request<unknown>("POST", "RegisterAccount", {}, {
+      body: {
+        login: params.login,
+        password: params.password,
+        server: params.server,
+      },
+    });
+    if (typeof result === "string") {
+      const token = result.trim();
+      if (token) return token;
+    }
+    const record = assertRecord(result, "RegisterAccount") as Api2TradeRegisteredAccount;
+    const token = String(record.id ?? record.uuid ?? record.accountId ?? "").trim();
+    if (!token) {
+      throw new Error("API2Trade RegisterAccount did not return an account token.");
+    }
+    return token;
   }
 
   async connectEx(params: {
@@ -250,7 +315,7 @@ export class Api2TradeClient {
     password: string;
     downloadOrderHistory?: boolean;
   }): Promise<string> {
-    const result = await this.request<string>("ConnectEx", {
+    const result = await this.request<string>("GET", "ConnectEx", {
       id: params.id,
       server: params.server,
       user: params.user,
@@ -266,48 +331,51 @@ export class Api2TradeClient {
   }
 
   async connectByToken(accountId: string): Promise<string> {
-    return this.request<string>("ConnectByToken", { id: accountId }, { expectText: true });
+    return this.request<string>("GET", "ConnectByToken", this.accountParams(accountId), { expectText: true });
   }
 
   async subscribeOrderUpdate(accountId: string): Promise<string> {
-    return this.request<string>("SubscribeOrderUpdate", { id: accountId }, { expectText: true });
+    return this.request<string>("GET", "SubscribeOrderUpdate", this.accountParams(accountId), { expectText: true });
   }
 
-  async checkConnect(accountId: string): Promise<string> {
-    return this.request<string>("CheckConnect", { id: accountId }, { expectText: true });
+  async checkConnect(accountId: string): Promise<string | Api2TradeConnectionStatus> {
+    return this.request<string | Api2TradeConnectionStatus>("GET", "CheckConnect", this.accountParams(accountId));
   }
 
   async connectionStatus(accountId: string): Promise<Api2TradeConnectionStatus> {
-    const result = await this.request<unknown>("ConnectionStatus", { id: accountId });
+    const result = await this.request<unknown>("GET", "ConnectionStatus", this.accountParams(accountId));
     return assertRecord(result, "ConnectionStatus") as Api2TradeConnectionStatus;
   }
 
   async disconnect(accountId: string): Promise<string> {
-    return this.request<string>("Disconnect", { id: accountId }, { expectText: true });
+    if (this.config.apiKey) {
+      return this.request<string>("DELETE", "DeleteAccount", this.accountParams(accountId), { expectText: true });
+    }
+    return this.request<string>("GET", "Disconnect", this.accountParams(accountId), { expectText: true });
   }
 
   async searchBroker(company: string): Promise<Api2TradeCompanySearchResult[]> {
-    const result = await this.request<unknown>("Search", { company });
+    const result = await this.request<unknown>("GET", "Search", { company });
     return Array.isArray(result) ? result as Api2TradeCompanySearchResult[] : [];
   }
 
   async accountSummary(accountId: string): Promise<Api2TradeAccountSummary> {
-    const result = await this.request<unknown>("AccountSummary", { id: accountId });
+    const result = await this.request<unknown>("GET", "AccountSummary", this.accountParams(accountId));
     return assertRecord(result, "AccountSummary") as Api2TradeAccountSummary;
   }
 
   async accountDetails(accountId: string): Promise<Api2TradeAccountDetails> {
-    const result = await this.request<unknown>("AccountDetails", { id: accountId });
+    const result = await this.request<unknown>("GET", "AccountDetails", this.accountParams(accountId));
     return assertRecord(result, "AccountDetails") as Api2TradeAccountDetails;
   }
 
   async openedOrders(accountId: string): Promise<Api2TradeOrder[]> {
-    const result = await this.request<unknown>("OpenedOrders", { id: accountId });
+    const result = await this.request<unknown>("GET", "OpenedOrders", this.accountParams(accountId));
     return Array.isArray(result) ? result as Api2TradeOrder[] : [];
   }
 
   async closedOrders(accountId: string): Promise<Api2TradeOrder[]> {
-    const result = await this.request<unknown>("ClosedOrders", { id: accountId });
+    const result = await this.request<unknown>("GET", "ClosedOrders", this.accountParams(accountId));
     return Array.isArray(result) ? result as Api2TradeOrder[] : [];
   }
 
@@ -316,8 +384,8 @@ export class Api2TradeClient {
     from: string;
     to: string;
   }): Promise<Api2TradeOrder[]> {
-    const result = await this.request<unknown>("OrderHistory", {
-      id: params.accountId,
+    const result = await this.request<unknown>("GET", "OrderHistory", {
+      ...this.accountParams(params.accountId),
       from: params.from,
       to: params.to,
       sort: 1,
@@ -331,8 +399,8 @@ export class Api2TradeClient {
     from: string;
     to: string;
   }): Promise<Api2TradeOrder[]> {
-    const result = await this.request<unknown>("HistoryPositionsByCloseTime", {
-      id: params.accountId,
+    const result = await this.request<unknown>("GET", "HistoryPositionsByCloseTime", {
+      ...this.accountParams(params.accountId),
       from: params.from,
       to: params.to,
     });
@@ -349,16 +417,20 @@ export class Api2TradeClient {
     comment?: string | null;
     slippage?: number | null;
   }): Promise<Api2TradeExecutionResponse> {
-    const result = await this.requestWithExecutionFallback<unknown>("OrderSend", "OrderSendSafe", {
-      id: params.accountId,
-      symbol: params.symbol,
-      operation: params.operation === "Buy" ? 0 : 1,
-      volume: params.volume,
-      stoploss: params.stopLoss,
-      takeprofit: params.takeProfit,
-      comment: params.comment,
-      slippage: params.slippage,
-    });
+    const result = await this.requestWithExecutionFallback<unknown>(
+      "OrderSend",
+      "OrderSendSafe",
+      this.accountParams(params.accountId),
+      {
+        symbol: params.symbol,
+        operation: params.operation === "Buy" ? 0 : 1,
+        volume: params.volume,
+        stopLoss: params.stopLoss,
+        takeProfit: params.takeProfit,
+        comment: params.comment,
+        slippage: params.slippage,
+      },
+    );
     return assertRecord(result, "OrderSend") as Api2TradeExecutionResponse;
   }
 
@@ -368,12 +440,17 @@ export class Api2TradeClient {
     lots?: number | null;
     comment?: string | null;
   }): Promise<Api2TradeExecutionResponse> {
-    const result = await this.requestWithExecutionFallback<unknown>("OrderClose", "OrderCloseSafe", {
-      id: params.accountId,
-      ticket: params.ticket,
-      lots: params.lots,
-      comment: params.comment,
-    });
+    const result = await this.requestWithExecutionFallback<unknown>(
+      "OrderClose",
+      "OrderCloseSafe",
+      this.accountParams(params.accountId),
+      {
+        ticket: params.ticket,
+        volume: params.lots,
+        lots: params.lots,
+        comment: params.comment,
+      },
+    );
     return assertRecord(result, "OrderClose") as Api2TradeExecutionResponse;
   }
 
@@ -383,12 +460,18 @@ export class Api2TradeClient {
     stopLoss?: number | null;
     takeProfit?: number | null;
   }): Promise<Api2TradeExecutionResponse> {
-    const result = await this.requestWithExecutionFallback<unknown>("OrderModify", "OrderModifySafe", {
-      id: params.accountId,
-      ticket: params.ticket,
-      stoploss: params.stopLoss,
-      takeprofit: params.takeProfit,
-    });
+    const result = await this.requestWithExecutionFallback<unknown>(
+      "OrderModify",
+      "OrderModifySafe",
+      this.accountParams(params.accountId),
+      {
+        ticket: params.ticket,
+        stopLoss: params.stopLoss,
+        takeProfit: params.takeProfit,
+        stoploss: params.stopLoss,
+        takeprofit: params.takeProfit,
+      },
+    );
     return assertRecord(result, "OrderModify") as Api2TradeExecutionResponse;
   }
 }

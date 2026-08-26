@@ -5,7 +5,6 @@ import {
   BrokerCredentialError,
 } from "@/lib/services/brokerCredentialService";
 import {
-  api2TradeUsesDashboardAccounts,
   brokerProviderConfigured,
   createBrokerAdapter,
   getBrokerProviderId,
@@ -57,8 +56,6 @@ export async function POST(
 
     const providerLabel = getBrokerProviderLabel();
     const providerId = getBrokerProviderId();
-    const usesDashboardUuidMode =
-      providerId === "api2trade" && api2TradeUsesDashboardAccounts();
 
     if (!brokerProviderConfigured()) {
       return jsonFail(
@@ -79,7 +76,7 @@ export async function POST(
 
     const creds = await getDecryptedCredentials(accountId);
 
-    if (!usesDashboardUuidMode && !creds) {
+    if (!creds) {
       return jsonFail(
         "BROKER_CREDENTIALS_NOT_FOUND",
         "No broker credentials stored for this account. Store credentials first.",
@@ -104,10 +101,7 @@ export async function POST(
         accountId,
         checkedAt,
         needsSync: true,
-        message:
-          usesDashboardUuidMode
-            ? `No API2Trade account UUID is linked yet. Add the MT account in API2Trade first, then enter its UUID here.`
-            : `Account has not been synced yet. Run 'Sync Account' first to establish the ${providerLabel} connection.`,
+        message: `Account has not been synced yet. Run 'Sync Account' first to establish the ${providerLabel} connection.`,
       });
     }
 
