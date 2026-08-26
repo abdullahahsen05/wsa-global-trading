@@ -208,9 +208,11 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
 
     const nextProviderAccountId = client.usesApiKeyAuth()
       ? await client.registerAccount({
-          login: credentials.login,
+          user: credentials.login,
           password: credentials.password,
           server: credentials.server,
+          type: (credentials.platform ?? "mt5").toUpperCase() === "MT4" ? "MT4" : "MT5",
+          name: credentials.server || accountId,
         })
       : await client.connectEx({
           id: providerAccountId,
@@ -353,9 +355,11 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     const client = this.assertConfigured();
     if (client.usesApiKeyAuth()) {
       return client.registerAccount({
-        login: params.login,
+        user: params.login,
         password: params.password,
         server: params.server,
+        type: params.platform.toUpperCase() === "MT4" ? "MT4" : "MT5",
+        name: params.name,
       });
     }
     return client.connectEx({

@@ -38,6 +38,14 @@ export async function searchApi2TradeServers(params: {
     };
   }
 
+  if (config.apiKey) {
+    return {
+      available: false,
+      servers: [],
+      message: "Live API2Trade server lookup is unavailable before account registration on this tenant. Select a configured server or enter the exact server manually.",
+    };
+  }
+
   try {
     const client = new Api2TradeClient(config);
     const companies = await client.searchBroker(query);
