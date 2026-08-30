@@ -36,7 +36,7 @@ function DemoNav({
               : "border-l-transparent text-foreground/78 hover:border-l-[#4a4730] hover:bg-panel-strong/55 hover:text-foreground"
           }`}
         >
-          <Icon className="h-4 w-4" />
+          {Icon ? <Icon className="h-4 w-4" /> : <span aria-hidden="true" className="w-4" />}
           {item.navLabel}
         </Link>
       );

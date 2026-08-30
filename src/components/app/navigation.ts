@@ -15,7 +15,6 @@ import {
   MessageSquare,
   Settings,
   ShieldAlert,
-  Store,
   Users,
   WalletCards,
 } from "lucide-react";
@@ -25,7 +24,7 @@ export interface NavItem {
   href: string;
   label: string;
   role: UserRole;
-  icon: ComponentType<{ className?: string }>;
+  icon?: ComponentType<{ className?: string }>;
 }
 
 export const navItems: NavItem[] = [
@@ -36,7 +35,7 @@ export const navItems: NavItem[] = [
   { href: "/risk", label: "Risk", role: "TRADER", icon: ShieldAlert },
   { href: "/ai", label: "AI Assistant", role: "TRADER", icon: MessageSquare },
   { href: "/copy-trading", label: "Copy Trading", role: "TRADER", icon: Repeat },
-  { href: "/marketplace", label: "Marketplace", role: "TRADER", icon: Store },
+  { href: "/marketplace", label: "Marketplace", role: "TRADER" },
   { href: "/my-bots", label: "My Bots", role: "TRADER", icon: Bot },
   { href: "/academy", label: "Academy", role: "TRADER", icon: BookOpenCheck },
   { href: "/calendar", label: "Calendar", role: "TRADER", icon: CalendarClock },
@@ -58,7 +57,7 @@ export const navItems: NavItem[] = [
   { href: "/admin/economic-calendar", label: "Calendar", role: "ADMIN", icon: CalendarClock },
   { href: "/admin/billing", label: "Billing", role: "ADMIN", icon: BadgeDollarSign },
   { href: "/admin/partners/withdrawals", label: "Partner Withdrawals", role: "ADMIN", icon: WalletCards },
-  { href: "/admin/marketplace", label: "Marketplace", role: "ADMIN", icon: Store },
+  { href: "/admin/marketplace", label: "Marketplace", role: "ADMIN" },
   { href: "/admin/academy", label: "Academy", role: "ADMIN", icon: BookOpenCheck },
   { href: "/admin/evaluations", label: "Evaluations", role: "ADMIN", icon: ListChecks },
   { href: "/admin/terminal", label: "Terminal", role: "ADMIN", icon: CandlestickChart },

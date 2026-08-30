@@ -7,7 +7,6 @@ import {
   ListChecks,
   MessageSquare,
   Repeat,
-  Store,
   WalletCards,
 } from "lucide-react";
 
@@ -31,7 +30,7 @@ export interface DemoSectionConfig {
   description: string;
   href: string;
   group: "workspace" | "products";
-  icon: LucideIcon;
+  icon?: LucideIcon;
 }
 
 const DEMO_SECTIONS: DemoSectionConfig[] = [
@@ -87,7 +86,6 @@ const DEMO_SECTIONS: DemoSectionConfig[] = [
     description: "Browse bot marketplace cards, product states, and disabled purchase actions.",
     href: "/demo/marketplace",
     group: "products",
-    icon: Store,
   },
   {
     slug: "my-bots",
