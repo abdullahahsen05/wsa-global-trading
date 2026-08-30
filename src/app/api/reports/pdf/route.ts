@@ -38,7 +38,8 @@ export async function POST(request: Request) {
       trades: body.trades as TradeDto[],
       currency: body.currency,
     });
-    return new Response(pdf, {
+    const pdfBytes = Uint8Array.from(pdf);
+    return new Response(pdfBytes, {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
