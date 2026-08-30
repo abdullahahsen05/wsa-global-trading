@@ -445,7 +445,7 @@ function AccountsContent() {
                     <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                       Enter the exact trading account login and main trading password. Once the
                       broker name is entered, matching servers can be loaded for you.
-                    </div>
+                    </Dialog.Description>
 
                     {errorMessage ? (
                       <div className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
