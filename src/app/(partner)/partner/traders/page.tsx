@@ -81,6 +81,19 @@ export default function PartnerTradersPage() {
         items={[
           { label: "Assigned traders", value: isLoading ? "..." : traders.length, tone: "accent" },
           { label: "Team lots", value: `${traders.reduce((sum, t) => sum + t.totalLotsTraded, 0).toFixed(2)}` },
+          {
+            label: "Wallet-ready",
+            value: formatMoney(
+              traders.reduce(
+                (sum, trader) => ({
+                  amount: sum.amount + trader.approvedWalletContribution.amount,
+                  currency: trader.approvedWalletContribution.currency,
+                }),
+                { amount: 0, currency: "USD" },
+              ),
+            ),
+            tone: "lime",
+          },
           { label: "At risk", value: traders.filter((t) => t.riskStatus === "AT_RISK").length, tone: "accent" },
           { label: "Restricted", value: traders.filter((t) => t.riskStatus === "RESTRICTED").length, tone: "danger" },
         ]}
@@ -117,18 +130,21 @@ export default function PartnerTradersPage() {
             <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-full">
               <div className="invisible-scrollbar min-h-0 flex-1 overflow-auto">
                 <DataTable
-                headers={["Trader", "Joined", "Accounts", "Total lots", "Equity", "Risk", ""]}
+                headers={["Trader", "Pipeline", "Model", "Total lots", "Wallet-ready", "Risk", ""]}
                 rows={filtered.map((t) => [
                   <div key="n" className="min-w-0">
                     <p className="truncate text-sm font-semibold text-foreground">{t.name}</p>
                     <p className="truncate text-xs text-muted">{t.email}</p>
                   </div>,
-                  <span key="j" className="text-xs text-muted">
-                    {t.registeredAt ? new Date(t.registeredAt).toLocaleDateString() : "-"}
-                  </span>,
-                  <span key="a">{t.connectedAccounts}/{t.accountCount}</span>,
+                  <div key="p" className="min-w-[120px]">
+                    <p className="text-xs font-semibold text-foreground">{labelPipeline(t.pipelineStage)}</p>
+                    <p className="truncate text-[11px] text-muted">
+                      {t.latestSyncAt ? `Live ${new Date(t.latestSyncAt).toLocaleString()}` : `${t.connectedAccounts}/${t.accountCount} connected`}
+                    </p>
+                  </div>,
+                  <span key="a">{labelModel(t.commissionModel)}</span>,
                   <span key="lots" className="font-semibold text-foreground">{t.totalLotsTraded.toFixed(2)}</span>,
-                  <span key="e">{formatMoney(t.totalEquity)}</span>,
+                  <span key="e">{formatMoney(t.approvedWalletContribution)}</span>,
                   <StatusPill key="r" tone={RISK_TONE[t.riskStatus]}>{t.riskStatus}</StatusPill>,
                   <GhostButton key="b" type="button" onClick={() => setSelectedId(t.traderId)}>
                     View
@@ -152,12 +168,40 @@ export default function PartnerTradersPage() {
                 <div className="definition-grid mt-4 grid grid-cols-2 gap-0">
                   <Stat label="Segment" value={selected.segment} />
                   <Stat label="Accounts" value={`${selected.connectedAccounts}/${selected.accountCount}`} />
+                  <Stat label="Pipeline" value={labelPipeline(selected.pipelineStage)} />
+                  <Stat label="Commission model" value={labelModel(selected.commissionModel)} />
                   <Stat label="Team equity" value={formatMoney(selected.totalEquity)} />
                   <Stat label="Floating PnL" value={formatMoney(selected.floatingPnl)} />
                   <Stat label="Total lots traded" value={selected.totalLotsTraded.toFixed(2)} />
                   <Stat label="Max drawdown" value={`${selected.maxDrawdownPercent}%`} />
                   <Stat label="Open risk events" value={selected.openRiskEvents} />
                   <Stat label="Referred / assigned" value={selected.assignedAt ? new Date(selected.assignedAt).toLocaleDateString() : "-"} />
+                  <Stat label="Last live sync" value={selected.latestSyncAt ? new Date(selected.latestSyncAt).toLocaleString() : "Not synced"} />
+                  <Stat label="Brokers" value={selected.brokerNames.length ? selected.brokerNames.join(", ") : "Not connected"} />
+                  <Stat label="Gross revenue" value={formatMoney(selected.grossRevenue)} />
+                  <Stat label="WSA commission" value={formatMoney(selected.wsaCommissionEarned)} />
+                  <Stat label="IB rebate earned" value={formatMoney(selected.ibRebateEarned)} />
+                  <Stat label="CPA earned" value={formatMoney(selected.cpaEarned)} />
+                  <Stat label="Wallet-ready" value={formatMoney(selected.approvedWalletContribution)} />
+                  <Stat label="Pending wallet" value={formatMoney(selected.pendingWalletContribution)} />
+                </div>
+
+                <div className="mt-4 rounded-[4px] border border-line bg-background px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">CPA qualification</p>
+                      <p className="mt-1 text-sm text-foreground">
+                        {selected.qualificationTargetLots != null
+                          ? `${selected.qualificationProgressLots.toFixed(2)} / ${selected.qualificationTargetLots.toFixed(2)} lots`
+                          : "No CPA target configured"}
+                      </p>
+                    </div>
+                    <StatusPill tone={selected.cpaQualified ? "lime" : "accent"}>
+                      {selected.cpaQualified
+                        ? selected.cpaTierLabel ? `Qualified · ${selected.cpaTierLabel}` : "Qualified"
+                        : selected.cpaTierLabel ? `Current ${selected.cpaTierLabel}` : "In progress"}
+                    </StatusPill>
+                  </div>
                 </div>
 
                 {selected.accounts && selected.accounts.length > 0 ? (
@@ -209,6 +253,19 @@ function Stat({ label, value }: { label: string; value: string | number }) {
       <p className="mt-1 text-sm font-semibold text-foreground">{value}</p>
     </div>
   );
+}
+
+function labelModel(model: PartnerTraderDto["commissionModel"]): string {
+  if (model === "UNCONFIGURED") return "Not set";
+  if (model === "IB") return "Rebate";
+  return model;
+}
+
+function labelPipeline(stage: PartnerTraderDto["pipelineStage"]): string {
+  if (stage === "BROKER_CONNECTED") return "Broker connected";
+  if (stage === "LIVE_SYNCED") return "Live synced";
+  if (stage === "QUALIFIED") return "Qualified";
+  return stage.charAt(0) + stage.slice(1).toLowerCase().replace("_", " ");
 }
 
 const ACCOUNT_STATUS_TONE: Record<string, "lime" | "accent" | "danger" | "muted"> = {

@@ -237,6 +237,11 @@ export default function PartnerOverviewPage() {
             tone: "lime",
           },
           {
+            label: "CPA-qualified traders",
+            value: traders.filter((trader) => trader.cpaQualified).length,
+            tone: "accent",
+          },
+          {
             label: "Open risk events",
             value: isLoading ? "..." : summary?.openRiskEvents ?? 0,
             tone: (summary?.openRiskEvents ?? 0) > 0 ? "danger" : undefined,
@@ -336,16 +341,19 @@ export default function PartnerOverviewPage() {
                 <p className="text-sm text-muted">No traders to display.</p>
               ) : (
                 <DataTable
-                  headers={["Trader", "Accounts", "Team equity", "Risk"]}
+                  headers={["Trader", "Pipeline", "Wallet-ready", "Risk"]}
                   rows={traders.slice(0, 12).map((t: PartnerTraderDto) => [
                     <div key="n" className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{t.name}</p>
                       <p className="truncate text-xs text-muted">{t.email}</p>
                     </div>,
-                    <span key="a">
-                      {t.connectedAccounts}/{t.accountCount}
-                    </span>,
-                    <span key="e">{formatMoney(t.totalEquity)}</span>,
+                    <div key="a">
+                      <p className="text-sm font-semibold text-foreground">{t.pipelineStage.replace("_", " ")}</p>
+                      <p className="text-xs text-muted">
+                        {t.latestSyncAt ? new Date(t.latestSyncAt).toLocaleDateString() : `${t.connectedAccounts}/${t.accountCount} connected`}
+                      </p>
+                    </div>,
+                    <span key="e">{formatMoney(t.approvedWalletContribution)}</span>,
                     <StatusPill key="r" tone={RISK_TONE[t.riskStatus]}>
                       {t.riskStatus}
                     </StatusPill>,

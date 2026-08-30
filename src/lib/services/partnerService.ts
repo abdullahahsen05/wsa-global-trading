@@ -5,6 +5,7 @@ import {
   PARTNER_ERROR,
   PartnerError,
   type PartnerAccountStatusSummary,
+  type PartnerCommissionModel,
   type PartnerCommissionDto,
   type PartnerCommissionSummaryDto,
   type PartnerSummaryDto,
@@ -37,6 +38,10 @@ interface AccountRow {
   status: string;
   currency: string;
   account_name: string | null;
+  broker_name: string | null;
+  broker_provider_id: string | null;
+  initial_balance: number | string | null;
+  last_synced_at: string | null;
 }
 
 interface SnapshotRow {
@@ -54,7 +59,65 @@ interface AssignedContext {
   openRiskByAccount: Map<string, number>;
   accountToTraderUserId: Map<string, string>;
   tradeLotsByTraderUserId: Map<string, number>;
+  rebatesByTraderUserId: Map<string, RebateAggregate>;
+  commissionsByTraderUserId: Map<string, CommissionAggregate>;
+  configByBrokerProviderId: Map<string, BrokerConfigRow>;
+  fallbackConfig: BrokerConfigRow | null;
   allAccountIds: string[];
+}
+
+interface RebateAggregate {
+  approved: number;
+  pending: number;
+  ib: number;
+  cpa: number;
+}
+
+interface CommissionAggregate {
+  approved: number;
+  pending: number;
+  paid: number;
+  total: number;
+  grossRevenue: number;
+}
+
+interface BrokerConfigRow {
+  broker_provider_id: string | null;
+  model_type: "IB" | "CPA" | "HYBRID";
+  cpa_qualification_lots: number | string;
+  cpa_tier_1_deposit: number | string;
+  cpa_tier_2_deposit: number | string;
+  cpa_tier_3_deposit: number | string;
+}
+
+function newestIso(values: Array<string | null | undefined>): string | null {
+  const timestamps = values.filter(Boolean) as string[];
+  if (timestamps.length === 0) return null;
+  return timestamps.reduce((latest, current) =>
+    new Date(current).getTime() > new Date(latest).getTime() ? current : latest,
+  );
+}
+
+function detectPipelineStage(params: {
+  accountCount: number;
+  connectedAccounts: number;
+  latestSyncAt: string | null;
+  totalLots: number;
+  cpaQualified: boolean;
+}): PartnerTraderDto["pipelineStage"] {
+  if (params.cpaQualified) return "QUALIFIED";
+  if (params.totalLots > 0) return "TRADING";
+  if (params.latestSyncAt) return "LIVE_SYNCED";
+  if (params.connectedAccounts > 0 || params.accountCount > 0) return "BROKER_CONNECTED";
+  return "REGISTERED";
+}
+
+function cpaTierLabel(config: BrokerConfigRow | null, deposit: number): string | null {
+  if (!config) return null;
+  if (deposit >= Number(config.cpa_tier_3_deposit)) return "Tier 3";
+  if (deposit >= Number(config.cpa_tier_2_deposit)) return "Tier 2";
+  if (deposit >= Number(config.cpa_tier_1_deposit)) return "Tier 1";
+  return null;
 }
 
 /** Load the partner's assigned traders + their accounts/snapshots/risk in bounded queries. */
@@ -81,13 +144,17 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
       openRiskByAccount: new Map(),
       accountToTraderUserId: new Map(),
       tradeLotsByTraderUserId: new Map(),
+      rebatesByTraderUserId: new Map(),
+      commissionsByTraderUserId: new Map(),
+      configByBrokerProviderId: new Map(),
+      fallbackConfig: null,
       allAccountIds: [],
     };
   }
 
   const { data: accountRows, error: aErr } = await supabase
     .from("trading_accounts")
-    .select("id, user_id, status, currency, account_name")
+    .select("id, user_id, status, currency, account_name, broker_name, broker_provider_id, initial_balance, last_synced_at")
     .in("user_id", userIds)
     .limit(2000);
   if (aErr) throw new Error(`Failed to fetch accounts: ${aErr.message}`);
@@ -99,40 +166,111 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
   const snapshotByAccount = new Map<string, SnapshotRow>();
   const openRiskByAccount = new Map<string, number>();
   const tradeLotsByTraderUserId = new Map<string, number>();
+  const rebatesByTraderUserId = new Map<string, RebateAggregate>();
+  const commissionsByTraderUserId = new Map<string, CommissionAggregate>();
+  const configByBrokerProviderId = new Map<string, BrokerConfigRow>();
+  let fallbackConfig: BrokerConfigRow | null = null;
 
-  if (allAccountIds.length > 0) {
-    const [{ data: snaps }, { data: riskRows }, { data: tradeRows }] = await Promise.all([
+  const [{ data: snaps }, { data: riskRows }, { data: tradeRows }, { data: rebateRows }, { data: commissionRows }, { data: configRows }] = await Promise.all([
+      allAccountIds.length
+        ? supabase
+            .from("latest_account_snapshots")
+            .select("trading_account_id, balance, equity, floating_pnl, drawdown_percent")
+            .in("trading_account_id", allAccountIds)
+        : Promise.resolve({ data: [] }),
+      allAccountIds.length
+        ? supabase
+            .from("risk_events")
+            .select("trading_account_id")
+            .is("acknowledged_at", null)
+            .in("trading_account_id", allAccountIds)
+            .limit(5000)
+        : Promise.resolve({ data: [] }),
+      allAccountIds.length
+        ? supabase
+            .from("trades")
+            .select("trading_account_id, volume, profit")
+            .in("trading_account_id", allAccountIds)
+            .limit(20000)
+        : Promise.resolve({ data: [] }),
       supabase
-        .from("latest_account_snapshots")
-        .select("trading_account_id, balance, equity, floating_pnl, drawdown_percent")
-        .in("trading_account_id", allAccountIds),
+        .from("partner_rebates")
+        .select("trader_id, amount, status, calculation_type")
+        .eq("partner_id", partnerUserId)
+        .in("trader_id", userIds)
+        .limit(10000),
       supabase
-        .from("risk_events")
-        .select("trading_account_id")
-        .is("acknowledged_at", null)
-        .in("trading_account_id", allAccountIds)
-        .limit(5000),
+        .from("partner_commissions")
+        .select("trader_id, gross_amount, commission_amount, status")
+        .eq("partner_id", partnerUserId)
+        .in("trader_id", userIds)
+        .limit(10000),
       supabase
-        .from("trades")
-        .select("trading_account_id, volume")
-        .in("trading_account_id", allAccountIds)
-        .limit(20000),
+        .from("partner_broker_configurations")
+        .select("broker_provider_id, model_type, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_2_deposit, cpa_tier_3_deposit")
+        .eq("partner_id", partnerUserId)
+        .eq("is_active", true)
+        .limit(200),
     ]);
-    for (const s of (snaps ?? []) as SnapshotRow[]) snapshotByAccount.set(s.trading_account_id, s);
-    for (const r of riskRows ?? []) {
-      openRiskByAccount.set(r.trading_account_id, (openRiskByAccount.get(r.trading_account_id) ?? 0) + 1);
-    }
-    for (const trade of tradeRows ?? []) {
-      const traderUserId = accountToTraderUserId.get(trade.trading_account_id as string);
-      if (!traderUserId) continue;
-      tradeLotsByTraderUserId.set(
-        traderUserId,
-        (tradeLotsByTraderUserId.get(traderUserId) ?? 0) + Math.abs(Number(trade.volume ?? 0)),
-      );
-    }
+  for (const s of (snaps ?? []) as SnapshotRow[]) snapshotByAccount.set(s.trading_account_id, s);
+  for (const r of riskRows ?? []) {
+    openRiskByAccount.set(r.trading_account_id, (openRiskByAccount.get(r.trading_account_id) ?? 0) + 1);
+  }
+  for (const trade of tradeRows ?? []) {
+    const traderUserId = accountToTraderUserId.get(trade.trading_account_id as string);
+    if (!traderUserId) continue;
+    tradeLotsByTraderUserId.set(
+      traderUserId,
+      (tradeLotsByTraderUserId.get(traderUserId) ?? 0) + Math.abs(Number(trade.volume ?? 0)),
+    );
+  }
+  for (const rebate of rebateRows ?? []) {
+    const traderId = rebate.trader_id as string | null;
+    if (!traderId) continue;
+    const current = rebatesByTraderUserId.get(traderId) ?? { approved: 0, pending: 0, ib: 0, cpa: 0 };
+    const amount = Number(rebate.amount ?? 0);
+    if (rebate.status === "APPROVED" || rebate.status === "PAID") current.approved += amount;
+    else if (rebate.status === "PENDING") current.pending += amount;
+    if (rebate.calculation_type === "IB_VOLUME") current.ib += amount;
+    if (rebate.calculation_type === "CPA_TIER") current.cpa += amount;
+    rebatesByTraderUserId.set(traderId, current);
+  }
+  for (const commission of commissionRows ?? []) {
+    const traderId = commission.trader_id as string | null;
+    if (!traderId) continue;
+    const current = commissionsByTraderUserId.get(traderId) ?? {
+      approved: 0,
+      pending: 0,
+      paid: 0,
+      total: 0,
+      grossRevenue: 0,
+    };
+    const amount = Number(commission.commission_amount ?? 0);
+    current.total += amount;
+    current.grossRevenue += Number(commission.gross_amount ?? 0);
+    if (commission.status === "APPROVED") current.approved += amount;
+    else if (commission.status === "PENDING") current.pending += amount;
+    else if (commission.status === "PAID") current.paid += amount;
+    commissionsByTraderUserId.set(traderId, current);
+  }
+  for (const config of (configRows ?? []) as BrokerConfigRow[]) {
+    if (config.broker_provider_id) configByBrokerProviderId.set(config.broker_provider_id, config);
+    else fallbackConfig = config;
   }
 
-  return { profiles, accounts, snapshotByAccount, openRiskByAccount, accountToTraderUserId, tradeLotsByTraderUserId, allAccountIds };
+  return {
+    profiles,
+    accounts,
+    snapshotByAccount,
+    openRiskByAccount,
+    accountToTraderUserId,
+    tradeLotsByTraderUserId,
+    rebatesByTraderUserId,
+    commissionsByTraderUserId,
+    configByBrokerProviderId,
+    fallbackConfig,
+    allAccountIds,
+  };
 }
 
 function buildTraderDto(
@@ -146,11 +284,13 @@ function buildTraderDto(
   let connectedAccounts = 0;
   let openRiskEvents = 0;
   let restricted = false;
+  let maxDeposit = 0;
 
   for (const acc of traderAccounts) {
     if (acc.status === "CONNECTED") connectedAccounts += 1;
     if (acc.status === "RESTRICTED") restricted = true;
     openRiskEvents += ctx.openRiskByAccount.get(acc.id) ?? 0;
+    maxDeposit = Math.max(maxDeposit, Number(acc.initial_balance ?? 0));
     const snap = ctx.snapshotByAccount.get(acc.id);
     if (snap) {
       totalEquity += Number(snap.equity);
@@ -164,6 +304,33 @@ function buildTraderDto(
     : openRiskEvents > 0
       ? "AT_RISK"
       : "OK";
+
+  const brokerNames = [...new Set(traderAccounts.map((acc) => acc.broker_name).filter(Boolean) as string[])];
+  const latestSyncAt = newestIso(traderAccounts.map((acc) => acc.last_synced_at));
+  const totalLotsTraded = Number((ctx.tradeLotsByTraderUserId.get(profile.user_id) ?? 0).toFixed(2));
+  const rebates = ctx.rebatesByTraderUserId.get(profile.user_id) ?? { approved: 0, pending: 0, ib: 0, cpa: 0 };
+  const commissions = ctx.commissionsByTraderUserId.get(profile.user_id) ?? {
+    approved: 0,
+    pending: 0,
+    paid: 0,
+    total: 0,
+    grossRevenue: 0,
+  };
+  const config =
+    traderAccounts
+      .map((acc) => acc.broker_provider_id ? ctx.configByBrokerProviderId.get(acc.broker_provider_id) ?? null : null)
+      .find(Boolean)
+    ?? ctx.fallbackConfig;
+  const qualificationTargetLots = config ? Number(config.cpa_qualification_lots) : null;
+  const cpaQualified = qualificationTargetLots != null && totalLotsTraded >= qualificationTargetLots;
+  const stage = detectPipelineStage({
+    accountCount: traderAccounts.length,
+    connectedAccounts,
+    latestSyncAt,
+    totalLots: totalLotsTraded,
+    cpaQualified,
+  });
+  const commissionModel: PartnerCommissionModel = config?.model_type ?? "UNCONFIGURED";
 
   const accountStatuses: PartnerAccountStatusSummary[] = traderAccounts.map((acc) => {
     const snap = ctx.snapshotByAccount.get(acc.id);
@@ -192,7 +359,27 @@ function buildTraderDto(
     riskStatus,
     assignedAt: profile.partner_assigned_at,
     registeredAt: profile.profiles?.created_at ?? null,
-    totalLotsTraded: Number((ctx.tradeLotsByTraderUserId.get(profile.user_id) ?? 0).toFixed(2)),
+    totalLotsTraded,
+    commissionModel,
+    pipelineStage: stage,
+    brokerNames,
+    latestSyncAt,
+    grossRevenue: { amount: Number(commissions.grossRevenue.toFixed(2)), currency: "USD" },
+    approvedWalletContribution: {
+      amount: Number((rebates.approved + commissions.approved).toFixed(2)),
+      currency: "USD",
+    },
+    pendingWalletContribution: {
+      amount: Number((rebates.pending + commissions.pending).toFixed(2)),
+      currency: "USD",
+    },
+    ibRebateEarned: { amount: Number(rebates.ib.toFixed(2)), currency: "USD" },
+    cpaEarned: { amount: Number(rebates.cpa.toFixed(2)), currency: "USD" },
+    wsaCommissionEarned: { amount: Number(commissions.total.toFixed(2)), currency: "USD" },
+    cpaQualified,
+    cpaTierLabel: cpaTierLabel(config, maxDeposit),
+    qualificationProgressLots: totalLotsTraded,
+    qualificationTargetLots,
     accounts: accountStatuses,
   };
 }

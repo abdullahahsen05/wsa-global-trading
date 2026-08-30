@@ -31,6 +31,13 @@ export class PartnerError extends Error {
 }
 
 export type TraderRiskStatus = "OK" | "AT_RISK" | "RESTRICTED";
+export type PartnerCommissionModel = "IB" | "CPA" | "HYBRID" | "UNCONFIGURED";
+export type PartnerTraderPipelineStage =
+  | "REGISTERED"
+  | "BROKER_CONNECTED"
+  | "LIVE_SYNCED"
+  | "TRADING"
+  | "QUALIFIED";
 
 export interface PartnerAccountStatusSummary {
   accountId: string;
@@ -57,6 +64,20 @@ export interface PartnerTraderDto {
   assignedAt: string | null;
   registeredAt: string | null;
   totalLotsTraded: number;
+  commissionModel: PartnerCommissionModel;
+  pipelineStage: PartnerTraderPipelineStage;
+  brokerNames: string[];
+  latestSyncAt: string | null;
+  grossRevenue: MoneyValue;
+  approvedWalletContribution: MoneyValue;
+  pendingWalletContribution: MoneyValue;
+  ibRebateEarned: MoneyValue;
+  cpaEarned: MoneyValue;
+  wsaCommissionEarned: MoneyValue;
+  cpaQualified: boolean;
+  cpaTierLabel: string | null;
+  qualificationProgressLots: number;
+  qualificationTargetLots: number | null;
   accounts?: PartnerAccountStatusSummary[];
 }
 
