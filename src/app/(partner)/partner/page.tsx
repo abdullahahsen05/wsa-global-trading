@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
 import {
   DataTable,
   EmptyState,
@@ -43,39 +44,48 @@ async function getJson<T>(url: string): Promise<T> {
 
 export default function PartnerOverviewPage() {
   const [siteUrl] = useState(() => typeof window === "undefined" ? "" : window.location.origin);
-  const { data: sessionUser } = useQuery<SessionUser>({
+  const sessionQuery = useQuery<SessionUser>({
     queryKey: ["session"],
     queryFn: () => getJson("/api/auth/session"),
   });
-  const { data: profile, isLoading: profileLoading, isError: profileError } = useQuery<PartnerProfileStatusDto>({
+  const profileQuery = useQuery<PartnerProfileStatusDto>({
     queryKey: ["partner", "profile"],
     queryFn: () => getJson("/api/partner/profile"),
     retry: false,
   });
+  const sessionUser: SessionUser | undefined = sessionQuery.data;
+  const profile: PartnerProfileStatusDto | undefined = profileQuery.data;
+  const profileLoading = profileQuery.isLoading;
+  const profileError = profileQuery.isError;
 
   const isPending = !profileLoading && profile?.status === "PENDING_REVIEW";
   const isActive = !profileLoading && profile?.status === "ACTIVE";
 
-  const { data: summary, isLoading: summaryLoading } = useQuery<PartnerSummaryDto>({
+  const summaryQuery = useQuery<PartnerSummaryDto>({
     queryKey: ["partner", "summary"],
     queryFn: () => getJson("/api/partner/summary"),
     enabled: isActive,
   });
-  const { data: traders = [] } = useQuery<PartnerTraderDto[]>({
+  const tradersQuery = useQuery<PartnerTraderDto[]>({
     queryKey: ["partner", "traders", "all"],
     queryFn: () => getJson("/api/partner/traders"),
     enabled: isActive,
   });
-  const { data: riskEvents = [] } = useQuery<PartnerRiskEventDto[]>({
+  const riskEventsQuery = useQuery<PartnerRiskEventDto[]>({
     queryKey: ["partner", "risk-events"],
     queryFn: () => getJson("/api/partner/risk-events"),
     enabled: isActive,
   });
-  const { data: activities = [] } = useQuery<PartnerActivityDto[]>({
+  const activitiesQuery = useQuery<PartnerActivityDto[]>({
     queryKey: ["partner", "activities"],
     queryFn: () => getJson("/api/partner/activities"),
     enabled: isActive,
   });
+  const summary: PartnerSummaryDto | undefined = summaryQuery.data;
+  const summaryLoading = summaryQuery.isLoading;
+  const traders: PartnerTraderDto[] = tradersQuery.data ?? [];
+  const riskEvents: PartnerRiskEventDto[] = riskEventsQuery.data ?? [];
+  const activities: PartnerActivityDto[] = activitiesQuery.data ?? [];
 
   const isLoading = profileLoading || (isActive && summaryLoading);
   const hasTraders = traders.length > 0;
@@ -200,7 +210,7 @@ export default function PartnerOverviewPage() {
     <WorkspacePage
       eyebrow="Partner"
       title={`Welcome, ${sessionUser?.name?.trim() || "Partner"}`}
-      description="Monitor your assigned traders, activity, risk, and Rebate / CPA / Hybrid earnings."
+      description="Monitor your assigned traders, activity, risk, rebates, CPA, hybrid earnings, commission structure, and payout readiness."
     >
       <InlineStatusStrip
         items={[
@@ -259,6 +269,24 @@ export default function PartnerOverviewPage() {
         </div>
       ) : null}
 
+      <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          { href: "/partner/rebate", label: "Rebate", helper: "Lot-based rebate earnings" },
+          { href: "/partner/cpa", label: "CPA", helper: "Qualified acquisition rewards" },
+          { href: "/partner/hybrid", label: "Hybrid", helper: "Combined rebate and CPA view" },
+          { href: "/partner/wsa-payout", label: "WSA Payout", helper: "Wallet, withdrawable, and request history" },
+        ].map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="rounded-[4px] border border-line bg-panel px-4 py-4 transition-colors hover:border-accent/40"
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">{item.label}</p>
+            <p className="mt-2 text-sm text-muted">{item.helper}</p>
+          </Link>
+        ))}
+      </div>
+
       {(summary?.referralCode ?? profile?.referralCode) ? (
         <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[4px] border border-line bg-panel px-4 py-3">
           <div className="min-w-0 flex-1">
@@ -309,7 +337,7 @@ export default function PartnerOverviewPage() {
               ) : (
                 <DataTable
                   headers={["Trader", "Accounts", "Team equity", "Risk"]}
-                  rows={traders.slice(0, 12).map((t) => [
+                  rows={traders.slice(0, 12).map((t: PartnerTraderDto) => [
                     <div key="n" className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{t.name}</p>
                       <p className="truncate text-xs text-muted">{t.email}</p>
@@ -332,7 +360,7 @@ export default function PartnerOverviewPage() {
                 <p className="text-sm text-muted">No activity recorded yet.</p>
               ) : (
                 <div className="space-y-2">
-                  {activities.slice(0, 10).map((a) => (
+                  {activities.slice(0, 10).map((a: PartnerActivityDto) => (
                     <div
                       key={a.id}
                       className="flex items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-3 py-2"
@@ -357,7 +385,7 @@ export default function PartnerOverviewPage() {
               <p className="text-sm text-muted">No open risk events for your traders.</p>
             ) : (
               <div className="space-y-2">
-                {riskEvents.slice(0, 12).map((e) => (
+                {riskEvents.slice(0, 12).map((e: PartnerRiskEventDto) => (
                   <div key={e.id} className="rounded-[4px] border border-line bg-background px-3 py-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="truncate text-sm font-semibold text-foreground">{e.traderName}</p>

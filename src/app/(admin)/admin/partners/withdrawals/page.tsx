@@ -89,6 +89,7 @@ export default function AdminPartnerWithdrawalsPage() {
   const [cpaTier3Deposit, setCpaTier3Deposit] = useState("1000");
   const [cpaTier3Payout, setCpaTier3Payout] = useState("750");
   const [configActive, setConfigActive] = useState(true);
+  const [ledgerView, setLedgerView] = useState<"ALL" | "REBATE" | "CPA" | "HYBRID" | "PAYOUT">("ALL");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -164,6 +165,24 @@ export default function AdminPartnerWithdrawalsPage() {
     () => brokerConfig.data?.configurations.find((config) => (config.brokerProviderId ?? "") === configBrokerId) ?? null,
     [brokerConfig.data?.configurations, configBrokerId],
   );
+  const hybridConfigCount = useMemo(
+    () => (brokerConfig.data?.configurations ?? []).filter((config) => config.modelType === "HYBRID" && config.isActive).length,
+    [brokerConfig.data?.configurations],
+  );
+  const filteredLedgerItems = useMemo(() => {
+    const items = selectedLedger?.items ?? [];
+    if (ledgerView === "ALL") return items;
+    if (ledgerView === "PAYOUT") {
+      return items.filter((item) => item.status === "APPROVED" || item.status === "PAID");
+    }
+    if (ledgerView === "REBATE") {
+      return items.filter((item) => item.type === "REBATE" && item.sourceType !== "CPA_TIER");
+    }
+    if (ledgerView === "CPA") {
+      return items.filter((item) => item.type === "COMMISSION" || item.sourceType === "CPA_TIER");
+    }
+    return items.filter((item) => item.type === "REBATE" && item.sourceType === "CPA_TIER");
+  }, [selectedLedger?.items, ledgerView]);
 
   useEffect(() => {
     if (!brokerConfig.data || configBrokerId) return;
@@ -294,8 +313,8 @@ export default function AdminPartnerWithdrawalsPage() {
   return (
     <WorkspacePage
       eyebrow="Admin · Partners"
-      title="Partner financial control"
-      description="Review commission and rebate ledgers, locked items, and withdrawal settlement from one server-calculated view."
+      title="Partner finance control"
+      description="Review traders, rebates, CPA, hybrid setup, WSA commission logic, and payout settlement from one server-calculated control room."
     >
       <InlineStatusStrip
         items={[
@@ -487,6 +506,30 @@ export default function AdminPartnerWithdrawalsPage() {
                 { label: "Locked", value: formatMoney({ amount: selectedLedger.lockedWithdrawalAmount, currency: selectedLedger.currency }), tone: "accent" },
               ]} />
             </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Rebate</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney({ amount: selectedLedger.approvedUnpaidRebates, currency: selectedLedger.currency })}</p>
+              </div>
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">CPA</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney({ amount: selectedLedger.approvedUnpaidCommissions, currency: selectedLedger.currency })}</p>
+              </div>
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Hybrid</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{hybridConfigCount} active broker setup(s)</p>
+              </div>
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">WSA commission %</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {selectedConfig ? `${selectedConfig.rebateRatePerLot.toFixed(2)} / lot` : "By broker model"}
+                </p>
+              </div>
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">WSA payout</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{selectedLedger.activeWithdrawalCount} active request(s)</p>
+              </div>
+            </div>
             <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
               <div className="min-w-0 xl:col-span-2">
                 <form onSubmit={saveConfiguration} className="mb-5 rounded-[4px] border border-line bg-background p-4">
@@ -495,7 +538,7 @@ export default function AdminPartnerWithdrawalsPage() {
                       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Broker partnership model</p>
                       <h3 className="mt-2 font-semibold text-foreground">Partner rate configuration</h3>
                       <p className="mt-1 text-xs leading-5 text-muted">
-                        Select a broker and choose whether this partner earns IB volume rebates, CPA rewards, or both.
+                        Configure whether this partner runs on rebate, CPA, or hybrid logic, and what WSA uses when calculating earnings.
                       </p>
                     </div>
                     <StatusPill tone={configActive ? "lime" : "muted"}>{configActive ? "ACTIVE" : "DISABLED"}</StatusPill>
@@ -553,20 +596,33 @@ export default function AdminPartnerWithdrawalsPage() {
                 ) : selectedLedger.items.length === 0 ? (
                   <EmptyState title="No ledger entries" description="Commissions and rebates for this partner will appear here." />
                 ) : (
-                  <DataTable
-                    initialPageSize={10}
-                    pageSizeOptions={[10, 20, 50]}
-                    maxBodyHeight="460px"
-                    headers={["Date", "Type", "Source", "Amount", "Status", "Order reference"]}
-                    rows={selectedLedger.items.map((item) => [
-                      <span key="date" className="text-xs text-muted">{new Date(item.createdAt).toLocaleDateString()}</span>,
-                      <span key="type">{item.type}</span>,
-                      <span key="source" className="text-xs text-muted">{item.sourceType}</span>,
-                      <span key="amount">{formatMoney({ amount: item.amount, currency: item.currency })}</span>,
-                      <StatusPill key="status" tone={TONES[item.status] ?? "muted"}>{item.status}</StatusPill>,
-                      <span key="reference" className="font-mono text-xs text-muted">{item.paymentOrderId ? `…${item.paymentOrderId.slice(-8)}` : "—"}</span>,
-                    ])}
-                  />
+                  <>
+                    <div className="mb-4 rounded-[4px] border border-line bg-panel p-4">
+                      <FilterChipRow
+                        chips={[
+                          { label: `All (${selectedLedger.items.length})`, active: ledgerView === "ALL", onClick: () => setLedgerView("ALL") },
+                          { label: `Rebate (${selectedLedger.items.filter((item) => item.type === "REBATE" && item.sourceType !== "CPA_TIER").length})`, active: ledgerView === "REBATE", onClick: () => setLedgerView("REBATE") },
+                          { label: `CPA (${selectedLedger.items.filter((item) => item.type === "COMMISSION" || item.sourceType === "CPA_TIER").length})`, active: ledgerView === "CPA", onClick: () => setLedgerView("CPA") },
+                          { label: `Hybrid (${selectedLedger.items.filter((item) => item.type === "REBATE" && item.sourceType === "CPA_TIER").length})`, active: ledgerView === "HYBRID", onClick: () => setLedgerView("HYBRID") },
+                          { label: `WSA Payout (${selectedLedger.items.filter((item) => item.status === "APPROVED" || item.status === "PAID").length})`, active: ledgerView === "PAYOUT", onClick: () => setLedgerView("PAYOUT") },
+                        ]}
+                      />
+                    </div>
+                    <DataTable
+                      initialPageSize={10}
+                      pageSizeOptions={[10, 20, 50]}
+                      maxBodyHeight="460px"
+                      headers={["Date", "Type", "Source", "Amount", "Status", "Order reference"]}
+                      rows={filteredLedgerItems.map((item) => [
+                        <span key="date" className="text-xs text-muted">{new Date(item.createdAt).toLocaleDateString()}</span>,
+                        <span key="type">{item.type}</span>,
+                        <span key="source" className="text-xs text-muted">{item.sourceType}</span>,
+                        <span key="amount">{formatMoney({ amount: item.amount, currency: item.currency })}</span>,
+                        <StatusPill key="status" tone={TONES[item.status] ?? "muted"}>{item.status}</StatusPill>,
+                        <span key="reference" className="font-mono text-xs text-muted">{item.paymentOrderId ? `…${item.paymentOrderId.slice(-8)}` : "—"}</span>,
+                      ])}
+                    />
+                  </>
                 )}
               </div>
               <form onSubmit={createRebate} className="flex w-full flex-col gap-4 rounded-[4px] border border-line bg-background p-4 xl:sticky xl:top-24">
