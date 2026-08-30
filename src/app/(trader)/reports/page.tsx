@@ -25,7 +25,7 @@ type ReportRow = {
   status: "Ready";
   tradeCount: number;
   pnl: number;
-  format: "CSV";
+  format: "CSV / PDF";
   trades: TradeDto[];
 };
 
@@ -99,7 +99,7 @@ function ReportsContent() {
         status: "Ready",
         tradeCount: monthTrades.length,
         pnl: monthTrades.reduce((sum, trade) => sum + trade.profit.amount, 0),
-        format: "CSV",
+        format: "CSV / PDF",
         trades: monthTrades,
       });
     }
@@ -111,7 +111,7 @@ function ReportsContent() {
         status: "Ready",
         tradeCount: trades.length,
         pnl: closed.reduce((sum, trade) => sum + trade.profit.amount, 0),
-        format: "CSV",
+        format: "CSV / PDF",
         trades,
       });
     }
@@ -123,7 +123,7 @@ function ReportsContent() {
         status: "Ready",
         tradeCount: closed.length,
         pnl: closed.reduce((sum, trade) => sum + trade.profit.amount, 0),
-        format: "CSV",
+        format: "CSV / PDF",
         trades: closed,
       });
     }
@@ -183,6 +183,26 @@ function ReportsContent() {
     URL.revokeObjectURL(url);
   }
 
+  async function exportPdf(report: ReportRow) {
+    const { generateTradeReportPdf } = await import("@/lib/pdf/tradeReportPdf");
+    const currency = report.trades[0]?.profit.currency ?? "USD";
+    const pdf = await generateTradeReportPdf({
+      reportName: report.name,
+      period: report.period,
+      trades: report.trades,
+      currency,
+    });
+    const blob = new Blob([pdf], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${report.name.toLowerCase().replace(/\s+/g, "-")}-${report.period
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")}.pdf`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <WorkspacePage
       eyebrow="Reports"
@@ -193,7 +213,7 @@ function ReportsContent() {
         items={[
           { label: "Ready reports", value: reports.length, helper: "Derived from live trades", tone: "lime" },
           { label: "Closed trades", value: closedCount, helper: "Export basis" },
-          { label: "Export format", value: "CSV", helper: "No simulated PDF queue" },
+          { label: "Export format", value: "CSV / PDF", helper: "Branded direct download" },
         ]}
       />
 
@@ -205,7 +225,7 @@ function ReportsContent() {
           />
         ) : (
           <DataTable
-            headers={["Report", "Period", "Status", "Trades", "Net P&L", "Format", ""]}
+            headers={["Report", "Period", "Status", "Trades", "Net P&L", "Format", "Export"]}
             paginated
             initialPageSize={10}
             rows={reports.map((report) => [
@@ -226,15 +246,24 @@ function ReportsContent() {
                 {formatMoney({ amount: report.pnl, currency: "USD" })}
               </span>,
               report.format,
-              <button
-                key="export"
-                type="button"
-                onClick={() => exportCsv(report)}
-                className="flex items-center gap-1 text-xs font-semibold text-accent hover:text-accent/80"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Export CSV
-              </button>,
+              <div key="export" className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => exportCsv(report)}
+                  className="flex items-center gap-1 text-xs font-semibold text-accent hover:text-accent/80"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void exportPdf(report)}
+                  className="flex items-center gap-1 text-xs font-semibold text-accent-2 hover:text-accent-2/80"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  PDF
+                </button>
+              </div>,
             ])}
           />
         )}
@@ -284,7 +313,7 @@ function ReportsContent() {
         <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
           <h2 className="text-lg font-semibold text-foreground">Export readiness</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
-            Automated report scheduling stays hidden until a real backend delivery workflow exists.
+            Reports can be exported directly as CSV or branded PDF from the live trade ledger.
           </p>
           <div className="invisible-scrollbar mt-4 min-h-0 flex-1 space-y-1 overflow-y-auto">
             {reports.length === 0 ? (

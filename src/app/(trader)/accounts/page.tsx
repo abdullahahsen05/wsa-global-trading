@@ -3,7 +3,7 @@
 import Link from "next/link";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, X } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DataTable,
@@ -27,20 +27,13 @@ import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/ho
 type ConnectStep = "setup" | "credentials";
 type BrokerPlatform = "MT4" | "MT5";
 
-type BrokerProviderOption = {
-  id: string;
-  displayName: string;
-  platformsSupported: BrokerPlatform[];
-};
-
 type BrokerServerOption = {
   id: string;
   serverName: string;
   brokerName?: string;
   source: "MANUAL" | "METAAPI" | "API2TRADE";
 };
-
-const CUSTOM_BROKER_OPTION = "__custom__";
+const CUSTOM_SERVER_OPTION = "__custom__";
 
 function statusTone(status: TraderAccountSummary["status"]) {
   if (status === "CONNECTED") return "lime" as const;
@@ -111,9 +104,6 @@ function AccountsContent() {
   // Holds the accountId created in step 1, used in step 2
   const [pendingAccountId, setPendingAccountId] = useState<string | null>(null);
   const [pendingBrokerName, setPendingBrokerName] = useState("");
-  const [pendingBrokerProviderId, setPendingBrokerProviderId] = useState<string | null>(null);
-  const [selectedBrokerOption, setSelectedBrokerOption] = useState("");
-  const [manualBrokerName, setManualBrokerName] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState<BrokerPlatform>("MT5");
   const [selectedServerOption, setSelectedServerOption] = useState("");
   const [serverSearchDraft, setServerSearchDraft] = useState("");
@@ -130,33 +120,34 @@ function AccountsContent() {
     },
   });
 
-  const brokerProvidersQuery = useQuery<{ providers: BrokerProviderOption[] }>({
-    queryKey: ["broker-providers", "account-connect", selectedPlatform],
-    enabled: connectOpen,
-    queryFn: async () => {
-      const res = await fetch(`/api/brokers?platform=${selectedPlatform}`);
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load broker providers");
-      return json.data;
-    },
-  });
-
   const brokerServersQuery = useQuery<{
     servers: BrokerServerOption[];
     discoveryAvailable: boolean;
     discoveryMessage: string | null;
   }>({
-    queryKey: ["broker-servers", pendingBrokerProviderId, selectedPlatform, serverSearchQuery],
-    enabled: step === "credentials" && Boolean(pendingBrokerProviderId),
+    queryKey: ["broker-server-search", pendingAccountId, selectedPlatform, serverSearchQuery],
+    enabled: step === "credentials" && serverSearchQuery.trim().length >= 2,
     queryFn: async () => {
       const res = await fetch(
-        `/api/brokers/${pendingBrokerProviderId}/servers?platform=${selectedPlatform}&query=${encodeURIComponent(serverSearchQuery || pendingBrokerName)}`,
+        `/api/broker-servers/search?platform=${selectedPlatform}&accountId=${encodeURIComponent(
+          pendingAccountId ?? "",
+        )}&query=${encodeURIComponent(serverSearchQuery || pendingBrokerName)}`,
       );
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load broker servers");
       return json.data;
     },
   });
+
+  useEffect(() => {
+    if (step !== "credentials") return undefined;
+    const timer = window.setTimeout(() => {
+      const nextQuery = serverSearchDraft.trim();
+      setServerSearchQuery(nextQuery);
+      if (!nextQuery) setSelectedServerOption("");
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [serverSearchDraft, step]);
 
   const filteredAccounts = tradingAccounts.filter((account) => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -181,9 +172,6 @@ function AccountsContent() {
     setStep("setup");
     setPendingAccountId(null);
     setPendingBrokerName("");
-    setPendingBrokerProviderId(null);
-    setSelectedBrokerOption("");
-    setManualBrokerName("");
     setSelectedPlatform("MT5");
     setSelectedServerOption("");
     setServerSearchDraft("");
@@ -201,13 +189,7 @@ function AccountsContent() {
     const form = event.currentTarget;
     const formData = new FormData(form);
     const accountName = (formData.get("accountLabel") as string)?.trim();
-    const brokerProviderId = formData.get("brokerProviderId") as string;
-    const provider = brokerProvidersQuery.data?.providers.find(
-      (item) => item.id === brokerProviderId,
-    );
-    const brokerName = brokerProviderId === CUSTOM_BROKER_OPTION
-      ? manualBrokerName.trim()
-      : provider?.displayName ?? "";
+    const brokerName = (formData.get("brokerName") as string)?.trim();
 
     if (!accountName || !brokerName) {
       setErrorMessage("Account label and broker are required.");
@@ -228,7 +210,6 @@ function AccountsContent() {
       if (json.ok) {
         setPendingAccountId(pendingAccountId ?? json.data.accountId);
         setPendingBrokerName(brokerName);
-        setPendingBrokerProviderId(provider?.id ?? null);
         setSelectedServerOption("");
         setServerSearchDraft(brokerName);
         setServerSearchQuery(brokerName);
@@ -257,21 +238,13 @@ function AccountsContent() {
     const password = formData.get("password") as string;
     const serverSelection = (formData.get("serverSelection") as string)?.trim();
     const customServer = (formData.get("customServer") as string)?.trim();
-    const selectedServer = brokerServersQuery.data?.servers.find(
-      (option) => option.serverName === serverSelection,
-    );
-    const usesCustomServer =
-      !pendingBrokerProviderId ||
-      serverSelection === CUSTOM_BROKER_OPTION ||
-      selectedServer?.source === "METAAPI" ||
-      selectedServer?.source === "API2TRADE";
-    const server = !pendingBrokerProviderId || serverSelection === CUSTOM_BROKER_OPTION
+    const server = serverSelection === CUSTOM_SERVER_OPTION
       ? customServer
       : serverSelection;
     const platform = selectedPlatform;
 
     if (!login || !password || !server || !platform) {
-      setErrorMessage("MT5 login, trading password, server, and platform are all required.");
+      setErrorMessage("Account login, trading password, server, and platform are all required.");
       setIsSubmitting(false);
       return;
     }
@@ -287,9 +260,8 @@ function AccountsContent() {
             password,
             server,
             platform,
-            brokerProviderId: pendingBrokerProviderId ?? undefined,
             brokerName: pendingBrokerName || undefined,
-            useCustomBrokerServer: usesCustomServer,
+            useCustomBrokerServer: true,
             connectNow: true,
           }),
         }
@@ -411,9 +383,8 @@ function AccountsContent() {
                       Connect broker account
                     </Dialog.Title>
                     <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
-                      Name your account and select an admin-configured broker, or enter your own.
-                      Credentials are entered in the next
-                      step and stored with AES-256-GCM encryption.
+                      Name your account, enter your broker name, and then connect the trading
+                      credentials. We will try to load matching servers automatically.
                     </Dialog.Description>
 
                     {errorMessage ? (
@@ -430,31 +401,10 @@ function AccountsContent() {
                           value={selectedPlatform}
                           onChange={(event) => {
                             setSelectedPlatform(event.target.value as BrokerPlatform);
-                            setSelectedBrokerOption("");
-                            setManualBrokerName("");
                           }}
                         >
                           <option value="MT5">MT5 (MetaTrader 5)</option>
                           <option value="MT4">MT4 (MetaTrader 4)</option>
-                        </SelectField>
-                        <SelectField
-                          label="Broker / company"
-                          name="brokerProviderId"
-                          value={selectedBrokerOption}
-                          onChange={(event) => setSelectedBrokerOption(event.target.value)}
-                          required
-                        >
-                          <option value="">
-                            {brokerProvidersQuery.isLoading
-                              ? "Loading configured brokers…"
-                              : "Select a configured broker"}
-                          </option>
-                          {(brokerProvidersQuery.data?.providers ?? []).map((provider) => (
-                            <option key={provider.id} value={provider.id}>
-                              {provider.displayName}
-                            </option>
-                          ))}
-                          <option value={CUSTOM_BROKER_OPTION}>Enter broker manually</option>
                         </SelectField>
                         <TextField
                           label="Account label"
@@ -462,15 +412,12 @@ function AccountsContent() {
                           placeholder="e.g. Evaluation Phase 1"
                           required
                         />
-                        {selectedBrokerOption === CUSTOM_BROKER_OPTION ? (
-                          <TextField
-                            label="Broker name"
-                            value={manualBrokerName}
-                            onChange={(event) => setManualBrokerName(event.target.value)}
-                            placeholder="Enter your broker company"
-                            required
-                          />
-                        ) : null}
+                        <TextField
+                          label="Broker name"
+                          name="brokerName"
+                          placeholder="e.g. IC Markets, Vantage Markets, Exness"
+                          required
+                        />
                       </div>
                       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
                         <p className="text-sm text-muted">
@@ -496,14 +443,8 @@ function AccountsContent() {
                       Trading account credentials
                     </Dialog.Title>
                     <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
-                      Enter your MT5 trading account credentials. Investor/read-only passwords
-                      cannot be used for trade execution or MetaAPI sync. Use your main trading password.
-                    </Dialog.Description>
-
-                    <div className="mt-3 rounded-[4px] border border-accent/20 bg-accent/5 px-4 py-3 text-xs leading-5 text-muted">
-                      <span className="font-semibold text-accent-2">Demo testing:</span> Use your MT5 demo account number,
-                      main trading password, exact broker server name (e.g. <span className="font-mono">ICMarkets-Demo02</span>),
-                      and select platform MT5.
+                      Enter the exact trading account login and main trading password. Once the
+                      broker name is entered, matching servers can be loaded for you.
                     </div>
 
                     {errorMessage ? (
@@ -513,87 +454,81 @@ function AccountsContent() {
                     ) : null}
 
                     <form className="mt-4 grid gap-4" onSubmit={handleCredentials}>
-                      {pendingBrokerProviderId ? (
-                        <div className="grid gap-3 rounded-[4px] border border-line bg-background p-4 md:grid-cols-[1fr_auto] md:items-end">
-                          <TextField
-                            label="Find your MetaTrader server"
-                            value={serverSearchDraft}
-                            onChange={(event) => setServerSearchDraft(event.target.value)}
-                            placeholder="Broker company or exact server name"
-                            autoComplete="off"
-                          />
-                          <GhostButton
-                            type="button"
-                            onClick={() => {
-                              setSelectedServerOption("");
-                              setServerSearchQuery(serverSearchDraft.trim());
-                            }}
-                          >
-                            Search servers
-                          </GhostButton>
-                          <p className="text-xs leading-5 text-muted md:col-span-2">
-                            WSA Global is the platform company. The active broker provider searches known {selectedPlatform} broker
-                            servers and combines them with servers configured by your administrator.
-                          </p>
-                        </div>
-                      ) : null}
+                      <div className="grid gap-3 rounded-[4px] border border-line bg-background p-4 md:grid-cols-[1fr_auto] md:items-end">
+                        <TextField
+                          label="Find broker server"
+                          value={serverSearchDraft}
+                          onChange={(event) => setServerSearchDraft(event.target.value)}
+                          placeholder="Broker name or exact server name"
+                          autoComplete="off"
+                        />
+                        <GhostButton
+                          type="button"
+                          onClick={() => {
+                            setSelectedServerOption("");
+                            setServerSearchQuery(serverSearchDraft.trim());
+                          }}
+                        >
+                          Search servers
+                        </GhostButton>
+                        <p className="text-xs leading-5 text-muted md:col-span-2">
+                          Search for your broker server, then select the closest match. If it does
+                          not appear, enter the exact server manually.
+                        </p>
+                      </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <TextField
-                          label="MT5 login / account number"
+                          label={`${selectedPlatform} login / account number`}
                           name="login"
                           placeholder="e.g. 12345678"
                           required
                           autoComplete="off"
                         />
                         <TextField
-                          label="MT5 trading password"
+                          label={`${selectedPlatform} trading password`}
                           name="password"
                           type="password"
-                          placeholder="Main trading password (not investor)"
+                          placeholder="Main trading password"
                           required
                           autoComplete="new-password"
                         />
-                        {pendingBrokerProviderId ? (
-                          <SelectField
-                            label="Broker server"
-                            name="serverSelection"
-                            value={selectedServerOption}
-                            onChange={(event) => setSelectedServerOption(event.target.value)}
-                            required
-                          >
-                            <option value="">
-                              {brokerServersQuery.isLoading
-                                ? "Loading configured servers…"
-                                : "Select a configured server"}
+                        <SelectField
+                          label="Broker server"
+                          name="serverSelection"
+                          value={selectedServerOption}
+                          onChange={(event) => setSelectedServerOption(event.target.value)}
+                          required
+                        >
+                          <option value="">
+                            {brokerServersQuery.isLoading
+                              ? "Loading matching servers…"
+                              : "Select a server"}
+                          </option>
+                          {(brokerServersQuery.data?.servers ?? []).map((server) => (
+                            <option key={server.id} value={server.serverName}>
+                              {server.serverName}
+                              {server.brokerName ? ` — ${server.brokerName}` : ""}
                             </option>
-                            {(brokerServersQuery.data?.servers ?? []).map((server) => (
-                              <option key={server.id} value={server.serverName}>
-                                {server.serverName}
-                                {server.source === "METAAPI" || server.source === "API2TRADE"
-                                  ? ` — ${server.brokerName ?? "Broker provider"}`
-                                  : " — WSA configured"}
-                              </option>
-                            ))}
-                            <option value={CUSTOM_BROKER_OPTION}>Enter server manually</option>
-                          </SelectField>
-                        ) : null}
-                        {!pendingBrokerProviderId || selectedServerOption === CUSTOM_BROKER_OPTION ? (
+                          ))}
+                          <option value={CUSTOM_SERVER_OPTION}>Enter server manually</option>
+                        </SelectField>
+                        {selectedServerOption === CUSTOM_SERVER_OPTION ? (
                           <TextField
                             label="Custom broker server"
                             name="customServer"
-                            placeholder="e.g. ICMarkets-Demo02"
+                            placeholder="Enter the exact server name"
                             required
                             autoComplete="off"
                           />
                         ) : null}
                       </div>
 
-                      {pendingBrokerProviderId && brokerServersQuery.isSuccess && brokerServersQuery.data.servers.length === 0 ? (
+                      {brokerServersQuery.isSuccess && brokerServersQuery.data.servers.length === 0 ? (
                         <p className="text-xs text-muted">
-                          No admin-configured servers match this platform. Choose “Enter server manually.”
+                          No matching servers were found. Choose “Enter server manually.”
                         </p>
                       ) : null}
-                      {pendingBrokerProviderId && brokerServersQuery.data?.discoveryMessage ? (
+                      {brokerServersQuery.data?.discoveryMessage ? (
                         <p className="text-xs text-muted">{brokerServersQuery.data.discoveryMessage}</p>
                       ) : null}
 

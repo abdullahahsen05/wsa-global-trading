@@ -367,6 +367,11 @@ export function CalendarTracker({
                   ? "text-accent"
                   : "text-danger"
                 : "text-foreground";
+              const resultGlowClass = summary
+                ? hasProfit
+                  ? "border-emerald-500/35 bg-emerald-500/10 shadow-[0_0_0_1px_rgba(34,197,94,0.12),0_0_22px_rgba(34,197,94,0.12)]"
+                  : "border-red-500/35 bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.12),0_0_22px_rgba(239,68,68,0.12)]"
+                : "";
 
               return (
                 <motion.button
@@ -383,13 +388,7 @@ export function CalendarTracker({
                     cell.inMonth
                       ? "border-line bg-background"
                       : "border-line/70 bg-panel/70 text-muted/70"
-                  } ${
-                    summary
-                      ? hasProfit
-                        ? "border-[#2e2817] bg-[#151106]"
-                        : "border-[#2a1f1a] bg-[#17110f]"
-                      : ""
-                  } ${selected ? "ring-1 ring-accent/40" : ""}`}
+                  } ${resultGlowClass} ${selected ? "ring-1 ring-accent/50" : ""}`}
                 >
                   <span
                     className={`self-end text-[11px] font-semibold ${
@@ -480,6 +479,13 @@ export function CalendarTracker({
               const profit = summary?.profit ?? 0;
               const tradeCount = summary?.tradeCount ?? 0;
               const winRate = tradeCount === 0 ? 0 : ((summary?.wins ?? 0) / tradeCount) * 100;
+              const monthToneClass = tradeCount === 0
+                ? selected
+                  ? "border-accent/40 bg-[#141106]"
+                  : "border-line bg-background hover:border-accent/25"
+                : profit >= 0
+                  ? "border-emerald-500/35 bg-emerald-500/10 shadow-[0_0_0_1px_rgba(34,197,94,0.12),0_0_20px_rgba(34,197,94,0.1)] hover:border-emerald-400/45"
+                  : "border-red-500/35 bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.12),0_0_20px_rgba(239,68,68,0.1)] hover:border-red-400/45";
 
               return (
                 <motion.button
@@ -496,11 +502,7 @@ export function CalendarTracker({
                         null,
                     );
                   }}
-                  className={`rounded-[4px] border p-4 text-left transition ${
-                    selected
-                      ? "border-accent/40 bg-[#141106]"
-                      : "border-line bg-background hover:border-accent/25"
-                  }`}
+                  className={`rounded-[4px] border p-4 text-left transition ${monthToneClass} ${selected ? "ring-1 ring-accent/45" : ""}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <p className="text-sm font-semibold text-foreground">{monthName}</p>

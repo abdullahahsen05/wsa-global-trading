@@ -3,7 +3,7 @@ if (typeof window !== "undefined") {
 }
 
 import { Api2TradeClient, loadApi2TradeConfig } from "@/lib/broker/api2TradeClient";
-import { publicApi2TradeError } from "@/lib/broker/api2TradeErrors";
+import { publicBrokerConnectionError } from "@/lib/broker/api2TradeErrors";
 
 export interface Api2TradeDiscoveredBrokerServer {
   brokerName: string;
@@ -19,13 +19,14 @@ export interface Api2TradeBrokerServerDiscoveryResult {
 
 export async function searchApi2TradeServers(params: {
   query: string;
+  seedAccountId?: string | null;
 }): Promise<Api2TradeBrokerServerDiscoveryResult> {
   const config = loadApi2TradeConfig();
   if (!config) {
     return {
       available: false,
       servers: [],
-      message: "API2Trade server discovery is not configured.",
+      message: "Broker server discovery is not configured.",
     };
   }
 
@@ -38,17 +39,17 @@ export async function searchApi2TradeServers(params: {
     };
   }
 
-  if (config.apiKey) {
+  if (config.apiKey && !params.seedAccountId) {
     return {
       available: false,
       servers: [],
-      message: "Live API2Trade server lookup is unavailable before account registration on this tenant. Select a configured server or enter the exact server manually.",
+      message: "Live broker server lookup becomes available after at least one account has been connected on this workspace. You can still enter the exact server manually.",
     };
   }
 
   try {
     const client = new Api2TradeClient(config);
-    const companies = await client.searchBroker(query);
+    const companies = await client.searchBroker(query, params.seedAccountId ?? undefined);
     const servers: Api2TradeDiscoveredBrokerServer[] = [];
     for (const company of companies) {
       const brokerName = (company.companyName ?? query).trim().slice(0, 120);
@@ -66,14 +67,14 @@ export async function searchApi2TradeServers(params: {
       available: true,
       servers: servers.slice(0, 100),
       message: servers.length === 0
-        ? "No API2Trade broker servers matched this search. You can still enter an exact server manually."
+        ? "No broker servers matched this search. You can still enter the exact server manually."
         : null,
     };
   } catch (error) {
     return {
       available: false,
       servers: [],
-      message: publicApi2TradeError(error) || "API2Trade server search is temporarily unavailable.",
+      message: publicBrokerConnectionError(error) || "Broker server search is temporarily unavailable.",
     };
   }
 }

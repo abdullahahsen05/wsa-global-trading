@@ -1,14 +1,18 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck, X } from "lucide-react";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
 
 type Platform = "MT4" | "MT5";
-type BrokerProvider = { id: string; displayName: string; platformsSupported: Platform[] };
-type BrokerServer = { id: string; serverName: string; platform: Platform };
+type BrokerServer = {
+  id: string;
+  serverName: string;
+  brokerName?: string;
+  source: "MANUAL" | "METAAPI" | "API2TRADE";
+};
 
 const CUSTOM = "__custom__";
 
@@ -29,10 +33,8 @@ export function MasterAccountConnectDialog({
   onConnected(message: string): void;
 }) {
   const [platform, setPlatform] = useState<Platform>("MT5");
-  const [providerId, setProviderId] = useState("");
   const [serverSelection, setServerSelection] = useState("");
-  const [serverQuery, setServerQuery] = useState("");
-  const [manualBroker, setManualBroker] = useState("");
+  const [brokerName, setBrokerName] = useState("");
   const [customServer, setCustomServer] = useState("");
   const [accountLabel, setAccountLabel] = useState("");
   const [login, setLogin] = useState("");
@@ -40,28 +42,38 @@ export function MasterAccountConnectDialog({
   const [createdAccountId, setCreatedAccountId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [serverSearchQuery, setServerSearchQuery] = useState("");
 
-  const providers = useQuery<{ providers: BrokerProvider[] }>({
-    queryKey: ["broker-providers", "copy-master-connect", platform],
-    queryFn: () => api(`/api/brokers?platform=${platform}`),
-    enabled: open,
+  const servers = useQuery<{
+    servers: BrokerServer[];
+    discoveryAvailable: boolean;
+    discoveryMessage: string | null;
+  }>({
+    queryKey: ["broker-server-search", "copy-master-connect", createdAccountId, platform, serverSearchQuery],
+    queryFn: () =>
+      api(
+        `/api/broker-servers/search?platform=${platform}&accountId=${encodeURIComponent(createdAccountId ?? "")}&query=${encodeURIComponent(serverSearchQuery)}`,
+      ),
+    enabled: open && serverSearchQuery.trim().length >= 2,
   });
-  const servers = useQuery<{ servers: BrokerServer[] }>({
-    queryKey: ["broker-servers", "copy-master-connect", providerId, platform, serverQuery],
-    queryFn: () => {
-      const params = new URLSearchParams({ platform });
-      if (serverQuery.trim().length >= 2) params.set("query", serverQuery.trim());
-      return api(`/api/brokers/${providerId}/servers?${params.toString()}`);
-    },
-    enabled: open && Boolean(providerId && providerId !== CUSTOM),
-  });
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const timer = window.setTimeout(() => {
+      const nextQuery = brokerName.trim();
+      setServerSearchQuery(nextQuery);
+      if (!nextQuery) {
+        setServerSelection("");
+        setCustomServer("");
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [brokerName, open]);
 
   function reset() {
     setPlatform("MT5");
-    setProviderId("");
     setServerSelection("");
-    setServerQuery("");
-    setManualBroker("");
+    setBrokerName("");
     setCustomServer("");
     setAccountLabel("");
     setLogin("");
@@ -69,6 +81,7 @@ export function MasterAccountConnectDialog({
     setCreatedAccountId(null);
     setSubmitting(false);
     setError("");
+    setServerSearchQuery("");
   }
 
   function close() {
@@ -79,12 +92,11 @@ export function MasterAccountConnectDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
-    const provider = providers.data?.providers.find((item) => item.id === providerId);
-    const brokerName = providerId === CUSTOM ? manualBroker.trim() : provider?.displayName ?? "";
-    const useCustomServer = providerId === CUSTOM || serverSelection === CUSTOM;
-    const server = useCustomServer ? customServer.trim() : serverSelection;
-    if (!accountLabel.trim() || !brokerName || !login.trim() || !password || !server) {
-      setError("Account label, broker, server, login, and password are required.");
+    const selectedServer = servers.data?.servers.find((item) => item.serverName === serverSelection);
+    const server = serverSelection === CUSTOM ? customServer.trim() : serverSelection;
+
+    if (!accountLabel.trim() || !brokerName.trim() || !login.trim() || !password || !server) {
+      setError("Account label, broker name, server, login, and password are required.");
       return;
     }
 
@@ -95,7 +107,7 @@ export function MasterAccountConnectDialog({
         const created = await api<{ accountId: string }>("/api/admin/copy/master-accounts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountName: accountLabel.trim(), brokerName, currency: "USD" }),
+          body: JSON.stringify({ accountName: accountLabel.trim(), brokerName: brokerName.trim(), currency: "USD" }),
         });
         accountId = created.accountId;
         setCreatedAccountId(accountId);
@@ -111,9 +123,8 @@ export function MasterAccountConnectDialog({
             login: login.trim(),
             password,
             server,
-            brokerProviderId: providerId === CUSTOM ? undefined : providerId,
-            brokerName,
-            useCustomBrokerServer: useCustomServer,
+            brokerName: brokerName.trim() || selectedServer?.brokerName,
+            useCustomBrokerServer: true,
             connectNow: true,
           }),
         },
@@ -123,7 +134,7 @@ export function MasterAccountConnectDialog({
       if (connection.connected) {
         onConnected(`Master account connected and synchronized. ${connection.tradesUpserted ?? 0} trade(s) updated.`);
       } else if (connection.status === "PENDING" || connection.status === "SYNCING") {
-        onConnected(connection.message ?? "Master credentials were stored securely. The broker provider is connecting; use Check status on the account card shortly.");
+        onConnected(connection.message ?? "Master credentials were stored securely. The connection is still starting; check the account card shortly.");
       } else {
         setError(connection.message ?? "Credentials were stored, but the broker connection did not complete. Check the values and try again.");
         return;
@@ -143,10 +154,8 @@ export function MasterAccountConnectDialog({
     }
   }
 
-  const providerOptions = providers.data?.providers ?? [];
   const serverOptions = servers.data?.servers ?? [];
-  const customBroker = providerId === CUSTOM;
-  const customServerSelected = customBroker || serverSelection === CUSTOM;
+  const customServerSelected = serverSelection === CUSTOM;
 
   return (
     <Dialog.Root open={open} onOpenChange={(value) => !value && close()}>
@@ -155,58 +164,46 @@ export function MasterAccountConnectDialog({
         <Dialog.Content className="invisible-scrollbar fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-line bg-panel p-4 shadow-[0_24px_80px_rgba(0,0,0,0.62)] focus:outline-none sm:p-6">
           <Dialog.Title className="text-2xl font-semibold text-foreground">Connect a master trading account</Dialog.Title>
           <Dialog.Description className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-            Add the MT4 or MT5 account that will generate the live strategy trades. Credentials are encrypted and never returned.
+            Add the MT4 or MT5 account that will generate the live strategy trades. Enter the broker name first and we will load matching servers where available.
           </Dialog.Description>
 
           <form onSubmit={submit} className="mt-6 space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Account label" value={accountLabel} onChange={setAccountLabel} placeholder="e.g. Gold Master" disabled={Boolean(createdAccountId)} />
-              <label className="space-y-2 text-sm font-semibold text-foreground">Platform<select value={platform} disabled={Boolean(createdAccountId)} onChange={(event) => { setPlatform(event.target.value as Platform); setProviderId(""); setServerSelection(""); setServerQuery(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="MT5">MetaTrader 5</option><option value="MT4">MetaTrader 4</option></select></label>
+              <label className="space-y-2 text-sm font-semibold text-foreground">Platform<select value={platform} disabled={Boolean(createdAccountId)} onChange={(event) => { setPlatform(event.target.value as Platform); setServerSelection(""); setServerSearchQuery(""); setCustomServer(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="MT5">MetaTrader 5</option><option value="MT4">MetaTrader 4</option></select></label>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="space-y-2 text-sm font-semibold text-foreground">Broker<select required value={providerId} disabled={Boolean(createdAccountId) || providers.isFetching} onChange={(event) => { setProviderId(event.target.value); setServerSelection(""); setServerQuery(""); }} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm"><option value="">Select broker...</option>{providerOptions.map((provider) => <option key={provider.id} value={provider.id}>{provider.displayName}</option>)}<option value={CUSTOM}>Enter another broker</option></select></label>
-              {customBroker ? <Field label="Broker name" value={manualBroker} onChange={setManualBroker} placeholder="Broker name" disabled={Boolean(createdAccountId)} /> : <div className="space-y-2">
-                <label className="text-sm font-semibold text-foreground" htmlFor="master-server-search">Search server</label>
-                <input
-                  id="master-server-search"
-                  type="search"
-                  value={serverQuery}
-                  disabled={!providerId || Boolean(createdAccountId)}
-                  onChange={(event) => { setServerQuery(event.target.value); setServerSelection(""); }}
-                  placeholder="Type broker/server e.g. MetaQuotes"
-                  className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm outline-none placeholder:text-muted/50 focus:border-accent disabled:opacity-60"
-                />
-              </div>}
-            </div>
-
-            {!customBroker ? (
-              <label className="block space-y-2 text-sm font-semibold text-foreground">
+              <Field label="Broker name" value={brokerName} onChange={(value) => { setBrokerName(value); setServerSelection(""); setCustomServer(""); }} placeholder="Broker name" disabled={Boolean(createdAccountId)} />
+              <label className="space-y-2 text-sm font-semibold text-foreground">
                 Server
-                <select required value={serverSelection} onChange={(event) => setServerSelection(event.target.value)} disabled={!providerId || servers.isFetching} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm">
-                  <option value="">{servers.isFetching ? "Searching servers..." : "Select server..."}</option>
-                  {serverOptions.map((server) => <option key={server.id} value={server.serverName}>{server.serverName}</option>)}
-                  <option value={CUSTOM}>Enter another server</option>
+                <select required value={serverSelection} onChange={(event) => setServerSelection(event.target.value)} disabled={!brokerName.trim() || servers.isFetching} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm">
+                  <option value="">{servers.isFetching ? "Searching servers..." : !brokerName.trim() ? "Enter broker name first" : "Select server..."}</option>
+                  {serverOptions.map((server) => <option key={server.id} value={server.serverName}>{server.serverName}{server.brokerName ? ` — ${server.brokerName}` : ""}</option>)}
+                  <option value={CUSTOM}>Enter server manually</option>
                 </select>
-                <span className="block text-xs font-normal text-muted">
-                  {serverQuery.trim().length >= 2 ? "Showing API2Trade-discovered and admin-configured matches." : "Type at least 2 characters to search API2Trade servers, or choose a configured server."}
-                </span>
               </label>
-            ) : null}
+            </div>
 
             {customServerSelected ? <Field label="Broker server" value={customServer} onChange={setCustomServer} placeholder="Exact MT4/MT5 server name" /> : null}
 
+            {servers.data?.discoveryMessage ? (
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
+                {servers.data.discoveryMessage}
+              </div>
+            ) : null}
+
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={`${platform} login`} value={login} onChange={setLogin} placeholder="Trading account number" autoComplete="username" />
-              <Field label="Trading password" type="password" value={password} onChange={setPassword} placeholder="Main or investor password" autoComplete="new-password" />
+              <Field label="Trading password" type="password" value={password} onChange={setPassword} placeholder="Main trading password" autoComplete="new-password" />
             </div>
 
             {createdAccountId ? <div className="rounded-[4px] border border-accent/25 bg-accent/10 px-4 py-3 text-sm text-accent">The master record is saved. Correct the connection details and retry without creating another account.</div> : null}
             {error ? <div className="rounded-[4px] border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</div> : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
-              <div className="flex items-center gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4 text-accent" />Encrypted credential storage and honest provider status.</div>
-              <div className="flex gap-2"><GhostButton type="button" onClick={close}>Cancel</GhostButton><PrimaryButton type="submit" disabled={submitting || providers.isFetching || servers.isFetching}>{submitting ? "Connecting..." : createdAccountId ? "Retry connection" : "Connect master account"}</PrimaryButton></div>
+              <div className="flex items-center gap-2 text-xs text-muted"><ShieldCheck className="h-4 w-4 text-accent" />Encrypted credential storage and connection status checks.</div>
+              <div className="flex gap-2"><GhostButton type="button" onClick={close}>Cancel</GhostButton><PrimaryButton type="submit" disabled={submitting || servers.isFetching}>{submitting ? "Connecting..." : createdAccountId ? "Retry connection" : "Connect master account"}</PrimaryButton></div>
             </div>
           </form>
 

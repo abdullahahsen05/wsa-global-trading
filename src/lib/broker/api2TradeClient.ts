@@ -368,8 +368,11 @@ export class Api2TradeClient {
     return this.request<string>("GET", "Disconnect", this.accountParams(accountId), { expectText: true });
   }
 
-  async searchBroker(company: string): Promise<Api2TradeCompanySearchResult[]> {
-    const result = await this.request<unknown>("GET", "Search", { company });
+  async searchBroker(company: string, seedAccountId?: string): Promise<Api2TradeCompanySearchResult[]> {
+    const result = await this.request<unknown>("GET", "Search", {
+      company,
+      ...(seedAccountId ? this.accountParams(seedAccountId) : {}),
+    });
     return Array.isArray(result) ? result as Api2TradeCompanySearchResult[] : [];
   }
 

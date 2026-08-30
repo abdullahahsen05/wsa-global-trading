@@ -10,7 +10,7 @@ import { createNotification } from '@/lib/services/notificationService';
 import { resolveAccountLifecycleStatus } from '@/lib/accounts/lifecycle';
 import { publicMetaApiError } from '@/lib/broker/metaApiErrors';
 import { Api2TradeBrokerAdapter } from '@/lib/broker/Api2TradeBrokerAdapter';
-import { publicApi2TradeError } from '@/lib/broker/api2TradeErrors';
+import { publicApi2TradeError, publicBrokerConnectionError } from '@/lib/broker/api2TradeErrors';
 import { acquireOperationalLock } from '@/lib/services/operationalLockService';
 import { calculatePartnerRebatesForTradingAccounts } from '@/lib/services/partnerRebateCalculationService';
 import {
@@ -717,7 +717,7 @@ async function runApi2TradeSync(params: {
         status: 'DISCONNECTED',
         snapshotInserted: false,
         tradesUpserted: 0,
-        error: 'API2Trade is not configured.',
+        error: 'Connection service is not configured.',
       };
     }
 
@@ -748,7 +748,7 @@ async function runApi2TradeSync(params: {
 
     const health = await adapter.verifyConnection(accountId);
     if (!health.ok) {
-      const message = health.message || 'API2Trade account is not connected yet.';
+      const message = health.message || 'The broker account is not connected yet.';
       const preservedConnectedStatus = await markFailed(supabase, accountId, message, previousStatus);
       return {
         accountId,
@@ -801,7 +801,7 @@ async function runApi2TradeSync(params: {
       tradesUpserted: persisted.tradesUpserted,
     };
   } catch (error) {
-    const diagnosticMessage = sanitizeMessage(publicApi2TradeError(error), credentials);
+    const diagnosticMessage = sanitizeMessage(publicBrokerConnectionError(error), credentials);
     console.error('[API2TRADE_SYNC_ERROR]', { tradingAccountId: accountId, message: diagnosticMessage });
     const preservedConnectedStatus = await markFailed(supabase, accountId, diagnosticMessage, previousStatus);
     return {
@@ -886,7 +886,7 @@ export async function syncTradingAccount(
       snapshotInserted: false,
       tradesUpserted: 0,
       error: activeProvider === 'api2trade' && api2TradeUsesDashboardAccounts()
-        ? 'No API2Trade account UUID is linked yet. Add the MT account in API2Trade first, then enter its UUID in WSA.'
+        ? 'No broker account ID is linked yet. Add the account in the provider dashboard first, then reconnect it here.'
         : 'No broker credentials stored for this account.',
     };
   }
@@ -1022,10 +1022,10 @@ export async function getBrokerConnectionStatus(
         providerReady: false,
         lastSyncedAt: account.last_synced_at,
         message: account.provider_account_id
-          ? 'API2Trade status is unavailable because the provider is not configured.'
+          ? 'Connection status is unavailable because the provider is not configured.'
           : effectiveLocalStatus === 'PENDING'
             ? 'Account setup is incomplete. Add broker credentials to start the connection.'
-            : 'The API2Trade account has not been provisioned yet.',
+            : 'The broker account has not been provisioned yet.',
       };
     }
     const adapter = createBrokerAdapter();
@@ -1051,8 +1051,8 @@ export async function getBrokerConnectionStatus(
         ? 'This account has had no successful broker activity for 10 days. Re-enter or confirm the credentials, then sync it to reconnect.'
         : health.ok
           ? synchronized
-            ? 'API2Trade is connected and the account has synchronized.'
-            : 'API2Trade is connected, but the first account-data sync has not completed. Run Sync account to finish connecting.'
+            ? 'The broker connection is active and the account has synchronized.'
+            : 'The broker connection is active, but the first account-data sync has not completed. Run Sync account to finish connecting.'
           : health.message,
     };
   }
@@ -1192,7 +1192,7 @@ export async function refreshAccountTrades(
         balance: 0,
         equity: 0,
         currency: 'USD',
-        error: 'API2Trade is not configured.',
+        error: 'Connection service is not configured.',
       };
     }
     const lock = await acquireOperationalLock(`account-sync:${accountId}`, 90);
@@ -1243,7 +1243,7 @@ export async function refreshAccountTrades(
         currency: persisted.currency,
       };
     } catch (error) {
-      const msg = publicApi2TradeError(error);
+      const msg = publicBrokerConnectionError(error);
       await supabase.from('trading_accounts').update({ sync_error: msg }).eq('id', accountId);
       return {
         accountId,

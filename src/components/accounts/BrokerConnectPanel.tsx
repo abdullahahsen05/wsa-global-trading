@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, RefreshCcw, ShieldCheck, X } from "lucide-react";
 import { GhostButton, Panel, PrimaryButton, StatusPill } from "@/components/app/WorkspaceUI";
@@ -52,17 +52,10 @@ interface ConnectionStatusResult {
   message: string;
 }
 
-interface BrokerProvider {
-  id: string;
-  displayName: string;
-  platformsSupported: Array<"MT4" | "MT5">;
-}
-
 interface BrokerServer {
   id: string;
   serverName: string;
-  platform: "MT4" | "MT5";
-  source: "MANUAL" | "METAAPI";
+  source: "MANUAL" | "METAAPI" | "API2TRADE";
   brokerName?: string;
 }
 
@@ -88,12 +81,13 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState({
     platform: "MT5",
-    brokerProviderId: "",
+    brokerName: "",
     login: "",
     password: "",
     server: "",
     customServer: "",
   });
+  const [serverSearchQuery, setServerSearchQuery] = useState("");
   const [notice, setNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
 
@@ -103,20 +97,31 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
     refetchOnWindowFocus: false,
   });
 
-  const providersQuery = useQuery<{ providers: BrokerProvider[]; sourceLabel: string }>({
-    queryKey: ["broker-providers", form.platform],
-    queryFn: () => apiFetch(`/api/brokers?platform=${form.platform}`),
-    enabled: formOpen,
+  const serversQuery = useQuery<{
+    servers: BrokerServer[];
+    discoveryAvailable: boolean;
+    discoveryMessage: string | null;
+  }>({
+    queryKey: ["broker-server-search", accountId, form.platform, serverSearchQuery],
+    queryFn: () =>
+      apiFetch(
+        `/api/broker-servers/search?platform=${form.platform}&accountId=${accountId}&query=${encodeURIComponent(serverSearchQuery)}`,
+      ),
+    enabled: formOpen && serverSearchQuery.trim().length >= 2,
     refetchOnWindowFocus: false,
   });
 
-  const serversQuery = useQuery<{ servers: BrokerServer[]; sourceLabel: string }>({
-    queryKey: ["broker-servers", form.brokerProviderId, form.platform],
-    queryFn: () =>
-      apiFetch(`/api/brokers/${form.brokerProviderId}/servers?platform=${form.platform}`),
-    enabled: formOpen && Boolean(form.brokerProviderId),
-    refetchOnWindowFocus: false,
-  });
+  useEffect(() => {
+    if (!formOpen) return undefined;
+    const timer = window.setTimeout(() => {
+      const nextQuery = form.brokerName.trim();
+      setServerSearchQuery(nextQuery);
+      if (!nextQuery) {
+        setForm((current) => ({ ...current, server: "", customServer: "" }));
+      }
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [form.brokerName, formOpen]);
 
   const connectionStatusQuery = useQuery<ConnectionStatusResult>({
     queryKey: ["broker-connection-status", accountId],
@@ -147,11 +152,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       const selectedServer = serversQuery.data?.servers.find(
         (server) => server.serverName === form.server,
       );
-      const usesCustomServer =
-        form.server === CUSTOM_SERVER_OPTION || selectedServer?.source === "METAAPI";
-      const selectedProvider = providersQuery.data?.providers.find(
-        (provider) => provider.id === form.brokerProviderId,
-      );
       return apiFetch<ConnectionResult>(`/api/trading-accounts/${accountId}/broker-credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -162,9 +162,8 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
           server: form.server === CUSTOM_SERVER_OPTION
             ? form.customServer.trim()
             : form.server.trim(),
-          brokerProviderId: form.brokerProviderId,
-          brokerName: selectedServer?.brokerName ?? selectedProvider?.displayName,
-          useCustomBrokerServer: usesCustomServer,
+          brokerName: form.brokerName.trim() || selectedServer?.brokerName,
+          useCustomBrokerServer: true,
         }),
       });
     },
@@ -172,7 +171,8 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       queryClient.invalidateQueries({ queryKey: ["broker-cred-status", accountId] });
       queryClient.invalidateQueries({ queryKey: ["trading-accounts"] });
       setFormOpen(false);
-      setForm({ platform: "MT5", brokerProviderId: "", login: "", password: "", server: "", customServer: "" });
+      setForm({ platform: "MT5", brokerName: "", login: "", password: "", server: "", customServer: "" });
+      setServerSearchQuery("");
       if (data.connected) {
         setNotice({
           type: "success",
@@ -239,7 +239,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
     storeMutation.isPending ||
     verifyMutation.isPending ||
     syncMutation.isPending ||
-    providersQuery.isFetching ||
     serversQuery.isFetching ||
     connectionStatusQuery.isFetching;
 
@@ -288,7 +287,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
           </p>
           <h2 className="mt-2 text-lg font-semibold text-foreground">MT4 / MT5 connection</h2>
           <p className="mt-1 text-sm text-muted">
-            Store broker credentials and run the initial read-only account sync.
+            Store broker credentials and run the initial account sync.
           </p>
           {(credStatus?.credentialsStored || credStatus?.providerAccountId) ? (
             <p className="mt-2 text-xs text-muted">
@@ -303,7 +302,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         ) : null}
       </div>
 
-      {/* Status indicators */}
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
@@ -340,14 +338,12 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         </div>
       </div>
 
-      {/* Sync error */}
       {credStatus?.syncError && !isDeploymentPendingMessage(credStatus.syncError) ? (
         <div className="mt-3 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           <strong>Sync error:</strong> {credStatus.syncError}
         </div>
       ) : null}
 
-      {/* Notice */}
       {displayedNotice ? (
         <div
           className={`mt-3 rounded-[4px] border px-4 py-3 text-sm font-medium ${
@@ -362,7 +358,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         </div>
       ) : null}
 
-      {/* Verify result */}
       {verifyResult && !displayedNotice?.type.startsWith("e") ? (
         <div className="mt-3 flex items-center gap-2 rounded-[4px] border border-line bg-background px-4 py-3 text-sm">
           {verifyResult.connected ? (
@@ -376,7 +371,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         </div>
       ) : null}
 
-      {/* Actions */}
       <div className="mt-4 flex flex-wrap gap-3">
         <GhostButton type="button" onClick={() => { setFormOpen((o) => !o); setNotice(null); }}>
           {credStatus?.credentialsStored ? "Update connection" : "Add broker connection"}
@@ -415,7 +409,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         ) : null}
       </div>
 
-      {/* Credential form */}
       {formOpen ? (
         <form onSubmit={handleSubmit} className="mt-5 grid gap-4 border-t border-line pt-5">
           <p className="text-sm text-muted">
@@ -431,9 +424,9 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 onChange={(e) => setForm((f) => ({
                   ...f,
                   platform: e.target.value,
-                  brokerProviderId: "",
                   server: "",
                   customServer: "",
+                  brokerName: "",
                 }))}
                 className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
               >
@@ -443,119 +436,121 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                Broker provider <span className="text-danger">*</span>
-              </label>
-              <select
-                required
-                value={form.brokerProviderId}
-                onChange={(e) => setForm((f) => ({
-                  ...f,
-                  brokerProviderId: e.target.value,
-                  server: "",
-                  customServer: "",
-                }))}
-                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-              >
-                <option value="">Select configured broker</option>
-                {(providersQuery.data?.providers ?? []).map((provider) => (
-                  <option key={provider.id} value={provider.id}>{provider.displayName}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          {providersQuery.isSuccess && providersQuery.data.providers.length === 0 ? (
-            <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
-              No broker providers are configured for {form.platform}. Contact support or an administrator.
-            </div>
-          ) : null}
-          <>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                Login <span className="text-danger">*</span>
+                Broker name <span className="text-danger">*</span>
               </label>
               <input
                 type="text"
                 required
-                value={form.login}
-                onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
-                placeholder="MT5 account number"
-                maxLength={50}
+                value={form.brokerName}
+                onChange={(e) => setForm((f) => ({
+                  ...f,
+                  brokerName: e.target.value,
+                  server: "",
+                  customServer: "",
+                }))}
+                placeholder="e.g. Vantage Markets, IC Markets, Exness"
                 className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
               />
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                  Password <span className="text-danger">*</span>
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  placeholder="Main or investor password"
-                  maxLength={200}
-                  autoComplete="new-password"
-                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-                />
-              </div>
-              <div>
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                    Server <span className="text-danger">*</span>
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!form.brokerProviderId || serversQuery.isFetching}
-                    onClick={() => void serversQuery.refetch()}
-                    className="text-xs font-semibold text-accent disabled:opacity-40"
-                  >
-                    {serversQuery.isFetching ? "Refreshing…" : "Refresh configured list"}
-                  </button>
-                </div>
-                <select
-                  required
-                  disabled={!form.brokerProviderId || serversQuery.isFetching}
-                  value={form.server}
-                  onChange={(e) => setForm((f) => ({ ...f, server: e.target.value }))}
-                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-50"
-                >
-                  <option value="">
-                    {!form.brokerProviderId ? "Select a broker first" : "Select configured server"}
-                  </option>
-                  {(serversQuery.data?.servers ?? []).map((server) => (
-                    <option key={server.id} value={server.serverName}>{server.serverName}</option>
-                  ))}
-                  <option value={CUSTOM_SERVER_OPTION}>Enter server manually</option>
-                </select>
-              </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+              Login <span className="text-danger">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              value={form.login}
+              onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
+              placeholder={`${form.platform} account number`}
+              maxLength={50}
+              className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                Password <span className="text-danger">*</span>
+              </label>
+              <input
+                type="password"
+                required
+                value={form.password}
+                onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                placeholder="Main trading password"
+                maxLength={200}
+                autoComplete="new-password"
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+              />
             </div>
-            {form.server === CUSTOM_SERVER_OPTION ? (
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                  Custom server name <span className="text-danger">*</span>
+            <div>
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <label className="block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                  Server <span className="text-danger">*</span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={form.customServer}
-                  onChange={(event) => setForm((current) => ({ ...current, customServer: event.target.value }))}
-                  placeholder="Exact MetaTrader server name"
-                  maxLength={100}
-                  autoComplete="off"
-                  className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-                />
+                <button
+                  type="button"
+                  disabled={!form.brokerName.trim() || serversQuery.isFetching}
+                  onClick={() => {
+                    setForm((current) => ({ ...current, server: "", customServer: "" }));
+                    setServerSearchQuery(form.brokerName.trim());
+                  }}
+                  className="text-xs font-semibold text-accent disabled:opacity-40"
+                >
+                  {serversQuery.isFetching ? "Searching…" : "Search servers"}
+                </button>
               </div>
-            ) : null}
-            {form.brokerProviderId && serversQuery.isSuccess && serversQuery.data.servers.length === 0 ? (
-              <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
-                No servers are configured for this broker and platform. Contact support or an administrator.
-              </div>
-            ) : null}
-            <p className="text-xs text-muted">
-              Server options combine the WSA Global broker catalog with broker-provider discovery. You can enter the exact server manually when needed.
-            </p>
-          </>
+              <select
+                required
+                disabled={!form.brokerName.trim() || serversQuery.isFetching}
+                value={form.server}
+                onChange={(e) => setForm((f) => ({ ...f, server: e.target.value }))}
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50 disabled:opacity-50"
+              >
+                <option value="">
+                  {!form.brokerName.trim() ? "Enter broker name first" : "Select broker server"}
+                </option>
+                {(serversQuery.data?.servers ?? []).map((server) => (
+                  <option key={server.id} value={server.serverName}>
+                    {server.serverName}
+                    {server.brokerName ? ` — ${server.brokerName}` : ""}
+                  </option>
+                ))}
+                <option value={CUSTOM_SERVER_OPTION}>Enter server manually</option>
+              </select>
+            </div>
+          </div>
+
+          {form.server === CUSTOM_SERVER_OPTION ? (
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                Custom server name <span className="text-danger">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                value={form.customServer}
+                onChange={(event) => setForm((current) => ({ ...current, customServer: event.target.value }))}
+                placeholder="Exact MetaTrader server name"
+                maxLength={100}
+                autoComplete="off"
+                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
+              />
+            </div>
+          ) : null}
+
+          {serversQuery.data?.discoveryMessage ? (
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3 text-sm text-muted">
+              {serversQuery.data.discoveryMessage}
+            </div>
+          ) : null}
+
+          <p className="text-xs text-muted">
+            Enter your broker name, search for the server, and if it does not appear, type the exact server manually.
+          </p>
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
             <p className="text-xs text-muted">
               Saving new credentials replaces existing ones for this account.
@@ -571,7 +566,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 type="submit"
                 disabled={
                   busy ||
-                  !form.brokerProviderId ||
+                  !form.brokerName.trim() ||
                   !form.server ||
                   (form.server === CUSTOM_SERVER_OPTION && !form.customServer.trim())
                 }

@@ -22,7 +22,7 @@ import {
   type Api2TradeOrder,
   loadApi2TradeConfig,
 } from "./api2TradeClient";
-import { publicApi2TradeError } from "./api2TradeErrors";
+import { publicApi2TradeError, publicBrokerConnectionError } from "./api2TradeErrors";
 import { getDecryptedCredentials } from "@/lib/services/brokerCredentialService";
 
 function safeIso(value: unknown, fallback = new Date().toISOString()): string {
@@ -103,9 +103,9 @@ function responseOk(response: Api2TradeExecutionResponse): boolean {
 
 function interpretExecution(response: Api2TradeExecutionResponse): BrokerExecutionResult {
   if (!responseOk(response)) {
-    throw new BrokerExecutionError(
+      throw new BrokerExecutionError(
       BROKER_EXEC_ERROR.PROVIDER_ERROR,
-      publicApi2TradeError(response.error ?? response.message ?? "API2Trade rejected the broker operation."),
+      publicBrokerConnectionError(response.error ?? response.message ?? "Broker rejected the operation."),
       502,
     );
   }
@@ -167,7 +167,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     if (!this.client) {
       throw new BrokerExecutionError(
         BROKER_EXEC_ERROR.PROVIDER_NOT_CONFIGURED,
-        "API2Trade is not configured. Set API2TRADE_BASE_URL plus API2TRADE_API_KEY or API2TRADE_USERNAME/API2TRADE_PASSWORD.",
+        "Connection service is not configured. Set the required broker provider credentials first.",
         503,
       );
     }
@@ -190,7 +190,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     if (!data.provider_account_id) {
       throw new BrokerExecutionError(
         BROKER_EXEC_ERROR.ACCOUNT_NOT_CONNECTED,
-        "Account is not connected to API2Trade yet.",
+        "This trading account has not been connected yet.",
         409,
       );
     }
@@ -377,7 +377,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
       return {
         ok: false,
         provider: "api2trade",
-        message: "API2Trade is not configured.",
+        message: "Connection service is not configured.",
       };
     }
     try {
@@ -386,10 +386,10 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
       return {
         ok: Boolean(connectedProviderAccountId),
         provider: "api2trade",
-        message: connectedProviderAccountId ? "Connected to API2Trade." : "API2Trade account is reconnecting.",
+        message: connectedProviderAccountId ? "Broker connection is active." : "Broker connection is reconnecting.",
       };
     } catch (error) {
-      return { ok: false, provider: "api2trade", message: publicApi2TradeError(error) };
+      return { ok: false, provider: "api2trade", message: publicBrokerConnectionError(error) };
     }
   }
 
@@ -516,7 +516,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
   async reactivateAccount(): Promise<void> {
     throw new BrokerExecutionError(
       BROKER_EXEC_ERROR.NOT_IMPLEMENTED,
-      "API2Trade reactivation requires reconnecting the stored MT4/MT5 credentials.",
+      "Reactivation requires reconnecting the stored MT4/MT5 credentials.",
       501,
     );
   }
