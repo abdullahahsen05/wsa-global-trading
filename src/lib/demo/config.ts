@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   BookOpenCheck,
   Bot,
+  BriefcaseBusiness,
   CandlestickChart,
   LayoutDashboard,
   ListChecks,
@@ -86,6 +87,7 @@ const DEMO_SECTIONS: DemoSectionConfig[] = [
     description: "Browse bot marketplace cards, product states, and disabled purchase actions.",
     href: "/demo/marketplace",
     group: "products",
+    icon: BriefcaseBusiness,
   },
   {
     slug: "my-bots",
