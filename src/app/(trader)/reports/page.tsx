@@ -184,15 +184,24 @@ function ReportsContent() {
   }
 
   async function exportPdf(report: ReportRow) {
-    const { generateTradeReportPdf } = await import("@/lib/pdf/tradeReportPdf");
     const currency = report.trades[0]?.profit.currency ?? "USD";
-    const pdf = await generateTradeReportPdf({
-      reportName: report.name,
-      period: report.period,
-      trades: report.trades,
-      currency,
+    const response = await fetch("/api/reports/pdf", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        reportName: report.name,
+        period: report.period,
+        trades: report.trades,
+        currency,
+      }),
     });
-    const blob = new Blob([pdf], { type: "application/pdf" });
+    if (!response.ok) {
+      throw new Error("Failed to export PDF");
+    }
+    const pdfBuffer = await response.arrayBuffer();
+    const blob = new Blob([pdfBuffer], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
