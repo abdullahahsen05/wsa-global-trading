@@ -10,7 +10,7 @@ import {
   MessageSquare,
   Plus,
   Send,
-  Sparkles,
+  TrendingUp,
   Users,
 } from "lucide-react";
 import {
@@ -146,7 +146,7 @@ function DemoTradingChartSection() {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Trend</p>
             <div className="mt-3 flex items-center gap-3">
               <div className="grid h-12 w-12 place-items-center rounded-[4px] bg-accent/10 text-accent">
-                <Sparkles className="h-5 w-5" />
+                <TrendingUp className="h-5 w-5" />
               </div>
               <div>
                 <p className="text-sm font-semibold text-foreground">Bias is constructive</p>

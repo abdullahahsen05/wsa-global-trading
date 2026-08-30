@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { motion, type HTMLMotionProps } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { LayoutGrid, type LucideIcon } from "lucide-react";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
@@ -463,12 +463,12 @@ export function EmptyState({
   title,
   description,
   action,
-  icon = Sparkles,
+  icon = LayoutGrid,
 }: {
   title: string;
   description: string;
   action?: ReactNode;
-  icon?: typeof Sparkles;
+  icon?: LucideIcon;
 }) {
   const Icon = icon;
 

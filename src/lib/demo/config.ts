@@ -7,7 +7,7 @@ import {
   ListChecks,
   MessageSquare,
   Repeat,
-  Sparkles,
+  Store,
   WalletCards,
 } from "lucide-react";
 
@@ -87,7 +87,7 @@ const DEMO_SECTIONS: DemoSectionConfig[] = [
     description: "Browse bot marketplace cards, product states, and disabled purchase actions.",
     href: "/demo/marketplace",
     group: "products",
-    icon: Sparkles,
+    icon: Store,
   },
   {
     slug: "my-bots",

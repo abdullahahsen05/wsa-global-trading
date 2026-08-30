@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ShieldCheck, Sparkles } from "lucide-react";
+import { Eye, ShieldCheck } from "lucide-react";
 import { Panel, GhostButton } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionCheckoutCTA } from "@/components/app/PlatformSubscriptionCheckoutCTA";
 import type { SubscriptionDto } from "@/lib/services/billingService";
@@ -52,7 +52,7 @@ export function PlatformSubscriptionLocked({
           <PlatformSubscriptionCheckoutCTA access={access} />
           <Link href="/platform-preview">
             <GhostButton type="button">
-              <Sparkles className="mr-2 inline-block h-4 w-4" />
+              <Eye className="mr-2 inline-block h-4 w-4" />
               Preview what you unlock
             </GhostButton>
           </Link>
