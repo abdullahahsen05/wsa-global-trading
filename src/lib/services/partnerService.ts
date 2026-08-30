@@ -453,6 +453,13 @@ export async function listPartnerTraders(
   return traders;
 }
 
+export async function listPartnerTradersForAdmin(
+  partnerUserId: string,
+  filters?: { status?: "ALL" | "ACTIVE" | "AT_RISK" | "RESTRICTED"; search?: string },
+): Promise<PartnerTraderDto[]> {
+  return listPartnerTraders(partnerUserId, filters);
+}
+
 /** Throws TRADER_NOT_ASSIGNED if the trader is not attributed to this partner. Returns trader_profiles.id. */
 async function assertTraderAssigned(partnerUserId: string, traderUserId: string): Promise<string> {
   const supabase = createAdminClient();

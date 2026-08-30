@@ -21,6 +21,7 @@ import type {
   PartnerWithdrawalDto,
   PartnerWithdrawalStatus,
 } from "@/lib/partner/withdrawals";
+import type { PartnerTraderDto, TraderRiskStatus } from "@/lib/partner/types";
 
 type PartnerModelType = "IB" | "CPA" | "HYBRID";
 
@@ -57,6 +58,25 @@ const TONES: Record<string, "lime" | "accent" | "danger" | "muted"> = {
   CANCELLED: "danger",
   REVERSED: "danger",
 };
+
+const RISK_TONES: Record<TraderRiskStatus, "lime" | "accent" | "danger"> = {
+  OK: "lime",
+  AT_RISK: "accent",
+  RESTRICTED: "danger",
+};
+
+function labelPipeline(stage: PartnerTraderDto["pipelineStage"]): string {
+  if (stage === "BROKER_CONNECTED") return "Broker connected";
+  if (stage === "LIVE_SYNCED") return "Live synced";
+  if (stage === "QUALIFIED") return "Qualified";
+  return stage.charAt(0) + stage.slice(1).toLowerCase().replace("_", " ");
+}
+
+function labelModel(model: PartnerTraderDto["commissionModel"]): string {
+  if (model === "UNCONFIGURED") return "Not set";
+  if (model === "IB") return "Rebate";
+  return model;
+}
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -161,6 +181,11 @@ export default function AdminPartnerWithdrawalsPage() {
     queryFn: () => api(`/api/admin/partners/${selectedLedgerSummary?.partnerId}/broker-configurations`),
     enabled: Boolean(selectedLedgerSummary?.partnerId),
   });
+  const partnerTraders = useQuery<PartnerTraderDto[]>({
+    queryKey: ["admin-partner-traders", selectedLedgerSummary?.partnerId],
+    queryFn: () => api(`/api/admin/partners/${selectedLedgerSummary?.partnerId}/traders`),
+    enabled: Boolean(selectedLedgerSummary?.partnerId),
+  });
   const selectedConfig = useMemo(
     () => brokerConfig.data?.configurations.find((config) => (config.brokerProviderId ?? "") === configBrokerId) ?? null,
     [brokerConfig.data?.configurations, configBrokerId],
@@ -168,6 +193,18 @@ export default function AdminPartnerWithdrawalsPage() {
   const hybridConfigCount = useMemo(
     () => (brokerConfig.data?.configurations ?? []).filter((config) => config.modelType === "HYBRID" && config.isActive).length,
     [brokerConfig.data?.configurations],
+  );
+  const partnerTraderRows = partnerTraders.data ?? [];
+  const qualifiedTraderCount = partnerTraderRows.filter((trader) => trader.cpaQualified).length;
+  const tradingTraderCount = partnerTraderRows.filter((trader) => trader.totalLotsTraded > 0).length;
+  const syncedTraderCount = partnerTraderRows.filter((trader) => Boolean(trader.latestSyncAt)).length;
+  const walletReadyAmount = partnerTraderRows.reduce(
+    (sum, trader) => sum + trader.approvedWalletContribution.amount,
+    0,
+  );
+  const pendingWalletAmount = partnerTraderRows.reduce(
+    (sum, trader) => sum + trader.pendingWalletContribution.amount,
+    0,
   );
   const filteredLedgerItems = useMemo(() => {
     const items = selectedLedger?.items ?? [];
@@ -530,6 +567,16 @@ export default function AdminPartnerWithdrawalsPage() {
                 <p className="mt-1 text-sm font-semibold text-foreground">{selectedLedger.activeWithdrawalCount} active request(s)</p>
               </div>
             </div>
+            <div className="mt-5">
+              <InlineStatusStrip items={[
+                { label: "Partner traders", value: partnerTraderRows.length },
+                { label: "Live synced", value: syncedTraderCount, tone: "accent" },
+                { label: "Trading", value: tradingTraderCount, tone: "accent" },
+                { label: "Qualified", value: qualifiedTraderCount, tone: "lime" },
+                { label: "Wallet-ready", value: formatMoney({ amount: walletReadyAmount, currency: selectedLedger.currency }), tone: "lime" },
+                { label: "Pending wallet", value: formatMoney({ amount: pendingWalletAmount, currency: selectedLedger.currency }), tone: "accent" },
+              ]} />
+            </div>
             <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
               <div className="min-w-0 xl:col-span-2">
                 <form onSubmit={saveConfiguration} className="mb-5 rounded-[4px] border border-line bg-background p-4">
@@ -624,6 +671,75 @@ export default function AdminPartnerWithdrawalsPage() {
                     />
                   </>
                 )}
+                <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-foreground">Assigned trader pipeline</h3>
+                      <p className="mt-1 text-sm text-muted">
+                        Live partner-side funnel for registration, sync, trading, qualification, and wallet readiness.
+                      </p>
+                    </div>
+                    {partnerTraders.isFetching ? <span className="text-xs text-muted">Refreshing…</span> : null}
+                  </div>
+
+                  {partnerTraders.isLoading ? (
+                    <div className="mt-4 space-y-2">
+                      {Array.from({ length: 4 }, (_, index) => (
+                        <div key={index} className="h-12 animate-pulse rounded-[4px] border border-line bg-background" />
+                      ))}
+                    </div>
+                  ) : partnerTraders.isError ? (
+                    <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+                      The partner trader pipeline could not be loaded.
+                    </p>
+                  ) : partnerTraderRows.length === 0 ? (
+                    <div className="mt-4">
+                      <EmptyState title="No assigned traders" description="Assign traders to this partner to populate the live pipeline." />
+                    </div>
+                  ) : (
+                    <div className="mt-4">
+                      <DataTable
+                        initialPageSize={8}
+                        pageSizeOptions={[8, 16, 32]}
+                        maxBodyHeight="420px"
+                        headers={["Trader", "Pipeline", "Model", "Gross revenue", "Wallet-ready", "Risk", "CPA progress"]}
+                        rows={partnerTraderRows.map((trader) => [
+                          <div key="trader" className="min-w-[180px]">
+                            <p className="truncate text-sm font-semibold text-foreground">{trader.name}</p>
+                            <p className="truncate text-xs text-muted">{trader.email}</p>
+                          </div>,
+                          <div key="pipeline" className="min-w-[160px]">
+                            <p className="text-sm font-semibold text-foreground">{labelPipeline(trader.pipelineStage)}</p>
+                            <p className="truncate text-xs text-muted">
+                              {trader.latestSyncAt
+                                ? `Live ${new Date(trader.latestSyncAt).toLocaleString()}`
+                                : `${trader.connectedAccounts}/${trader.accountCount} connected`}
+                            </p>
+                          </div>,
+                          <span key="model">{labelModel(trader.commissionModel)}</span>,
+                          <span key="revenue">{formatMoney(trader.grossRevenue)}</span>,
+                          <div key="wallet" className="min-w-[120px]">
+                            <p className="text-sm font-semibold text-accent-2">{formatMoney(trader.approvedWalletContribution)}</p>
+                            <p className="text-xs text-muted">pending {formatMoney(trader.pendingWalletContribution)}</p>
+                          </div>,
+                          <StatusPill key="risk" tone={RISK_TONES[trader.riskStatus]}>{trader.riskStatus}</StatusPill>,
+                          <div key="cpa" className="min-w-[150px]">
+                            <p className="text-sm font-semibold text-foreground">
+                              {trader.qualificationTargetLots != null
+                                ? `${trader.qualificationProgressLots.toFixed(2)} / ${trader.qualificationTargetLots.toFixed(2)}`
+                                : "Not configured"}
+                            </p>
+                            <p className="text-xs text-muted">
+                              {trader.cpaQualified
+                                ? trader.cpaTierLabel ? `Qualified · ${trader.cpaTierLabel}` : "Qualified"
+                                : trader.cpaTierLabel ? `Current ${trader.cpaTierLabel}` : "In progress"}
+                            </p>
+                          </div>,
+                        ])}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
               <form onSubmit={createRebate} className="flex w-full flex-col gap-4 rounded-[4px] border border-line bg-background p-4 xl:sticky xl:top-24">
                 <h3 className="font-semibold text-foreground">Add rebate entry</h3>
