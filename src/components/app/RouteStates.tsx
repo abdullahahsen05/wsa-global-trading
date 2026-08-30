@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { AlertTriangle, PanelsTopLeft, RefreshCcw, type LucideIcon } from "lucide-react";
+import { AlertTriangle, MessageSquare, RefreshCcw, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/app/BrandLogo";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
@@ -155,7 +155,7 @@ export function EmptyState({
   title,
   description,
   action,
-  icon = PanelsTopLeft,
+  icon = MessageSquare,
 }: {
   title: string;
   description: string;

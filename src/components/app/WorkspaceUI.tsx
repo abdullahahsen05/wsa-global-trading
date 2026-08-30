@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { motion, type HTMLMotionProps } from "framer-motion";
-import { PanelsTopLeft, type LucideIcon } from "lucide-react";
+import { MessageSquare, type LucideIcon } from "lucide-react";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
@@ -463,7 +463,7 @@ export function EmptyState({
   title,
   description,
   action,
-  icon = PanelsTopLeft,
+  icon = MessageSquare,
 }: {
   title: string;
   description: string;
