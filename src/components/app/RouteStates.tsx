@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { AlertTriangle, MessageSquare, RefreshCcw, type LucideIcon } from "lucide-react";
+import { AlertTriangle, RefreshCcw, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/app/BrandLogo";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
@@ -155,21 +155,24 @@ export function EmptyState({
   title,
   description,
   action,
-  icon = MessageSquare,
+  icon,
 }: {
   title: string;
   description: string;
   action?: ReactNode;
   icon?: LucideIcon;
 }) {
-  const Icon = icon;
-
   return (
     <div className="py-4 text-left">
-      <div className="grid h-9 w-9 place-items-center rounded-[4px] bg-accent/10 text-accent">
-        <Icon className="h-5 w-5" />
-      </div>
-      <h3 className="mt-4 text-lg font-semibold text-foreground">{title}</h3>
+      {icon ? (
+        <div className="grid h-9 w-9 place-items-center rounded-[4px] bg-accent/10 text-accent">
+          {(() => {
+            const Icon = icon;
+            return <Icon className="h-5 w-5" />;
+          })()}
+        </div>
+      ) : null}
+      <h3 className={`${icon ? "mt-4" : ""} text-lg font-semibold text-foreground`}>{title}</h3>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted">{description}</p>
       {action ? <div className="mt-5 flex">{action}</div> : null}
     </div>

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { motion, type HTMLMotionProps } from "framer-motion";
-import { MessageSquare, type LucideIcon } from "lucide-react";
+import { type LucideIcon } from "lucide-react";
 
 const ease = [0.22, 1, 0.36, 1] as const;
 
@@ -463,21 +463,24 @@ export function EmptyState({
   title,
   description,
   action,
-  icon = MessageSquare,
+  icon,
 }: {
   title: string;
   description: string;
   action?: ReactNode;
   icon?: LucideIcon;
 }) {
-  const Icon = icon;
-
   return (
     <div className="py-4 text-left">
-      <div className="grid h-9 w-9 place-items-center rounded-[4px] bg-accent/10 text-accent">
-        <Icon className="h-5 w-5" />
-      </div>
-      <h3 className="mt-4 text-lg font-semibold text-foreground">{title}</h3>
+      {icon ? (
+        <div className="grid h-9 w-9 place-items-center rounded-[4px] bg-accent/10 text-accent">
+          {(() => {
+            const Icon = icon;
+            return <Icon className="h-5 w-5" />;
+          })()}
+        </div>
+      ) : null}
+      <h3 className={`${icon ? "mt-4" : ""} text-lg font-semibold text-foreground`}>{title}</h3>
       <p className="mt-2 max-w-xl text-sm leading-6 text-muted">{description}</p>
       {action ? <div className="mt-5 flex w-full [&>*]:w-full sm:[&>*]:w-auto">{action}</div> : null}
     </div>
