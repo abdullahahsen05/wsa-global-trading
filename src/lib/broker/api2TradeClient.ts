@@ -4,6 +4,7 @@ if (typeof window !== "undefined") {
 
 import { publicApi2TradeError } from "./api2TradeErrors";
 import {
+  api2TradeUsesApiKeyAuth,
   getResolvedApi2TradeBaseUrl,
   getResolvedApi2TradeEventsUrl,
 } from "./provider";
@@ -14,6 +15,7 @@ export interface Api2TradeConfig {
   apiKey?: string;
   username?: string;
   password?: string;
+  authMode: "basic" | "apikey";
 }
 
 export interface Api2TradeAccountSummary {
@@ -149,8 +151,17 @@ export function loadApi2TradeConfig(): Api2TradeConfig | null {
   const username = process.env.API2TRADE_USERNAME?.trim();
   const password = process.env.API2TRADE_PASSWORD?.trim();
   if (!baseUrl) return null;
-  if (!apiKey && !(username && password)) return null;
-  return { baseUrl: trimSlash(baseUrl), eventsUrl: eventsUrl ? trimSlash(eventsUrl) : undefined, apiKey, username, password };
+  const authMode = api2TradeUsesApiKeyAuth() ? "apikey" as const : "basic" as const;
+  if (authMode === "apikey" && !apiKey) return null;
+  if (authMode === "basic" && !(username && password)) return null;
+  return {
+    baseUrl: trimSlash(baseUrl),
+    eventsUrl: eventsUrl ? trimSlash(eventsUrl) : undefined,
+    apiKey: authMode === "apikey" ? apiKey : undefined,
+    username: authMode === "basic" ? username : undefined,
+    password: authMode === "basic" ? password : undefined,
+    authMode,
+  };
 }
 
 function assertRecord(value: unknown, endpoint: string): Record<string, unknown> {
@@ -164,7 +175,7 @@ export class Api2TradeClient {
   constructor(private readonly config: Api2TradeConfig) {}
 
   usesApiKeyAuth(): boolean {
-    return Boolean(this.config.apiKey);
+    return this.config.authMode === "apikey";
   }
 
   private headers(): Record<string, string> {
@@ -269,18 +280,19 @@ export class Api2TradeClient {
   }
 
   private async requestWithExecutionFallback<T>(
+    method: "GET" | "POST",
     primaryEndpoint: string,
     fallbackEndpoint: string,
     params: Record<string, string | number | boolean | null | undefined> = {},
     body?: Record<string, string | number | boolean | null | undefined>,
   ): Promise<T> {
     try {
-      return await this.request<T>("POST", primaryEndpoint, params, { body });
+      return await this.request<T>(method, primaryEndpoint, params, body ? { body } : undefined);
     } catch (error) {
       if (!shouldFallbackToSafeExecutionEndpoint(error)) {
         throw error;
       }
-      return this.request<T>("POST", fallbackEndpoint, params, { body });
+      return this.request<T>(method, fallbackEndpoint, params, body ? { body } : undefined);
     }
   }
 
@@ -434,7 +446,21 @@ export class Api2TradeClient {
     comment?: string | null;
     slippage?: number | null;
   }): Promise<Api2TradeExecutionResponse> {
+    if (!this.usesApiKeyAuth()) {
+      const result = await this.request<unknown>("GET", "OrderSendSafe", {
+        ...this.accountParams(params.accountId),
+        symbol: params.symbol,
+        operation: params.operation === "Buy" ? 0 : 1,
+        volume: params.volume,
+        stoploss: params.stopLoss,
+        takeprofit: params.takeProfit,
+        comment: params.comment,
+        slippage: params.slippage,
+      });
+      return assertRecord(result, "OrderSendSafe") as Api2TradeExecutionResponse;
+    }
     const result = await this.requestWithExecutionFallback<unknown>(
+      "POST",
       "OrderSend",
       "OrderSendSafe",
       this.accountParams(params.accountId),
@@ -457,7 +483,16 @@ export class Api2TradeClient {
     lots?: number | null;
     comment?: string | null;
   }): Promise<Api2TradeExecutionResponse> {
+    if (!this.usesApiKeyAuth()) {
+      return this.request<Api2TradeExecutionResponse>("GET", "OrderCloseSafe", {
+        ...this.accountParams(params.accountId),
+        ticket: params.ticket,
+        lots: params.lots,
+        comment: params.comment,
+      });
+    }
     const result = await this.requestWithExecutionFallback<unknown>(
+      "POST",
       "OrderClose",
       "OrderCloseSafe",
       this.accountParams(params.accountId),
@@ -477,7 +512,16 @@ export class Api2TradeClient {
     stopLoss?: number | null;
     takeProfit?: number | null;
   }): Promise<Api2TradeExecutionResponse> {
+    if (!this.usesApiKeyAuth()) {
+      return this.request<Api2TradeExecutionResponse>("GET", "OrderModifySafe", {
+        ...this.accountParams(params.accountId),
+        ticket: params.ticket,
+        stoploss: params.stopLoss,
+        takeprofit: params.takeProfit,
+      });
+    }
     const result = await this.requestWithExecutionFallback<unknown>(
+      "POST",
       "OrderModify",
       "OrderModifySafe",
       this.accountParams(params.accountId),

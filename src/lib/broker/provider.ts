@@ -8,6 +8,8 @@ import { MetaApiBrokerAdapter } from "./MetaApiBrokerAdapter";
 
 export type BrokerProviderId = "metaapi" | "api2trade";
 
+type Api2TradeAuthMode = "auto" | "basic" | "apikey";
+
 export function getBrokerProviderId(): BrokerProviderId {
   return process.env.BROKER_PROVIDER?.trim().toLowerCase() === "api2trade"
     ? "api2trade"
@@ -23,9 +25,26 @@ export function api2TradeUsesDashboardAccounts(): boolean {
     && process.env.API2TRADE_CONNECTION_MODE?.trim().toLowerCase() === "dashboard-uuid";
 }
 
+function getApi2TradeAuthMode(): Api2TradeAuthMode {
+  const configured = process.env.API2TRADE_AUTH_MODE?.trim().toLowerCase();
+  if (configured === "basic" || configured === "apikey") return configured;
+  return "auto";
+}
+
 export function api2TradeUsesApiKeyAuth(): boolean {
-  return getBrokerProviderId() === "api2trade"
-    && Boolean(process.env.API2TRADE_API_KEY?.trim());
+  if (getBrokerProviderId() !== "api2trade") return false;
+  if (getApi2TradeAuthMode() === "basic") return false;
+  if (getApi2TradeAuthMode() === "apikey") return Boolean(process.env.API2TRADE_API_KEY?.trim());
+
+  const configuredBaseUrl = process.env.API2TRADE_BASE_URL?.trim().toLowerCase() ?? "";
+  if (configuredBaseUrl.includes("mt5.mt4api.dev")) return false;
+
+  return Boolean(process.env.API2TRADE_API_KEY?.trim())
+    && !(
+      process.env.API2TRADE_USERNAME?.trim()
+      && process.env.API2TRADE_PASSWORD?.trim()
+      && configuredBaseUrl.includes("mt4api.dev")
+    );
 }
 
 export function getResolvedApi2TradeBaseUrl(): string | null {
