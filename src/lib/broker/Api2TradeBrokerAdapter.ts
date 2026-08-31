@@ -127,6 +127,24 @@ function interpretExecution(response: Api2TradeExecutionResponse): BrokerExecuti
   };
 }
 
+function normalizeProviderAccountId(value: unknown): string {
+  if (value == null) return "";
+  let token = String(value).trim();
+  if (!token) return "";
+  if (
+    (token.startsWith('"') && token.endsWith('"'))
+    || (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    try {
+      const parsed = JSON.parse(token) as unknown;
+      if (typeof parsed === "string") token = parsed.trim();
+    } catch {
+      token = token.slice(1, -1).trim();
+    }
+  }
+  return token;
+}
+
 function isMissingApi2TradeClient(error: unknown): boolean {
   const message = publicApi2TradeError(error).toLowerCase();
   return message.includes("invalid_token")
@@ -194,7 +212,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
         409,
       );
     }
-    return data.provider_account_id as string;
+    return normalizeProviderAccountId(data.provider_account_id);
   }
 
   private async reconnectWithStoredCredentials(

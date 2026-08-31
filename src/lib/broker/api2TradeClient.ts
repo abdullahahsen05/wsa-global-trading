@@ -149,6 +149,24 @@ function toBasicAuth(username: string, password: string): string {
   return Buffer.from(`${username}:${password}`).toString("base64");
 }
 
+function normalizeApi2TradeToken(value: unknown): string {
+  if (value == null) return "";
+  let token = String(value).trim();
+  if (!token) return "";
+  if (
+    (token.startsWith('"') && token.endsWith('"'))
+    || (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    try {
+      const parsed = JSON.parse(token) as unknown;
+      if (typeof parsed === "string") token = parsed.trim();
+    } catch {
+      token = token.slice(1, -1).trim();
+    }
+  }
+  return token;
+}
+
 export function loadApi2TradeConfig(): Api2TradeConfig | null {
   const baseUrl = getResolvedApi2TradeBaseUrl();
   const eventsUrl = getResolvedApi2TradeEventsUrl();
@@ -326,11 +344,11 @@ export class Api2TradeClient {
       },
     });
     if (typeof result === "string") {
-      const token = result.trim();
+      const token = normalizeApi2TradeToken(result);
       if (token) return token;
     }
     const record = assertRecord(result, "RegisterAccount") as Api2TradeRegisteredAccount;
-    const token = String(record.id ?? record.uuid ?? record.accountId ?? "").trim();
+    const token = normalizeApi2TradeToken(record.id ?? record.uuid ?? record.accountId);
     if (!token) {
       throw new Error("API2Trade RegisterAccount did not return an account token.");
     }
@@ -352,7 +370,7 @@ export class Api2TradeClient {
       downloadOrderHistory: params.downloadOrderHistory ?? true,
       reconnectOnSymbolUpdate: true,
     }, { expectText: true });
-    const token = String(result ?? "").trim();
+    const token = normalizeApi2TradeToken(result);
     if (!token) {
       throw new Error("API2Trade ConnectEx did not return an account token.");
     }
@@ -360,7 +378,9 @@ export class Api2TradeClient {
   }
 
   async connectByToken(accountId: string): Promise<string> {
-    return this.request<string>("GET", "ConnectByToken", this.accountParams(accountId), { expectText: true });
+    return normalizeApi2TradeToken(
+      await this.request<string>("GET", "ConnectByToken", this.accountParams(accountId), { expectText: true }),
+    );
   }
 
   async subscribeOrderUpdate(accountId: string): Promise<string> {
