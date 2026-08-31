@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, RefreshCcw, ShieldCheck, X } from "lucide-react";
 import { GhostButton, Panel, PrimaryButton, StatusPill } from "@/components/app/WorkspaceUI";
+import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
 
 interface CredentialStatus {
   accountId: string;
@@ -434,24 +435,28 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
                 <option value="MT4">MT4</option>
               </select>
             </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
-                Broker name <span className="text-danger">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={form.brokerName}
-                onChange={(e) => setForm((f) => ({
+            <BrokerAutocompleteField
+              label="Broker name"
+              value={form.brokerName}
+              onChange={(value) => setForm((f) => ({
+                ...f,
+                brokerName: value,
+                server: "",
+                customServer: "",
+              }))}
+              onSelectBroker={(broker) => {
+                setForm((f) => ({
                   ...f,
-                  brokerName: e.target.value,
+                  brokerName: broker.name,
                   server: "",
                   customServer: "",
-                }))}
-                placeholder="e.g. Vantage Markets, IC Markets, Exness"
-                className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"
-              />
-            </div>
+                }));
+                setServerSearchQuery(broker.name);
+              }}
+              platform={form.platform as "MT4" | "MT5"}
+              placeholder="e.g. Vantage Markets, IC Markets, Exness"
+              required
+            />
           </div>
 
           <div>

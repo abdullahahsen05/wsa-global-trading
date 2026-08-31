@@ -19,6 +19,7 @@ import {
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
 import { SearchField, SelectField, TextField } from "@/components/app/FormFields";
+import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
@@ -103,6 +104,7 @@ function AccountsContent() {
   const [errorMessage, setErrorMessage] = useState("");
   // Holds the accountId created in step 1, used in step 2
   const [pendingAccountId, setPendingAccountId] = useState<string | null>(null);
+  const [setupBrokerName, setSetupBrokerName] = useState("");
   const [pendingBrokerName, setPendingBrokerName] = useState("");
   const [selectedPlatform, setSelectedPlatform] = useState<BrokerPlatform>("MT5");
   const [selectedServerOption, setSelectedServerOption] = useState("");
@@ -171,6 +173,7 @@ function AccountsContent() {
   const resetDialog = () => {
     setStep("setup");
     setPendingAccountId(null);
+    setSetupBrokerName("");
     setPendingBrokerName("");
     setSelectedPlatform("MT5");
     setSelectedServerOption("");
@@ -189,7 +192,7 @@ function AccountsContent() {
     const form = event.currentTarget;
     const formData = new FormData(form);
     const accountName = (formData.get("accountLabel") as string)?.trim();
-    const brokerName = (formData.get("brokerName") as string)?.trim();
+    const brokerName = setupBrokerName.trim() || (formData.get("brokerName") as string)?.trim();
 
     if (!accountName || !brokerName) {
       setErrorMessage("Account label and broker are required.");
@@ -412,9 +415,21 @@ function AccountsContent() {
                           placeholder="e.g. Evaluation Phase 1"
                           required
                         />
-                        <TextField
+                        <BrokerAutocompleteField
                           label="Broker name"
                           name="brokerName"
+                          value={setupBrokerName}
+                          onChange={(value) => {
+                            setSetupBrokerName(value);
+                            setSelectedServerOption("");
+                            setServerSearchDraft(value);
+                          }}
+                          onSelectBroker={(broker) => {
+                            setSetupBrokerName(broker.name);
+                            setServerSearchDraft(broker.name);
+                            setServerSearchQuery(broker.name);
+                          }}
+                          platform={selectedPlatform}
                           placeholder="e.g. IC Markets, Vantage Markets, Exness"
                           required
                         />

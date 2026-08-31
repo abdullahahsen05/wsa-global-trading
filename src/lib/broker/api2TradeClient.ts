@@ -86,6 +86,11 @@ export interface Api2TradeCompanySearchResult {
     name?: string;
     access?: string[];
   }>;
+  logo?: string;
+  logoUrl?: string;
+  icon?: string;
+  image?: string;
+  website?: string;
 }
 
 export interface Api2TradeOrderUpdateSummary {

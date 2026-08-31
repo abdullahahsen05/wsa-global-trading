@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck, X } from "lucide-react";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
+import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
 
 type Platform = "MT4" | "MT5";
 type BrokerServer = {
@@ -174,7 +175,25 @@ export function MasterAccountConnectDialog({
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Broker name" value={brokerName} onChange={(value) => { setBrokerName(value); setServerSelection(""); setCustomServer(""); }} placeholder="Broker name" disabled={Boolean(createdAccountId)} />
+              <BrokerAutocompleteField
+                label="Broker name"
+                value={brokerName}
+                onChange={(value) => {
+                  setBrokerName(value);
+                  setServerSelection("");
+                  setCustomServer("");
+                }}
+                onSelectBroker={(broker) => {
+                  setBrokerName(broker.name);
+                  setServerSelection("");
+                  setCustomServer("");
+                  setServerSearchQuery(broker.name);
+                }}
+                platform={platform}
+                placeholder="Search broker name"
+                disabled={Boolean(createdAccountId)}
+                required
+              />
               <label className="space-y-2 text-sm font-semibold text-foreground">
                 Server
                 <select required value={serverSelection} onChange={(event) => setServerSelection(event.target.value)} disabled={!brokerName.trim() || servers.isFetching} className="h-12 w-full rounded-[4px] border border-line bg-background px-3 text-sm">

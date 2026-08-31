@@ -31,11 +31,11 @@ export async function searchApi2TradeServers(params: {
   }
 
   const query = params.query.trim().slice(0, 100);
-  if (query.length < 2) {
+  if (query.length < 1) {
     return {
       available: true,
       servers: [],
-      message: "Enter at least two characters to search known MetaTrader servers.",
+      message: "Enter a broker or server name to search known MetaTrader servers.",
     };
   }
 
