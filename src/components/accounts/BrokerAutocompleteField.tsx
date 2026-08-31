@@ -67,14 +67,19 @@ export function BrokerAutocompleteField({
   const [query, setQuery] = useState(value);
   const blurTimer = useRef<number | null>(null);
 
+  function clearBlurTimer() {
+    if (blurTimer.current) {
+      window.clearTimeout(blurTimer.current);
+      blurTimer.current = null;
+    }
+  }
+
   useEffect(() => {
     const timer = window.setTimeout(() => setQuery(value.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [value]);
 
-  useEffect(() => () => {
-    if (blurTimer.current) window.clearTimeout(blurTimer.current);
-  }, []);
+  useEffect(() => () => clearBlurTimer(), []);
 
   const brokersQuery = useQuery({
     queryKey: ["api2trade-broker-search", platform, query],
@@ -108,7 +113,7 @@ export function BrokerAutocompleteField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => {
-            if (blurTimer.current) window.clearTimeout(blurTimer.current);
+            clearBlurTimer();
             setOpen(true);
           }}
           onBlur={() => {
@@ -119,18 +124,25 @@ export function BrokerAutocompleteField({
           className={controlClassName}
         />
         {open ? (
-          <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-50 max-h-72 overflow-y-auto rounded-[6px] border border-line bg-panel shadow-[0_18px_45px_rgba(0,0,0,0.42)]">
+          <div
+            role="listbox"
+            tabIndex={-1}
+            onMouseDown={(event) => event.preventDefault()}
+            onPointerDown={clearBlurTimer}
+            className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-[80] max-h-[min(20rem,46vh)] overflow-y-auto overscroll-contain rounded-[6px] border border-line bg-panel shadow-[0_18px_45px_rgba(0,0,0,0.42)] [scrollbar-color:rgba(250,204,21,0.65)_rgba(255,255,255,0.08)] [scrollbar-width:thin]"
+          >
             {brokers.map((broker) => (
               <button
                 key={broker.id}
                 type="button"
-                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   onChange(broker.name);
                   onSelectBroker?.(broker);
                   setOpen(false);
                 }}
-                className="flex w-full items-center gap-3 border-b border-line/60 px-3 py-3 text-left last:border-b-0 hover:bg-accent/10"
+                role="option"
+                aria-selected={broker.name === value}
+                className="flex w-full items-center gap-3 border-b border-line/60 px-3 py-3 text-left last:border-b-0 hover:bg-accent/10 focus:bg-accent/10 focus:outline-none"
               >
                 {broker.logoUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
