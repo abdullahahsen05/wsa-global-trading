@@ -900,7 +900,7 @@ export async function syncTradingAccount(
       status: 'DISCONNECTED',
       snapshotInserted: false,
       tradesUpserted: 0,
-      error: `${getBrokerProviderLabel(activeProvider)} is not configured.`,
+      error: `${getBrokerProviderLabel()} is not configured.`,
     };
   }
 
