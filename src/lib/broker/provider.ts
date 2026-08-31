@@ -4,20 +4,17 @@ if (typeof window !== "undefined") {
 
 import { Api2TradeBrokerAdapter } from "./Api2TradeBrokerAdapter";
 import type { BrokerAdapter } from "./BrokerAdapter";
-import { MetaApiBrokerAdapter } from "./MetaApiBrokerAdapter";
 
 export type BrokerProviderId = "metaapi" | "api2trade";
 
 type Api2TradeAuthMode = "auto" | "basic" | "apikey";
 
 export function getBrokerProviderId(): BrokerProviderId {
-  return process.env.BROKER_PROVIDER?.trim().toLowerCase() === "api2trade"
-    ? "api2trade"
-    : "metaapi";
+  return "api2trade";
 }
 
 export function getBrokerProviderLabel(provider = getBrokerProviderId()): string {
-  return provider === "api2trade" ? "API2Trade" : "MetaApi";
+  return provider === "api2trade" ? "API2Trade" : "API2Trade";
 }
 
 export function api2TradeUsesDashboardAccounts(): boolean {
@@ -70,17 +67,13 @@ export function getResolvedApi2TradeEventsUrl(): string | undefined {
 }
 
 export function createBrokerAdapter(): BrokerAdapter {
-  return getBrokerProviderId() === "api2trade"
-    ? new Api2TradeBrokerAdapter()
-    : new MetaApiBrokerAdapter();
+  return new Api2TradeBrokerAdapter();
 }
 
 export function brokerProviderConfigured(): boolean {
-  return getBrokerProviderId() === "api2trade"
-    ? Boolean(
-        getResolvedApi2TradeBaseUrl()
-        && (process.env.API2TRADE_API_KEY?.trim()
-          || (process.env.API2TRADE_USERNAME?.trim() && process.env.API2TRADE_PASSWORD?.trim())),
-      )
-    : Boolean(process.env.METAAPI_TOKEN?.trim());
+  return Boolean(
+    getResolvedApi2TradeBaseUrl()
+    && (process.env.API2TRADE_API_KEY?.trim()
+      || (process.env.API2TRADE_USERNAME?.trim() && process.env.API2TRADE_PASSWORD?.trim())),
+  );
 }

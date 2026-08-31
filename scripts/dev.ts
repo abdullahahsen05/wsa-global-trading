@@ -88,13 +88,9 @@ if (
 
 if (
   runWorkers &&
-  (
-    process.env.BROKER_PROVIDER === "api2trade"
-      ? Boolean(
-        process.env.API2TRADE_BASE_URL &&
-        (process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD)),
-      )
-      : Boolean(process.env.METAAPI_TOKEN)
+  Boolean(
+    process.env.API2TRADE_BASE_URL &&
+    (process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD)),
   ) &&
   process.env.WSA_RISK_ENGINE_ENABLED !== "false"
 ) {

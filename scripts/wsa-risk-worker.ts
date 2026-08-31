@@ -652,25 +652,15 @@ async function shutdown() {
 }
 
 async function main() {
-  if (process.env.BROKER_PROVIDER === "api2trade") {
-    if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))) {
-      throw new Error("API2Trade risk worker requires API2TRADE_BASE_URL plus API key or Basic Auth credentials.");
-    }
-    console.log(`[risk-worker] API2Trade polling source started; reconciling every ${reconcileMs}ms`);
-  } else if (!process.env.METAAPI_TOKEN) {
-    throw new Error("METAAPI_TOKEN is required for the WSA live risk worker.");
-  } else {
-    console.log(`[risk-worker] started; reconciling every ${reconcileMs}ms`);
+  if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))) {
+    throw new Error("API2Trade risk worker requires API2TRADE_BASE_URL plus API key or Basic Auth credentials.");
   }
+  console.log(`[risk-worker] API2Trade polling source started; reconciling every ${reconcileMs}ms`);
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
   while (!stopping) {
     try {
-      if (process.env.BROKER_PROVIDER === "api2trade") {
-        await reconcileApi2TradeRiskAccounts();
-      } else {
-        await reconcileStreams();
-      }
+      await reconcileApi2TradeRiskAccounts();
     } catch (error) {
       console.error(
         `[risk-worker] reconcile cycle failed; retrying in ${reconcileMs}ms: ${

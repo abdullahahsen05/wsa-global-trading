@@ -11,7 +11,6 @@ export async function GET() {
     const adapter = createBrokerAdapter();
     const executionConfigured = adapter.executionAvailable();
     const providerConfigured = brokerProviderConfigured();
-    const metaapiTokenConfigured = Boolean(process.env.METAAPI_TOKEN);
     const encryptionConfigured = Boolean(process.env.ENCRYPTION_KEY);
     return jsonOk({
       ...settings,
@@ -19,7 +18,7 @@ export async function GET() {
       brokerProviderLabel: getBrokerProviderLabel(),
       executionConfigured,
       providerConfigured,
-      metaapiTokenConfigured,
+      metaapiTokenConfigured: false,
       api2TradeConfigured: getBrokerProviderId() === "api2trade" ? providerConfigured : false,
       encryptionConfigured,
     });

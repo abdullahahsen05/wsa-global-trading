@@ -19,7 +19,9 @@ const evaluationIntervalMs = Math.max(60_000, Number.parseInt(process.env.WSA_EV
 const staleMinutes = Math.max(5, Number.parseInt(process.env.WORKER_STALE_JOB_MINUTES ?? "15", 10) || 15);
 const maxJobs = Math.min(Math.max(Number.parseInt(process.env.WORKER_MAX_JOBS_PER_RUN ?? "5", 10) || 5, 1), 20);
 const riskStreamOwnsAccountProjection =
-  Boolean(process.env.METAAPI_TOKEN)
+  process.env.BROKER_PROVIDER === "api2trade"
+  && Boolean(process.env.API2TRADE_BASE_URL)
+  && Boolean(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))
   && process.env.WSA_RISK_ENGINE_ENABLED === "true";
 const recurringAccountSyncEnabled =
   process.env.WSA_BACKGROUND_ACCOUNT_SYNC_ENABLED === "true"

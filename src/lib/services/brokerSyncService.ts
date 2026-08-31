@@ -198,8 +198,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function liveRiskProjectionEnabled(): boolean {
-  return getBrokerProviderId() !== 'api2trade'
-    && Boolean(process.env.METAAPI_TOKEN)
+  return getBrokerProviderId() === 'api2trade'
+    && brokerProviderConfigured()
     && process.env.WSA_RISK_ENGINE_ENABLED === 'true';
 }
 

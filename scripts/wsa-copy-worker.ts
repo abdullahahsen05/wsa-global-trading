@@ -561,14 +561,10 @@ async function main() {
   if (process.env.WSA_COPY_ENGINE_ENABLED !== "true") {
     throw new Error("WSA copy worker is disabled.");
   }
-  if (getBrokerProviderId() === "api2trade") {
-    if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))) {
-      throw new Error("API2Trade copy worker requires API2TRADE_BASE_URL plus API key or Basic Auth credentials.");
-    }
-    console.log("[copy-worker] API2Trade websocket-first source enabled; WSA engine remains local.");
-  } else if (!process.env.METAAPI_TOKEN) {
-    throw new Error("WSA copy worker is disabled or METAAPI_TOKEN is missing.");
+  if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))) {
+    throw new Error("API2Trade copy worker requires API2TRADE_BASE_URL plus API key or Basic Auth credentials.");
   }
+  console.log("[copy-worker] API2Trade websocket-first source enabled; WSA engine remains local.");
   if (process.env.BROKER_EXECUTION_ENABLED !== "true") {
     throw new Error("BROKER_EXECUTION_ENABLED must be true before the live WSA worker can start.");
   }
