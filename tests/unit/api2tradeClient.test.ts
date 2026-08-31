@@ -3,7 +3,6 @@ import { Api2TradeClient, loadApi2TradeConfig } from "@/lib/broker/api2TradeClie
 import { api2TradeUsesApiKeyAuth, getResolvedApi2TradeBaseUrl } from "@/lib/broker/provider";
 
 const ORIGINAL_ENV = {
-  BROKER_PROVIDER: process.env.BROKER_PROVIDER,
   API2TRADE_AUTH_MODE: process.env.API2TRADE_AUTH_MODE,
   API2TRADE_BASE_URL: process.env.API2TRADE_BASE_URL,
   API2TRADE_API_KEY: process.env.API2TRADE_API_KEY,
@@ -12,7 +11,6 @@ const ORIGINAL_ENV = {
 };
 
 afterEach(() => {
-  process.env.BROKER_PROVIDER = ORIGINAL_ENV.BROKER_PROVIDER;
   process.env.API2TRADE_AUTH_MODE = ORIGINAL_ENV.API2TRADE_AUTH_MODE;
   process.env.API2TRADE_BASE_URL = ORIGINAL_ENV.API2TRADE_BASE_URL;
   process.env.API2TRADE_API_KEY = ORIGINAL_ENV.API2TRADE_API_KEY;
@@ -22,13 +20,12 @@ afterEach(() => {
 });
 
 describe("api2trade auth mode resolution", () => {
-  it("prefers direct MT5 auth for mt5.mt4api.dev even when an api key is still present", () => {
-    process.env.BROKER_PROVIDER = "api2trade";
+  it("always uses direct MT5 auth even when legacy API-key env values are still present", () => {
+    process.env.API2TRADE_AUTH_MODE = "apikey";
     process.env.API2TRADE_BASE_URL = "https://mt5.mt4api.dev";
     process.env.API2TRADE_API_KEY = "legacy-key";
     process.env.API2TRADE_USERNAME = "swagger-user";
     process.env.API2TRADE_PASSWORD = "swagger-pass";
-    delete process.env.API2TRADE_AUTH_MODE;
 
     expect(api2TradeUsesApiKeyAuth()).toBe(false);
     expect(getResolvedApi2TradeBaseUrl()).toBe("https://mt5.mt4api.dev");
@@ -38,22 +35,6 @@ describe("api2trade auth mode resolution", () => {
     expect(config?.authMode).toBe("basic");
     expect(config?.apiKey).toBeUndefined();
     expect(config?.username).toBe("swagger-user");
-  });
-
-  it("allows forcing the old api-key mode explicitly", () => {
-    process.env.BROKER_PROVIDER = "api2trade";
-    process.env.API2TRADE_AUTH_MODE = "apikey";
-    process.env.API2TRADE_BASE_URL = "https://mt5.mt4api.dev";
-    process.env.API2TRADE_API_KEY = "paid-key";
-    process.env.API2TRADE_USERNAME = "swagger-user";
-    process.env.API2TRADE_PASSWORD = "swagger-pass";
-
-    expect(api2TradeUsesApiKeyAuth()).toBe(true);
-    expect(getResolvedApi2TradeBaseUrl()).toBe("https://api.metatraderapi.dev");
-
-    const config = loadApi2TradeConfig();
-    expect(config?.authMode).toBe("apikey");
-    expect(config?.apiKey).toBe("paid-key");
   });
 });
 

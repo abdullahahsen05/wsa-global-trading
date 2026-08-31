@@ -147,17 +147,15 @@ function toBasicAuth(username: string, password: string): string {
 export function loadApi2TradeConfig(): Api2TradeConfig | null {
   const baseUrl = getResolvedApi2TradeBaseUrl();
   const eventsUrl = getResolvedApi2TradeEventsUrl();
-  const apiKey = process.env.API2TRADE_API_KEY?.trim();
   const username = process.env.API2TRADE_USERNAME?.trim();
   const password = process.env.API2TRADE_PASSWORD?.trim();
   if (!baseUrl) return null;
   const authMode = api2TradeUsesApiKeyAuth() ? "apikey" as const : "basic" as const;
-  if (authMode === "apikey" && !apiKey) return null;
   if (authMode === "basic" && !(username && password)) return null;
   return {
     baseUrl: trimSlash(baseUrl),
     eventsUrl: eventsUrl ? trimSlash(eventsUrl) : undefined,
-    apiKey: authMode === "apikey" ? apiKey : undefined,
+    apiKey: undefined,
     username: authMode === "basic" ? username : undefined,
     password: authMode === "basic" ? password : undefined,
     authMode,

@@ -27,10 +27,9 @@ const snapshotMs = Math.max(
   10_000,
   Number.parseInt(process.env.WSA_RISK_SNAPSHOT_MS ?? "30000", 10) || 30_000,
 );
-const defaultTradeReconcileMs = process.env.BROKER_PROVIDER === "api2trade" ? 15_000 : 5_000;
 const tradeReconcileMs = Math.max(
-  process.env.BROKER_PROVIDER === "api2trade" ? 10_000 : 2_000,
-  Number.parseInt(process.env.WSA_TRADE_RECONCILE_MS ?? String(defaultTradeReconcileMs), 10) || defaultTradeReconcileMs,
+  10_000,
+  Number.parseInt(process.env.WSA_TRADE_RECONCILE_MS ?? "15000", 10) || 15_000,
 );
 const liveCopyStreamEnabled =
   process.env.WSA_COPY_ENGINE_ENABLED === "true"
@@ -652,8 +651,8 @@ async function shutdown() {
 }
 
 async function main() {
-  if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_API_KEY || (process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD))) {
-    throw new Error("API2Trade risk worker requires API2TRADE_BASE_URL plus API key or Basic Auth credentials.");
+  if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD)) {
+    throw new Error("API2Trade risk worker requires API2TRADE_BASE_URL plus paid MT5 API username/password.");
   }
   console.log(`[risk-worker] API2Trade polling source started; reconciling every ${reconcileMs}ms`);
   process.once("SIGINT", () => void shutdown());
