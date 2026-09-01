@@ -66,6 +66,17 @@ const dashboardTabs: Array<{ id: DashboardView; label: string }> = [
   { id: "CALENDAR_TRACKER", label: "Calendar Tracker" },
 ];
 
+function formatSyncTime(value: string | null | undefined): string {
+  if (!value) return "Not synced";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not synced";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 export default function TraderDashboardPage() {
   const { data: summary, isLoading } = useTraderAccessSummary();
   const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
@@ -373,7 +384,6 @@ function TraderDashboardContent() {
   );
   const accountCurrency = baseAccount?.balance.currency ?? "USD";
   const accountIdentity = getAccountDisplayIdentity(baseAccount);
-  const currentHour = new Date().getHours();
   const overlayPeriodStats = useMemo(
     () => ({
       ...periodStats,
@@ -455,30 +465,32 @@ function TraderDashboardContent() {
 
   const marketSentimentItems = [
     {
-      label: "Session",
-      value: currentHour < 7 ? "Asia late" : currentHour < 13 ? "London" : currentHour < 19 ? "New York" : "Overnight",
-      helper: "Current market window",
-      tone: "accent" as const,
+      label: "Open Trades",
+      value: String(accountOpenTradeCount),
+      helper: "Live open positions from the selected account",
+      tone: accountOpenTradeCount > 0 ? ("accent" as const) : ("muted" as const),
     },
     {
-      label: "Trend Bias",
-      value: periodStats.winRate >= 58 && periodProfitFactor >= 1.4 ? "Bullish" : "Balanced",
-      helper: "Derived from your win rate and profit factor",
-      tone: "lime" as const,
+      label: "Closed Trades",
+      value: String(periodStats.tradeCount),
+      helper: `${selectedPeriod === "DAILY" ? "Today" : selectedPeriod === "WEEKLY" ? "Last 7 days" : "This month"} from the live trade ledger`,
+      tone: periodStats.tradeCount > 0 ? ("lime" as const) : ("muted" as const),
     },
     {
-      label: "Volatility",
-      value: accountDrawdown >= 4.5 ? "Elevated" : accountDrawdown >= 3 ? "Moderate" : "Low",
-      helper: "Based on your account drawdown",
-      tone: accountDrawdown >= 4.5 ? ("danger" as const) : ("lime" as const),
+      label: "Period P&L",
+      value: formatMoney({ amount: periodStats.totalProfit, currency: accountCurrency }),
+      helper: "Closed-trade profit for the selected period",
+      tone: periodStats.totalProfit > 0
+        ? ("lime" as const)
+        : periodStats.totalProfit < 0
+          ? ("danger" as const)
+          : ("muted" as const),
     },
     {
-      label: "Performance Score",
-      value: hasClosedTrades
-        ? `${Math.min(99, Math.round((periodStats.winRate * 0.8 + periodProfitFactor * 10) / 1.1))}`
-        : "—",
-      helper: "Composite score from your period results",
-      tone: "accent" as const,
+      label: "Last Sync",
+      value: formatSyncTime(baseAccount?.lastSyncedAt ?? baseAccount?.updatedAt),
+      helper: "Latest broker snapshot received by the platform",
+      tone: baseAccount?.live ? ("lime" as const) : ("muted" as const),
     },
   ];
 
