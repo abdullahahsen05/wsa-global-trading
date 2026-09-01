@@ -10,7 +10,7 @@ import { createNotification } from '@/lib/services/notificationService';
 import { resolveAccountLifecycleStatus } from '@/lib/accounts/lifecycle';
 import { publicMetaApiError } from '@/lib/broker/metaApiErrors';
 import { Api2TradeBrokerAdapter } from '@/lib/broker/Api2TradeBrokerAdapter';
-import { publicApi2TradeError, publicBrokerConnectionError } from '@/lib/broker/api2TradeErrors';
+import { publicBrokerConnectionError } from '@/lib/broker/api2TradeErrors';
 import { acquireOperationalLock } from '@/lib/services/operationalLockService';
 import { calculatePartnerRebatesForTradingAccounts } from '@/lib/services/partnerRebateCalculationService';
 import {
@@ -29,6 +29,25 @@ function safeIso(val: unknown, fallback?: string): string {
   if (val == null) return fb;
   const d = val instanceof Date ? val : new Date(typeof val === 'number' ? val * 1000 : String(val));
   return isNaN(d.getTime()) ? fb : d.toISOString();
+}
+
+function usableApi2TradeProviderAccountId(value: string | null): string | null {
+  const token = value?.trim();
+  if (!token) return null;
+  if (token.startsWith('{') || token.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(token) as unknown;
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        const nested = String(record.id ?? record.uuid ?? record.accountId ?? '').trim();
+        return nested || null;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+  return token;
 }
 
 async function loadCachedTradeRefreshSummary(
@@ -928,7 +947,9 @@ export async function syncTradingAccount(
     actorUserId,
     credentials: effectiveCredentials,
     platform,
-    existingProviderAccountId: account.provider_account_id ?? null,
+    existingProviderAccountId: activeProvider === 'api2trade'
+      ? usableApi2TradeProviderAccountId(account.provider_account_id ?? null)
+      : account.provider_account_id ?? null,
     preserveRestricted: account.status === 'RESTRICTED',
     previousStatus: account.status,
   };

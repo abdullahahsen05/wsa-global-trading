@@ -151,8 +151,19 @@ function toBasicAuth(username: string, password: string): string {
 
 function normalizeApi2TradeToken(value: unknown): string {
   if (value == null) return "";
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    return normalizeApi2TradeToken(record.id ?? record.uuid ?? record.accountId);
+  }
   let token = String(value).trim();
   if (!token) return "";
+  if (token.startsWith("{") || token.startsWith("[")) {
+    try {
+      return normalizeApi2TradeToken(JSON.parse(token) as unknown);
+    } catch {
+      return "";
+    }
+  }
   if (
     (token.startsWith('"') && token.endsWith('"'))
     || (token.startsWith("'") && token.endsWith("'"))

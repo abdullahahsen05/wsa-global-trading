@@ -129,8 +129,19 @@ function interpretExecution(response: Api2TradeExecutionResponse): BrokerExecuti
 
 function normalizeProviderAccountId(value: unknown): string {
   if (value == null) return "";
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    return normalizeProviderAccountId(record.id ?? record.uuid ?? record.accountId);
+  }
   let token = String(value).trim();
   if (!token) return "";
+  if (token.startsWith("{") || token.startsWith("[")) {
+    try {
+      return normalizeProviderAccountId(JSON.parse(token) as unknown);
+    } catch {
+      return "";
+    }
+  }
   if (
     (token.startsWith('"') && token.endsWith('"'))
     || (token.startsWith("'") && token.endsWith("'"))
@@ -212,7 +223,15 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
         409,
       );
     }
-    return normalizeProviderAccountId(data.provider_account_id);
+    const providerAccountId = normalizeProviderAccountId(data.provider_account_id);
+    if (!providerAccountId) {
+      throw new BrokerExecutionError(
+        BROKER_EXEC_ERROR.ACCOUNT_NOT_CONNECTED,
+        "This trading account has an invalid broker connection reference. Reconnect the account to refresh it.",
+        409,
+      );
+    }
+    return providerAccountId;
   }
 
   private async reconnectWithStoredCredentials(
