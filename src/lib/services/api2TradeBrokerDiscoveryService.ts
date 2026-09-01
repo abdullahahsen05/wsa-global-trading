@@ -167,8 +167,8 @@ export async function searchApi2TradeBrokers(params: {
         available: true,
         brokers: recommendations,
         message: recommendations.length
-          ? "Showing brokers already used in this workspace. Start typing to search API2Trade live broker data."
-          : "Start typing a broker name to search API2Trade live broker data.",
+          ? "Showing brokers already used in this workspace. Start typing to search live broker data."
+          : "Start typing a broker name to search live broker data.",
         cached: false,
       };
       cacheSet(cacheKey, response, EMPTY_QUERY_CACHE_TTL_MS);

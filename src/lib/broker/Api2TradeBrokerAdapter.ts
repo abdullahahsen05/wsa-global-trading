@@ -302,7 +302,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     if (client.usesApiKeyAuth()) {
       const refreshedProviderAccountId = await this.reconnectWithStoredCredentials(accountId, providerAccountId);
       if (!refreshedProviderAccountId) {
-        throw new Error("API2Trade account is not connected and could not be re-registered.");
+        throw new Error("Broker account is not connected and could not be refreshed.");
       }
       await this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => true);
       return refreshedProviderAccountId;
@@ -315,7 +315,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
         return Boolean(await this.reconnectWithStoredCredentials(accountId, providerAccountId));
       });
     if (!tokenReconnectOk) {
-      throw new Error("API2Trade account is not connected and reconnect by token failed.");
+      throw new Error("Broker account is not connected and reconnect failed.");
     }
     await this.checkApi2TradeSession(providerAccountId).catch(() => true);
     return providerAccountId;

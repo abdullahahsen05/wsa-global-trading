@@ -1,6 +1,11 @@
 export function publicApi2TradeError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error ?? "API2Trade request failed.");
+  const raw = error instanceof Error ? error.message : String(error ?? "Broker service request failed.");
   return raw
+    .replace(/API\s*2\s*Trade/gi, "broker service")
+    .replace(/API2Trade/gi, "broker service")
+    .replace(/Api2Trade/gi, "broker service")
+    .replace(/https?:\/\/(?:mt4|mt5)\.mt4api\.dev[^\s,)"]*/gi, "broker service")
+    .replace(/\b(?:mt4|mt5)\.mt4api\.dev\b/gi, "broker service")
     .replace(/password[^,\s]*/gi, "password=[redacted]")
     .replace(/user=\d+/gi, "user=[redacted]")
     .replace(/login[^,\s]*/gi, "login=[redacted]")

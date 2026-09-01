@@ -292,7 +292,7 @@ export class Api2TradeClient {
     });
     const bodyText = await response.text();
     if (!response.ok) {
-      throw new Error(publicApi2TradeError(`API2Trade ${endpoint} failed (${response.status}): ${bodyText}`));
+      throw new Error(publicApi2TradeError(`Broker service ${endpoint} failed (${response.status}): ${bodyText}`));
     }
     if (options?.expectText) return bodyText as T;
     if (!bodyText.trim()) return null as T;
@@ -361,7 +361,7 @@ export class Api2TradeClient {
     const record = assertRecord(result, "RegisterAccount") as Api2TradeRegisteredAccount;
     const token = normalizeApi2TradeToken(record.id ?? record.uuid ?? record.accountId);
     if (!token) {
-      throw new Error("API2Trade RegisterAccount did not return an account token.");
+      throw new Error("Broker service did not return an account token.");
     }
     return token;
   }
@@ -383,7 +383,7 @@ export class Api2TradeClient {
     }, { expectText: true });
     const token = normalizeApi2TradeToken(result);
     if (!token) {
-      throw new Error("API2Trade ConnectEx did not return an account token.");
+      throw new Error("Broker service did not return an account token.");
     }
     return token;
   }

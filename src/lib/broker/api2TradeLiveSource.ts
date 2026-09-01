@@ -108,7 +108,7 @@ export class Api2TradeLiveAccountSource {
   static fromEnv(providerAccountId: string): Api2TradeLiveAccountSource {
     const config = loadApi2TradeConfig();
     if (!config) {
-      throw new Error("API2Trade is not configured.");
+      throw new Error("Broker connection service is not configured.");
     }
     return new Api2TradeLiveAccountSource(new Api2TradeClient(config), providerAccountId);
   }
@@ -175,7 +175,7 @@ export class Api2TradeLiveAccountSource {
           try {
             socket.close();
           } catch {}
-          reject(new Error("API2Trade order update websocket timed out."));
+          reject(new Error("Live order update stream timed out."));
         }, 10_000);
 
         socket.once("open", () => {

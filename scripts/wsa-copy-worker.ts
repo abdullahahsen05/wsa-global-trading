@@ -86,8 +86,8 @@ async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY"
     event_time: eventTime,
     dedupe_key: dedupeKey,
     source_sequence: fingerprint,
-    source: getBrokerProviderId() === "api2trade" ? "API2TRADE_LIVE_SOURCE" : "WSA_STREAM",
-    raw_payload: { source: getBrokerProviderId() === "api2trade" ? "API2TRADE_LIVE_SOURCE" : "METAAPI_STREAM", eventType },
+    source: getBrokerProviderId() === "api2trade" ? "LIVE_BROKER_SOURCE" : "WSA_STREAM",
+    raw_payload: { source: getBrokerProviderId() === "api2trade" ? "LIVE_BROKER_SOURCE" : "BROKER_STREAM", eventType },
   }).select("id").single();
   if (error) {
     if ((error as { code?: string }).code === "23505") return;
@@ -150,11 +150,11 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
       warmupInFlight = warmCopyStrategyAccounts(strategy.id, strategy.master_account_id, adapter)
         .then((result) => {
           if (result.warmed > 0) {
-            console.log(`[copy-worker] prewarmed ${result.warmed} API2Trade account session(s) for strategy ${strategy.id}`);
+            console.log(`[copy-worker] prewarmed ${result.warmed} broker account session(s) for strategy ${strategy.id}`);
           }
         })
         .catch((error) => {
-          console.error(`[copy-worker] API2Trade prewarm failed for strategy ${strategy.id}: ${error instanceof Error ? error.message : "unknown error"}`);
+          console.error(`[copy-worker] Broker prewarm failed for strategy ${strategy.id}: ${error instanceof Error ? error.message : "unknown error"}`);
         })
         .finally(() => {
           warmupInFlight = null;
@@ -184,7 +184,7 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
     };
     await handle.reconcile();
     console.log(
-      `[copy-worker] API2Trade ${source.usingWebSocket() ? "websocket" : "polling fallback"} synchronized for strategy ${strategy.id}`,
+      `[copy-worker] Broker ${source.usingWebSocket() ? "websocket" : "polling fallback"} synchronized for strategy ${strategy.id}`,
     );
     return handle;
   }
@@ -328,7 +328,7 @@ async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHan
       },
     };
     await handle.reconcile();
-    console.log(`[self-copy] API2Trade live source synchronized for ${source.source_account_id}`);
+    console.log(`[self-copy] Broker live source synchronized for ${source.source_account_id}`);
     return handle;
   }
   const sdk = await import("metaapi.cloud-sdk/node") as unknown as {
@@ -562,9 +562,9 @@ async function main() {
     throw new Error("WSA copy worker is disabled.");
   }
   if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD)) {
-    throw new Error("API2Trade copy worker requires API2TRADE_BASE_URL plus paid MT5 API username/password.");
+    throw new Error("Copy worker requires live broker API configuration.");
   }
-  console.log("[copy-worker] API2Trade websocket-first source enabled; WSA engine remains local.");
+  console.log("[copy-worker] Broker websocket-first source enabled; WSA engine remains local.");
   if (process.env.BROKER_EXECUTION_ENABLED !== "true") {
     throw new Error("BROKER_EXECUTION_ENABLED must be true before the live WSA worker can start.");
   }

@@ -88,7 +88,7 @@ export function BrokerAutocompleteField({
 
   const helperText = useMemo(() => {
     if (!open) return null;
-    if (brokersQuery.isFetching) return "Loading brokers from API2Trade…";
+    if (brokersQuery.isFetching) return "Loading brokers…";
     if (message) return message;
     if (!brokers.length) return "No broker results yet.";
     return null;
@@ -127,7 +127,7 @@ export function BrokerAutocompleteField({
                     Select your broker
                   </h3>
                   <p className="mt-1 text-sm text-muted">
-                    {query ? `Showing API2Trade matches for “${query}”.` : "Showing recommended brokers. Start typing to search live broker data."}
+                    {query ? `Showing broker matches for “${query}”.` : "Showing recommended brokers. Start typing to search live broker data."}
                   </p>
                 </div>
                 <button
@@ -182,7 +182,7 @@ export function BrokerAutocompleteField({
                       <span className="mt-1 block text-sm text-muted">
                         {broker.serverCount ? `${broker.serverCount} server${broker.serverCount === 1 ? "" : "s"} available` : "Server can be entered manually"}
                         {" · "}
-                        {broker.source === "API2TRADE" ? "API2Trade data" : "Workspace recommendation"}
+                        {broker.source === "API2TRADE" ? "Live broker data" : "Workspace recommendation"}
                       </span>
                     </span>
                     <span className="hidden rounded-full border border-line px-3 py-1 text-xs font-semibold text-muted sm:inline-flex">

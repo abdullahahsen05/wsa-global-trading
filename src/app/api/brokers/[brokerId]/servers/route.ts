@@ -62,7 +62,7 @@ export async function GET(
         : "ADMIN_CONFIGURED",
       sourceLabel: liveServers.length > 0
         ? activeBrokerProvider === "api2trade"
-          ? "Configured and API2Trade-discovered broker servers"
+          ? "Configured and live-discovered broker servers"
           : "Configured and MetaApi-known broker servers"
         : "Configured broker servers",
       discoveryAvailable: discovered.available,

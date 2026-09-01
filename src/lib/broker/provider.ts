@@ -12,7 +12,7 @@ export function getBrokerProviderId(): BrokerProviderId {
 }
 
 export function getBrokerProviderLabel(): string {
-  return "API2Trade";
+  return "broker connection service";
 }
 
 export function api2TradeUsesDashboardAccounts(): boolean {

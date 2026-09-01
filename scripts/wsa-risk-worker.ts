@@ -456,6 +456,7 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
   };
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function reconcileStreams() {
   if (Date.now() >= nextLifecycleScanAt) {
     const expired = await expireStaleTradingAccounts();
@@ -573,7 +574,7 @@ async function reconcileApi2TradeRiskAccounts() {
     .not("provider_account_id", "is", null)
     .in("status", ["CONNECTED", "RESTRICTED"])
     .limit(2_000);
-  if (error) throw new Error(`API2Trade risk accounts could not be loaded: ${error.message}`);
+  if (error) throw new Error(`Live risk accounts could not be loaded: ${error.message}`);
 
   const adapter = createBrokerAdapter();
   for (const accountRow of (data ?? []) as RiskAccount[]) {
@@ -617,7 +618,7 @@ async function reconcileApi2TradeRiskAccounts() {
           throw new Error(refresh.error);
         }
         if (refresh.tradesUpserted > 0) {
-          console.log(`[risk-worker] API2Trade projected ${refresh.tradesUpserted} trade change(s) for ${accountRow.id}`);
+          console.log(`[risk-worker] Live broker source projected ${refresh.tradesUpserted} trade change(s) for ${accountRow.id}`);
         }
       }
 
@@ -630,7 +631,7 @@ async function reconcileApi2TradeRiskAccounts() {
       streamRetryAfter.set(accountRow.id, retryAt);
       const publicMessage = publicApi2TradeError(error);
       console.error(
-        `[risk-worker] API2Trade account failed for ${accountRow.id}; retrying at ${new Date(retryAt).toISOString()}: ${publicMessage}`,
+        `[risk-worker] Broker account failed for ${accountRow.id}; retrying at ${new Date(retryAt).toISOString()}: ${publicMessage}`,
       );
       await supabase
         .from("trading_accounts")
@@ -652,9 +653,9 @@ async function shutdown() {
 
 async function main() {
   if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD)) {
-    throw new Error("API2Trade risk worker requires API2TRADE_BASE_URL plus paid MT5 API username/password.");
+    throw new Error("Risk worker requires live broker API configuration.");
   }
-  console.log(`[risk-worker] API2Trade polling source started; reconciling every ${reconcileMs}ms`);
+  console.log(`[risk-worker] Live broker polling source started; reconciling every ${reconcileMs}ms`);
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
   while (!stopping) {
