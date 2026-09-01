@@ -115,6 +115,23 @@ async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY"
       console.log(
         `[copy-worker] direct copy event ${data.id} finished in ${Date.now() - startedAt}ms: ${result.success} succeeded, ${result.failed} failed, ${result.skipped} skipped`,
       );
+      if (
+        eventType === "OPEN"
+        && result.attempted === 0
+        && result.success === 0
+        && result.failed === 0
+        && result.skipped === 0
+      ) {
+        await enqueueJob({
+          type: "EXECUTE_COPY_EVENT",
+          payload: { masterEventId: data.id },
+          uniqueKey: `EXECUTE_COPY_EVENT:${data.id}`,
+          priority: 200,
+          runAfter: new Date(Date.now() + 10_000).toISOString(),
+          maxAttempts: 5,
+        });
+        console.warn(`[copy-worker] direct copy event ${data.id} had no eligible followers; queued delayed retry`);
+      }
       return;
     } catch (error) {
       console.error(

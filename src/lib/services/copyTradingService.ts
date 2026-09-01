@@ -1518,17 +1518,27 @@ export async function executeCopyForEvent(
     symbol: ev.symbol,
   });
   const hotRuntime = getStrategyHotRuntime(ev.strategy_id);
-  const [strategy, settings, followers] = hotRuntime
+  let usingHotRuntime = Boolean(hotRuntime);
+  const [strategy, settings, loadedFollowers] = hotRuntime
     ? [hotRuntime.strategy, hotRuntime.settings, hotRuntime.followers]
     : await Promise.all([
         getStrategyRowCached(ev.strategy_id),
         getCopyGlobalSettingsCached(),
         loadActiveFollowersCached(ev.strategy_id),
       ]);
+  let followers = loadedFollowers;
+  if (hotRuntime && followers.length === 0) {
+    const freshFollowers = await loadActiveFollowers(ev.strategy_id);
+    if (freshFollowers.length > 0) {
+      followers = freshFollowers;
+      usingHotRuntime = false;
+    }
+  }
   logCopyTiming(ev.id, "strategy/settings loaded", startedAt, {
     strategyId: strategy.id,
     provider: getBrokerProviderId(),
-    hotRuntime: Boolean(hotRuntime),
+    hotRuntime: usingHotRuntime,
+    followers: followers.length,
   });
 
   // Safety gates — every one must pass before any broker call is even attempted.
@@ -1593,7 +1603,7 @@ export async function executeCopyForEvent(
 
   const masterLot = ev.volume === null ? 0 : Number(ev.volume);
   const accountIds = followers.map((f) => f.follower_account_id);
-  const [masterSnap, accountRules, statusByAccount] = hotRuntime
+  const [masterSnap, accountRules, statusByAccount] = usingHotRuntime && hotRuntime
     ? [hotRuntime.masterSnap, hotRuntime.accountRules, hotRuntime.statusByAccount]
     : await Promise.all([
         getSnapshotCached(strategy.master_account_id),
