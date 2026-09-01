@@ -1,7 +1,7 @@
 import Image from "next/image";
 
 export function BrandLogo({
-  className = "h-14 w-auto max-w-[180px]",
+  className = "h-20 w-auto max-w-[180px]",
   priority = false,
 }: {
   className?: string;
@@ -11,8 +11,8 @@ export function BrandLogo({
     <Image
       src="/image.png"
       alt="WSA Global"
-      width={2172}
-      height={724}
+      width={825}
+      height={820}
       priority={priority}
       className={`${className} object-contain`}
     />
