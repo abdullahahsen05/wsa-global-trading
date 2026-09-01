@@ -613,7 +613,7 @@ async function reconcileApi2TradeRiskAccounts() {
       const lastRefreshAt = api2TradeLastRefreshAt.get(accountRow.id) ?? 0;
       if (Date.now() - lastRefreshAt >= tradeReconcileMs) {
         api2TradeLastRefreshAt.set(accountRow.id, Date.now());
-        const refresh = await refreshAccountTrades(accountRow.id, null);
+        const refresh = await refreshAccountTrades(accountRow.id, null, { force: true });
         if (refresh.error) {
           throw new Error(refresh.error);
         }

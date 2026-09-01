@@ -371,6 +371,36 @@ async function persistBrokerSnapshotAndTrades(params: {
     tradesUpserted++;
   }
 
+  const openExternalIds = new Set(openTrades.map((trade) => trade.id).filter(Boolean));
+  const closedTradeMap = new Map(closedTrades.map((trade) => [trade.id, trade]));
+  const { data: staleOpenRows, error: staleOpenLoadError } = await supabase
+    .from('trades')
+    .select('external_trade_id, open_price')
+    .eq('trading_account_id', accountId)
+    .eq('status', 'OPEN');
+  if (staleOpenLoadError) throw new Error(`Open trade reconciliation failed: ${staleOpenLoadError.message}`);
+
+  for (const staleRow of staleOpenRows ?? []) {
+    const externalTradeId = String(staleRow.external_trade_id ?? '');
+    if (!externalTradeId || openExternalIds.has(externalTradeId)) continue;
+
+    const closedTrade = closedTradeMap.get(externalTradeId);
+    const { error } = await supabase
+      .from('trades')
+      .update({
+        status: 'CLOSED',
+        close_price: closedTrade?.closePrice ?? staleRow.open_price ?? null,
+        profit: closedTrade?.profit.amount ?? 0,
+        currency: closedTrade?.profit.currency || currency,
+        closed_at: closedTrade?.closedAt ?? new Date().toISOString(),
+      })
+      .eq('trading_account_id', accountId)
+      .eq('external_trade_id', externalTradeId)
+      .eq('status', 'OPEN');
+    if (error) throw new Error(`Stale open trade close failed: ${error.message}`);
+    tradesUpserted++;
+  }
+
   if (tradesUpserted > 0) {
     try {
       await calculatePartnerRebatesForTradingAccounts([accountId]);
@@ -1151,6 +1181,7 @@ export async function getBrokerConnectionStatus(
 export async function refreshAccountTrades(
   accountId: string,
   actorUserId: string | null,
+  options?: { force?: boolean },
 ): Promise<TradeRefreshSummary> {
   const supabase = createAdminClient();
 
@@ -1172,6 +1203,7 @@ export async function refreshAccountTrades(
 
   if (
     liveRiskProjectionEnabled()
+    && !options?.force
     && (account.status === 'CONNECTED' || account.status === 'RESTRICTED')
   ) {
     const [snapshotResult, openTradesResult] = await Promise.all([
