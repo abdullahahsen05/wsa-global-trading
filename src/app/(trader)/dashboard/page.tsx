@@ -142,15 +142,16 @@ function TraderDashboardContent() {
   const { data: accounts = [], isLoading } = useQuery<TraderAccountSummary[]>({
     queryKey: ["trading-accounts", "TRADER"],
     queryFn: async () => {
-      const res = await fetch("/api/trading-accounts");
+      const res = await fetch("/api/trading-accounts", { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
       return json.data;
     },
-    staleTime: 5_000,
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
+    staleTime: 1_000,
+    refetchInterval: 3_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 
   const connectedAccounts = useMemo(
@@ -183,10 +184,11 @@ function TraderDashboardContent() {
       return json.data;
     },
     enabled: Boolean(baseAccount?.accountId),
-    staleTime: 5_000,
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
+    staleTime: 1_000,
+    refetchInterval: 3_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 
   const { data: calendarTrades = trades } = useQuery<TradeDto[]>({
@@ -204,10 +206,11 @@ function TraderDashboardContent() {
     },
     enabled:
       Boolean(baseAccount?.accountId) && activeOverlay === "CALENDAR_TRACKER",
-    staleTime: 30_000,
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 
   // Fetch risk rules
@@ -244,10 +247,11 @@ function TraderDashboardContent() {
       return json.data;
     },
     enabled: Boolean(baseAccount?.accountId),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
+    staleTime: 3_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 
   const { data: dailyAnalyticsSummary } = useQuery<AnalyticsSummary>({
@@ -265,10 +269,11 @@ function TraderDashboardContent() {
       return json.data;
     },
     enabled: Boolean(baseAccount?.accountId) && selectedPeriod !== "DAILY",
-    staleTime: 15_000,
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
+    staleTime: 3_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 
   // Subscribe to realtime updates
