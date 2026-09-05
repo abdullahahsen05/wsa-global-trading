@@ -326,11 +326,11 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
               </h2>
               <p className="mt-1 text-sm text-muted">
                 {mode === "REBATE"
-                  ? "Broker → trader → symbol → lots → rebate. Only rebate performance is shown here."
+                  ? "Only rebate performance is shown here."
                   : mode === "CPA"
-                    ? "Broker → client → symbol → lots → qualified → total. Only CPA performance is shown here."
+                    ? "Only CPA performance is shown here."
                     : mode === "HYBRID"
-                      ? "Broker → client → symbol → lots → IB → CPA. WSA commission is not shown here."
+                      ? "Only hybrid performance is shown here."
                       : "Platform subscription commission records generated for the partner account."}
               </p>
             </div>
@@ -364,11 +364,11 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
               <EmptyState
                 title={`No ${title.toLowerCase()} records yet`}
                 description={mode === "REBATE"
-                  ? "When referred traders close eligible lots, broker, trader, symbol, lots, and rebate values will appear here."
+                  ? "Only rebate performance is shown here."
                   : mode === "CPA"
-                    ? "When referred clients qualify for CPA, broker, client, lot, qualified, and total values will appear here."
+                    ? "Only CPA performance is shown here."
                     : mode === "HYBRID"
-                      ? "When referred clients generate hybrid activity, broker, client, lot, IB, and CPA values will appear here."
+                      ? "Only hybrid performance is shown here."
                   : `When ${title.toLowerCase()} activity is created for your traders, it will appear here.`}
               />
             ) : (
