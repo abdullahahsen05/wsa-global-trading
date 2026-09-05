@@ -8,6 +8,7 @@ import { BrandLogo } from "@/components/app/BrandLogo";
 import { PrimaryButton } from "@/components/app/WorkspaceUI";
 import { TextField } from "@/components/app/FormFields";
 import { createClient } from "@/lib/supabase/client";
+import { getAuthRedirectOrigin } from "@/lib/auth/redirectOrigin";
 import { BRAND_NAME } from "@/lib/brand";
 
 type Role = "TRADER" | "PARTNER";
@@ -109,6 +110,7 @@ export default function RegisterPage() {
       email,
       password,
       options: {
+        emailRedirectTo: `${getAuthRedirectOrigin()}/login`,
         // role is read by the handle_new_user() DB trigger.
         // ADMIN is never accepted — the trigger enforces TRADER as the fallback.
         data: {

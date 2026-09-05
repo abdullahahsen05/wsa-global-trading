@@ -5,6 +5,7 @@ import { useState, type FormEvent } from "react";
 import { ArrowLeft, Mail } from "lucide-react";
 import { BrandLogo } from "@/components/app/BrandLogo";
 import { TextField } from "@/components/app/FormFields";
+import { getAuthRedirectOrigin } from "@/lib/auth/redirectOrigin";
 import { createClient } from "@/lib/supabase/client";
 
 export default function ForgotPasswordPage() {
@@ -20,17 +21,10 @@ export default function ForgotPasswordPage() {
 
     const formData = new FormData(event.currentTarget);
     const email = formData.get("email") as string;
-    const redirectBaseUrl =
-      typeof window !== "undefined" && window.location.origin
-        ? window.location.origin
-        : process.env.NEXT_PUBLIC_SITE_URL ??
-          process.env.NEXT_PUBLIC_APP_URL ??
-          "";
-
     const supabase = createClient();
     const { error: authError } =
       await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${redirectBaseUrl}/reset-password`,
+        redirectTo: `${getAuthRedirectOrigin()}/reset-password`,
       });
 
     setIsSubmitting(false);

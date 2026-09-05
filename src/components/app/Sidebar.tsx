@@ -62,8 +62,8 @@ export function Sidebar({
   return (
     <>
     <aside className="hidden h-screen w-[240px] self-start overflow-hidden border-r border-line bg-panel px-4 py-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
-        <div className="mb-7 px-2">
-          <BrandLogo priority />
+        <div className="mb-7 flex justify-center px-2">
+          <BrandLogo className="h-20 w-auto max-w-[165px]" priority />
         </div>
         <div className="mb-3 px-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
@@ -91,7 +91,7 @@ export function Sidebar({
         <Dialog.Content className="fixed left-0 top-0 z-50 flex h-[100dvh] w-[min(88vw,340px)] flex-col border-r border-line bg-panel px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] focus:outline-none sm:px-5 lg:hidden">
           <Dialog.Title className="sr-only">Navigation menu</Dialog.Title>
           <div className="mb-7 flex items-center justify-between">
-            <BrandLogo priority />
+            <BrandLogo className="h-20 w-auto max-w-[165px]" priority />
               <Dialog.Close asChild>
                 <button className="grid h-9 w-9 place-items-center rounded-[4px] border border-line bg-panel-strong text-muted">
                   <X className="h-4 w-4" />
