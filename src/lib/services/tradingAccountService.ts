@@ -38,7 +38,7 @@ export async function listTradingAccounts(userId: string, role: UserRole): Promi
       .in('trading_account_id', accountIds),
   ])
 
-  if (snapshotError) throw new Error(`Failed to fetch latest account snapshots: ${snapshotError.message}`)
+  if (snapshotError) throw new Error(`Failed to fetch latest live account values: ${snapshotError.message}`)
   if (countError) throw new Error(`Failed to fetch open trade counts: ${countError.message}`)
 
   const snapshotMap = new Map(
@@ -90,7 +90,7 @@ export async function getTradingAccount(
       .eq('trading_account_id', accountId),
   ])
 
-  if (snapshotError) throw new Error(`Failed to fetch latest account snapshots: ${snapshotError.message}`)
+  if (snapshotError) throw new Error(`Failed to fetch latest live account values: ${snapshotError.message}`)
   if (countError) throw new Error(`Failed to fetch open trade counts: ${countError.message}`)
 
   const snapshot = snapshots?.[0] ?? null

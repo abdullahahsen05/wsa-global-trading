@@ -492,7 +492,7 @@ function TraderDashboardContent() {
     {
       label: "Last Sync",
       value: formatSyncTime(baseAccount?.lastSyncedAt ?? baseAccount?.updatedAt),
-      helper: "Latest broker snapshot received by the platform",
+      helper: "Latest live broker update received by the platform",
       tone: baseAccount?.live ? ("lime" as const) : ("muted" as const),
     },
   ];

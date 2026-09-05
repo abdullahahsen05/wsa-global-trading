@@ -1,6 +1,6 @@
 export const demoOverviewStats = [
   { label: "Balance", value: "$52,480", tone: "lime" as const, helper: "Across 3 sample accounts" },
-  { label: "Equity", value: "$54,120", tone: "accent" as const, helper: "Real-time demo snapshot" },
+  { label: "Equity", value: "$54,120", tone: "accent" as const, helper: "Real-time demo live view" },
   { label: "Open trades", value: "7", tone: "default" as const, helper: "2 indices, 3 FX, 2 metals" },
   { label: "AI credits", value: "94", tone: "accent" as const, helper: "Demo-only summary" },
 ];

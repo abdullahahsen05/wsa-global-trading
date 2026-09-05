@@ -26,7 +26,7 @@ function DrawdownMeter({ value }: { value: number }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Drawdown meter</h3>
-          <p className="mt-1 text-xs text-muted">Current drawdown pressure across the live snapshot</p>
+          <p className="mt-1 text-xs text-muted">Current drawdown pressure across live data</p>
         </div>
         <StatusPill tone={value >= 6 ? "danger" : value >= 4 ? "accent" : "lime"}>
           {formatPercent(value)}

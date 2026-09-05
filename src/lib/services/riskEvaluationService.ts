@@ -324,7 +324,7 @@ export async function evaluateAndPersistRiskEvents(
         .eq("trading_account_id", accountId)
         .eq("status", "OPEN"),
     ]);
-  if (snapshotError) throw new Error(`Risk snapshot could not be loaded: ${snapshotError.message}`);
+  if (snapshotError) throw new Error(`Live risk data could not be loaded: ${snapshotError.message}`);
   if (closedError) throw new Error(`Daily P&L could not be loaded: ${closedError.message}`);
   if (openResult.error) throw new Error(`Open trade count could not be loaded: ${openResult.error.message}`);
   const snapshot = snapshots?.[0] ?? { balance: 0, equity: 0 };

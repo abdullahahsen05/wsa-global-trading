@@ -54,7 +54,7 @@ async function loadCachedTradeRefreshSummary(
   supabase: ReturnType<typeof createAdminClient>,
   accountId: string,
   providerAccountId: string,
-  message = 'A broker sync is already running for this account. Showing the latest stored ledger snapshot.',
+  message = 'A broker sync is already running for this account. Showing the latest live account values.',
 ): Promise<TradeRefreshSummary> {
   const [snapshotResult, openTradesResult] = await Promise.all([
     supabase

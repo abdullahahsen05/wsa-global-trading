@@ -21,7 +21,7 @@ import { PlatformSubscriptionCheckoutCTA } from "@/components/app/PlatformSubscr
 import { useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 
 const featureCards = [
-  { title: "Trading Dashboard", description: "Live KPI strip, equity snapshots, and session-aware performance tracking.", icon: Gauge },
+  { title: "Trading Dashboard", description: "Live KPI strip, equity updates, and session-aware performance tracking.", icon: Gauge },
   { title: "MT5 Accounts", description: "Connect accounts, review status, and track broker-linked account performance.", icon: WalletCards },
   { title: "Copy Trading", description: "Activate per-account copy tiers after subscription approval and entitlement setup.", icon: Repeat },
   { title: "AI Assistant", description: "Get trading guidance, risk context, and chart-aware workflow assistance.", icon: MessageSquare },
@@ -142,7 +142,7 @@ export default function PlatformPreviewPage() {
               <StatusPill tone="lime">Connected</StatusPill>
             </div>
             <p className="mt-3 text-xs text-muted">
-              After activation, your real account cards, snapshots, and risk status appear here.
+              After activation, your real account cards, live values, and risk status appear here.
             </p>
           </div>
         </Panel>

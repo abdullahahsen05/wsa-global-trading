@@ -71,7 +71,7 @@ export default async function AccountDetailPage({
               [account.brokerName, account.platform, account.serverName].filter(Boolean).join(" · ") ||
               "Broker details pending",
           },
-          { label: "Equity", value: formatMoney(account.equity), helper: "Latest snapshot", tone: "lime" },
+          { label: "Equity", value: formatMoney(account.equity), helper: "Latest live value", tone: "lime" },
           {
             label: "Floating PnL",
             value: formatMoney(account.floatingPnl),

@@ -38,7 +38,7 @@ export function DemoAccountDetail({ accountId }: { accountId: string }) {
       <InlineStatusStrip
         items={[
           { label: "Balance", value: account.balance, helper: account.broker },
-          { label: "Equity", value: account.equity, helper: "Latest snapshot", tone: "lime" },
+          { label: "Equity", value: account.equity, helper: "Latest live value", tone: "lime" },
           { label: "Floating PnL", value: "$1,640", helper: `${accountTrades.filter((trade) => trade.status === "OPEN").length} open trades`, tone: "accent" },
           { label: "Drawdown", value: account.drawdown, helper: "Current max" },
         ]}
@@ -100,7 +100,7 @@ export function DemoAccountDetail({ accountId }: { accountId: string }) {
           </div>
         </Panel>
         <Panel>
-          <h2 className="text-lg font-semibold text-foreground">Snapshot feed</h2>
+          <h2 className="text-lg font-semibold text-foreground">Live feed</h2>
           <div className="mt-4 space-y-3">
             {snapshots.map((snapshot) => (
               <div key={snapshot.capturedAt} className="flex items-center justify-between rounded-[4px] border border-line bg-background p-3 text-sm">

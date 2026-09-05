@@ -249,7 +249,7 @@ export async function listAllAccounts(): Promise<AdminTradingAccountSummary[]> {
       .in('id', traderIds),
   ])
 
-  if (snapshotError) throw new Error(`Failed to fetch latest account snapshots: ${snapshotError.message}`)
+  if (snapshotError) throw new Error(`Failed to fetch latest live account values: ${snapshotError.message}`)
   if (countError) throw new Error(`Failed to fetch open trade counts: ${countError.message}`)
   if (profileError) throw new Error(`Failed to fetch account owners: ${profileError.message}`)
 

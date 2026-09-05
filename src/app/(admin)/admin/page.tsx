@@ -224,6 +224,10 @@ function PlatformOversightChart({
     linePoints,
     `${points.at(-1)?.x ?? width - padding.right},${height - padding.bottom}`,
   ].join(" ");
+  const firstEquity = data[0]?.equity ?? 0;
+  const latestEquity = data.at(-1)?.equity ?? firstEquity;
+  const equityChange = latestEquity - firstEquity;
+  const isFlatTrend = Math.abs(equityChange) < 0.01;
 
   const tickCount = 4;
   const yTicks = Array.from({ length: tickCount + 1 }, (_, index) => {
@@ -257,14 +261,14 @@ function PlatformOversightChart({
             Platform oversight
           </h2>
           <p className="mt-1 text-sm leading-6 text-muted">
-            Persisted platform equity from connected-account snapshots.
+            Live platform equity from connected accounts.
           </p>
         </div>
 
         <div className="text-right">
           <p className="flex items-center justify-end gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
             <span className={`h-1.5 w-1.5 rounded-full ${isRefreshing ? "animate-pulse bg-accent" : "bg-accent-2"}`} />
-            {isRefreshing ? "Refreshing" : "Live snapshots"}
+            {isRefreshing ? "Refreshing" : "Live"}
           </p>
           <p className="mt-1 text-base font-semibold text-accent tabular-nums">
             {latest
@@ -289,7 +293,7 @@ function PlatformOversightChart({
       ) : data.length === 0 ? (
         <div className="grid h-[312px] place-items-center px-6 text-center">
           <div>
-            <p className="font-semibold text-foreground">No equity snapshots yet</p>
+            <p className="font-semibold text-foreground">No live equity yet</p>
             <p className="mt-2 text-sm text-muted">Connect and synchronize an account to begin the platform timeline.</p>
           </div>
         </div>
@@ -354,6 +358,26 @@ function PlatformOversightChart({
             strokeLinecap="round"
           />
 
+          {points.map(({ x, y, point }, index) => (
+            <circle
+              key={`${point.capturedAt}-${index}`}
+              cx={x}
+              cy={y}
+              r={index === points.length - 1 ? "3.8" : "2.4"}
+              fill={index === points.length - 1 ? "#21d19f" : "#0b1614"}
+              stroke="#21d19f"
+              strokeWidth={index === points.length - 1 ? "1.75" : "1.25"}
+              opacity={index === 0 && points.length > 2 ? "0.55" : "1"}
+            >
+              <title>
+                {`${new Date(point.capturedAt).toLocaleString()} · ${formatMoney({
+                  amount: point.equity,
+                  currency,
+                })}`}
+              </title>
+            </circle>
+          ))}
+
           {points.length > 0 ? (
             <g>
               <circle
@@ -402,6 +426,19 @@ function PlatformOversightChart({
             );
           })}
         </svg>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-3 border-t border-line px-1 pt-3 text-xs text-muted">
+          <span>
+            {isFlatTrend ? "Live equity is steady" : "Live equity trend is updating"}
+          </span>
+          <span className={equityChange >= 0 ? "font-semibold text-accent-2 tabular-nums" : "font-semibold text-danger tabular-nums"}>
+            {isFlatTrend
+              ? "No change"
+              : `${equityChange > 0 ? "+" : ""}${formatMoney({
+                  amount: equityChange,
+                  currency,
+                })}`}
+          </span>
+        </div>
       </div>}
     </section>
   );
@@ -566,6 +603,22 @@ export default function AdminOverviewPage() {
   const snapshotFresh = newestAccountUpdate
     ? accountsFetchedAt - Date.parse(newestAccountUpdate) < 10 * 60_000
     : false;
+  const liveEquityCurve =
+    equityCurve.length > 0
+      ? equityCurve
+      : portfolioCurrency && connectedAccountRows.length > 0
+        ? [
+            {
+              capturedAt:
+                newestAccountUpdate ?? new Date(accountsFetchedAt).toISOString(),
+              balance: connectedAccountRows.reduce(
+                (sum, account) => sum + account.balance.amount,
+                0,
+              ),
+              equity: totalEquity,
+            },
+          ]
+        : [];
   const overlayTraders: TraderProfileDto[] = traders.map((trader) => ({
     traderId: trader.traderId,
     name: trader.name,
@@ -666,8 +719,8 @@ export default function AdminOverviewPage() {
 
       <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2.05fr)_minmax(300px,0.95fr)]">
         <PlatformOversightChart
-          data={equityCurve}
-          currency={equityTimeline?.currency ?? "USD"}
+          data={liveEquityCurve}
+          currency={portfolioCurrency ?? equityTimeline?.currency ?? "USD"}
           mixedCurrencies={equityTimeline?.mixedCurrencies ?? false}
           isRefreshing={equityRefreshing}
         />
@@ -679,7 +732,7 @@ export default function AdminOverviewPage() {
                 Platform health
               </h2>
               <p className="mt-1 text-sm leading-6 text-muted">
-                Snapshot freshness and trading-performance signals.
+                Live account and trading-performance signals.
               </p>
             </div>
 
@@ -709,7 +762,7 @@ export default function AdminOverviewPage() {
               <dt className="text-sm text-muted">Max drawdown</dt>
               <dd className="text-sm font-semibold text-danger tabular-nums">
                 {formatPercent(
-                  calculateMaxDrawdown(equityCurve),
+                  calculateMaxDrawdown(liveEquityCurve),
                 )}
               </dd>
             </div>
@@ -729,7 +782,7 @@ export default function AdminOverviewPage() {
               </dt>
               <dd className="mt-2 text-sm leading-6 text-muted">
                 {closedTradeCount} closed trades are represented in
-                the platform snapshot. Current account values were
+                the live platform view. Current account values were
                 last updated{" "}
                 {newestAccountUpdate
                   ? new Date(newestAccountUpdate).toLocaleString()

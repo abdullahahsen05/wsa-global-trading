@@ -101,7 +101,7 @@ function MetricRail({
   const metrics = [
     { label: "Active traders", value: activeTraders, helper: "Across all programs", tone: "text-foreground" },
     { label: "Connected accounts", value: connectedAccounts, helper: "Broker-linked", tone: "text-accent-2" },
-    { label: "Equity snapshots", value: equitySnapshotCount, helper: "Persisted trend points", tone: "text-accent" },
+    { label: "Live equity points", value: equitySnapshotCount, helper: "Live trend points", tone: "text-accent" },
     { label: "MRR", value: formatMoney(monthlyRecurringRevenue), helper: "Subscription records", tone: "text-accent-2" },
   ];
 
@@ -259,7 +259,7 @@ export function AdminOverviewOverlay({
                 </Section>
 
                 <Section
-                  eyebrow="Snapshot"
+                  eyebrow="Live"
                   title="Account notes"
                   description="A short view of the current supervision state."
                   action={<StatusPill tone="muted">{tradingAccounts.length}</StatusPill>}

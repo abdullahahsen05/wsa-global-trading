@@ -229,7 +229,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       } else {
         setNotice({
           type: "success",
-          text: `Account synced. ${data.tradesUpserted} trades upserted${data.snapshotStored ? ", snapshot captured" : ""}.`,
+          text: `Account synced. ${data.tradesUpserted} trades upserted${data.snapshotStored ? ", live values updated" : ""}.`,
         });
       }
     },
