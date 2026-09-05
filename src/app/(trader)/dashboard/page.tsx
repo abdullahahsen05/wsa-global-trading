@@ -363,6 +363,7 @@ function TraderDashboardContent() {
   const periodAvgWinLoss = analyticsSummary?.riskRewardRatio ?? localAvgWinLoss;
   const periodConsistency = analyticsSummary?.consistencyScore ?? localConsistency;
   const hasClosedTrades = periodStats.tradeCount > 0;
+  const accountCurrency = baseAccount?.balance.currency ?? "USD";
   const pnlPositive = live.pnl >= 0;
   const pnlPrefix = live.pnl > 0 ? "↑" : live.pnl < 0 ? "↓" : "—";
   const floatingPnlValue = live.pnl === 0
@@ -385,7 +386,6 @@ function TraderDashboardContent() {
       riskLimits,
     ],
   );
-  const accountCurrency = baseAccount?.balance.currency ?? "USD";
   const accountIdentity = getAccountDisplayIdentity(baseAccount);
   const overlayPeriodStats = useMemo(
     () => ({
