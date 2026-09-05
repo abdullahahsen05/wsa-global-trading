@@ -299,7 +299,8 @@ export async function calculatePartnerRebatesForTradingAccounts(
 
   for (const trade of (trades ?? []) as ClosedTradeScanRow[]) {
     const account = trade.trading_accounts;
-    const traderId = account?.user_id as string | undefined;
+    if (!account) continue;
+    const traderId = account.user_id as string | undefined;
     if (!traderId) continue;
 
     const { data: traderProfile } = await supabase
