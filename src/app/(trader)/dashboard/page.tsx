@@ -11,7 +11,7 @@ import { DashboardModeOverlay } from "@/components/dashboard/DashboardModeOverla
 import { DashboardKpiStrip, MarketSentimentStrip } from "@/components/dashboard/DashboardKpiStrip";
 import { PerformanceRings, type PerformanceRingItem } from "@/components/dashboard/PerformanceRings";
 import { Panel, PageActionGroup, WorkspacePage } from "@/components/app/WorkspaceUI";
-import { formatMoney, formatPercent } from "@/lib/utils/format";
+import { formatMoney, formatPercent, normalizeMoneyAmount } from "@/lib/utils/format";
 import {
   calculateAverageWinLossRatio,
   calculateConsistencyScore,
@@ -298,7 +298,7 @@ function TraderDashboardContent() {
     () => ({
       balance: baseAccount?.balance.amount ?? 0,
       equity: baseAccount?.equity.amount ?? 0,
-      pnl: baseAccount?.floatingPnl.amount ?? 0,
+      pnl: normalizeMoneyAmount(baseAccount?.floatingPnl.amount ?? 0),
       refresh: baseAccount?.updatedAt
         ? new Date(baseAccount.updatedAt)
         : statsNow,
@@ -365,6 +365,9 @@ function TraderDashboardContent() {
   const hasClosedTrades = periodStats.tradeCount > 0;
   const pnlPositive = live.pnl >= 0;
   const pnlPrefix = live.pnl > 0 ? "↑" : live.pnl < 0 ? "↓" : "—";
+  const floatingPnlValue = live.pnl === 0
+    ? formatMoney({ amount: 0, currency: accountCurrency })
+    : `${pnlPrefix} ${formatMoney({ amount: Math.abs(live.pnl), currency: accountCurrency })}`;
   const accountDrawdown = baseAccount?.drawdownPercent ?? 0;
   const accountOpenTradeCount = baseAccount?.openTradeCount ?? openTrades.length;
   const riskState = useMemo(
@@ -444,7 +447,7 @@ function TraderDashboardContent() {
     },
     {
       label: "Floating PnL",
-      value: `${pnlPrefix} ${formatMoney({ amount: Math.abs(live.pnl), currency: accountCurrency })}`,
+      value: floatingPnlValue,
       helper:
         live.pnl > 0
           ? "Unrealised gain on open positions"
