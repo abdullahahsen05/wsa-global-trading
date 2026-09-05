@@ -11,8 +11,8 @@ export function BrandLogo({
     <Image
       src="/image.png"
       alt="WSA Global"
-      width={825}
-      height={820}
+      width={1280}
+      height={853}
       priority={priority}
       className={`${className} object-contain`}
     />
