@@ -4,10 +4,7 @@ import {
   type BrokerCredentialPayload,
 } from "@/lib/services/brokerCredentialService";
 import { syncTradingAccount } from "@/lib/services/brokerSyncService";
-import {
-  getBrokerProviderId,
-  getBrokerProviderLabel,
-} from "@/lib/broker/provider";
+import { getBrokerProviderLabel } from "@/lib/broker/provider";
 
 export interface BrokerConnectionResult {
   accountId: string;
@@ -32,7 +29,6 @@ export async function connectBrokerAccount(params: {
   connectNow?: boolean;
 }): Promise<BrokerConnectionResult> {
   const providerLabel = getBrokerProviderLabel();
-  const providerId = getBrokerProviderId();
   await storeBrokerCredentials(params.accountId, params.credentials);
 
   const platform = (params.credentials.platform ?? "mt5").toUpperCase();

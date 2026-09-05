@@ -155,7 +155,7 @@ export default function DxfeedTerminal({ initialSymbol = "EURUSD", onSymbolChang
         const providers: DxDataProviders = cfg.data.dataProviders;
         cdnUrlRef.current = cfg.data.cdnUrl as string;
 
-        // 2. Fetch short-lived WebSocket feed token (keeps main API key server-side)
+        // 2. Fetch short-lived WebSocket feed token (keeps the main secret server-side)
         const tokenRes = await fetch("/api/dxfeed/feed-token", { method: "POST" });
         const tokenData = await tokenRes.json();
         if (tokenData.ok && tokenData.data?.feedUrl) {

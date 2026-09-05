@@ -1,6 +1,7 @@
 import { AuthError, requireTrader } from "@/lib/auth/session";
 import { jsonFail } from "@/lib/api/envelope";
 import { listTrades } from "@/lib/services/tradeService";
+import { formatPrice } from "@/lib/utils/format";
 
 function csvCell(value: string | number | null): string {
   if (value === null) return "";
@@ -34,8 +35,8 @@ export async function GET() {
         trade.side,
         trade.status,
         trade.volume,
-        trade.openPrice,
-        trade.closePrice,
+        formatPrice(trade.openPrice),
+        formatPrice(trade.closePrice),
         trade.profit.amount,
         trade.profit.currency,
         trade.openedAt,

@@ -4,6 +4,7 @@ if (typeof window !== "undefined") {
 
 import type { TradeDto, TraderAccountSummary } from "@/lib/domain/types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { publicMetaApiError } from "@/lib/broker/metaApiErrors";
 import {
   BROKER_EXEC_ERROR,
   type BrokerAdapter,
@@ -59,7 +60,7 @@ export class MetaApiBrokerAdapter implements BrokerAdapter {
     if (!this.token) {
       throw new BrokerExecutionError(
         BROKER_EXEC_ERROR.PROVIDER_NOT_CONFIGURED,
-        "METAAPI_TOKEN is not configured.",
+        "Broker connection service is not configured.",
         503,
       );
     }
@@ -78,7 +79,7 @@ export class MetaApiBrokerAdapter implements BrokerAdapter {
     if (!data.provider_account_id) {
       throw new BrokerExecutionError(
         BROKER_EXEC_ERROR.ACCOUNT_NOT_CONNECTED,
-        "Account is not connected to MetaAPI yet.",
+        "Account is not connected yet.",
         409,
       );
     }
@@ -177,13 +178,13 @@ export class MetaApiBrokerAdapter implements BrokerAdapter {
 
   async verifyConnection(accountId: string): Promise<BrokerConnectionHealth> {
     if (!this.token) {
-      return { ok: false, provider: "metaapi", message: "METAAPI_TOKEN is not configured." };
+      return { ok: false, provider: "metaapi", message: "Broker connection service is not configured." };
     }
     try {
       await this.withConnection(accountId, async () => true);
-      return { ok: true, provider: "metaapi", message: "Connected to MetaAPI." };
+      return { ok: true, provider: "metaapi", message: "Broker connection is active." };
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Connection failed.";
+      const message = publicMetaApiError(err);
       return { ok: false, provider: "metaapi", message };
     }
   }

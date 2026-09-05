@@ -223,6 +223,7 @@ export default function AdminPartnerWithdrawalsPage() {
 
   useEffect(() => {
     if (!brokerConfig.data || configBrokerId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate the editable admin form once broker configuration loads.
     setConfigBrokerId(
       brokerConfig.data.configurations[0]?.brokerProviderId
         ?? brokerConfig.data.brokers.find((broker) => broker.is_active)?.id
@@ -232,6 +233,7 @@ export default function AdminPartnerWithdrawalsPage() {
 
   useEffect(() => {
     if (!selectedConfig) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate the editable admin form from the selected partner configuration.
       setConfigModel("IB");
       setConfigCurrency(selectedLedger?.currency ?? "USD");
       setRebateRatePerLot("5");
@@ -351,7 +353,7 @@ export default function AdminPartnerWithdrawalsPage() {
     <WorkspacePage
       eyebrow="Admin · Partners"
       title="Partner finance control"
-      description="Review traders, rebates, CPA, hybrid setup, WSA commission logic, and payout settlement from one server-calculated control room."
+      description="Review broker rebate/CPA/hybrid calculations, WSA platform subscription commission, and payout settlement from one control room."
     >
       <InlineStatusStrip
         items={[
@@ -538,26 +540,26 @@ export default function AdminPartnerWithdrawalsPage() {
             <div className="mt-4">
               <InlineStatusStrip items={[
                 { label: "Withdrawable", value: formatMoney({ amount: selectedLedger.withdrawableBalance, currency: selectedLedger.currency }), tone: "lime" },
-                { label: "Approved commissions", value: formatMoney({ amount: selectedLedger.approvedUnpaidCommissions, currency: selectedLedger.currency }), tone: "lime" },
-                { label: "Approved rebates", value: formatMoney({ amount: selectedLedger.approvedUnpaidRebates, currency: selectedLedger.currency }), tone: "lime" },
+                { label: "Approved WSA commissions", value: formatMoney({ amount: selectedLedger.approvedUnpaidCommissions, currency: selectedLedger.currency }), tone: "lime" },
+                { label: "Paid WSA commissions", value: formatMoney({ amount: selectedLedger.paidCommissions, currency: selectedLedger.currency }), tone: "lime" },
                 { label: "Locked", value: formatMoney({ amount: selectedLedger.lockedWithdrawalAmount, currency: selectedLedger.currency }), tone: "accent" },
               ]} />
             </div>
             <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Rebate</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Broker rebate</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney({ amount: selectedLedger.approvedUnpaidRebates, currency: selectedLedger.currency })}</p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">CPA</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">WSA commission</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney({ amount: selectedLedger.approvedUnpaidCommissions, currency: selectedLedger.currency })}</p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Hybrid</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Broker hybrid</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{hybridConfigCount} active broker setup(s)</p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">WSA commission %</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Broker model rate</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">
                   {selectedConfig ? `${selectedConfig.rebateRatePerLot.toFixed(2)} / lot` : "By broker model"}
                 </p>
@@ -573,8 +575,8 @@ export default function AdminPartnerWithdrawalsPage() {
                 { label: "Live synced", value: syncedTraderCount, tone: "accent" },
                 { label: "Trading", value: tradingTraderCount, tone: "accent" },
                 { label: "Qualified", value: qualifiedTraderCount, tone: "lime" },
-                { label: "Wallet-ready", value: formatMoney({ amount: walletReadyAmount, currency: selectedLedger.currency }), tone: "lime" },
-                { label: "Pending wallet", value: formatMoney({ amount: pendingWalletAmount, currency: selectedLedger.currency }), tone: "accent" },
+                { label: "Broker approved", value: formatMoney({ amount: walletReadyAmount, currency: selectedLedger.currency }), tone: "lime" },
+                { label: "Broker pending", value: formatMoney({ amount: pendingWalletAmount, currency: selectedLedger.currency }), tone: "accent" },
               ]} />
             </div>
             <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
@@ -585,7 +587,7 @@ export default function AdminPartnerWithdrawalsPage() {
                       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Broker partnership model</p>
                       <h3 className="mt-2 font-semibold text-foreground">Partner rate configuration</h3>
                       <p className="mt-1 text-xs leading-5 text-muted">
-                        Configure whether this partner runs on rebate, CPA, or hybrid logic, and what WSA uses when calculating earnings.
+                        Configure the broker-side earning model only. WSA commission % is for platform subscription affiliate revenue and is managed separately.
                       </p>
                     </div>
                     <StatusPill tone={configActive ? "lime" : "muted"}>{configActive ? "ACTIVE" : "DISABLED"}</StatusPill>
@@ -676,7 +678,7 @@ export default function AdminPartnerWithdrawalsPage() {
                     <div>
                       <h3 className="text-lg font-semibold text-foreground">Assigned trader pipeline</h3>
                       <p className="mt-1 text-sm text-muted">
-                        Live partner-side funnel for registration, sync, trading, qualification, and wallet readiness.
+                        Live partner-side funnel for registration, sync, trading, qualification, and read-only broker performance.
                       </p>
                     </div>
                     {partnerTraders.isFetching ? <span className="text-xs text-muted">Refreshing…</span> : null}
@@ -702,7 +704,7 @@ export default function AdminPartnerWithdrawalsPage() {
                         initialPageSize={8}
                         pageSizeOptions={[8, 16, 32]}
                         maxBodyHeight="420px"
-                        headers={["Trader", "Pipeline", "Model", "Gross revenue", "Wallet-ready", "Risk", "CPA progress"]}
+                        headers={["Trader", "Pipeline", "Model", "Gross revenue", "Broker approved", "Risk", "CPA progress"]}
                         rows={partnerTraderRows.map((trader) => [
                           <div key="trader" className="min-w-[180px]">
                             <p className="truncate text-sm font-semibold text-foreground">{trader.name}</p>
@@ -746,7 +748,7 @@ export default function AdminPartnerWithdrawalsPage() {
                 <TextField label={`Amount (${selectedLedger.currency})`} type="number" min="0.01" step="0.01" required value={rebateAmount} onChange={(event) => setRebateAmount(event.target.value)} />
                 <SelectField label="Initial status" value={rebateStatus} onChange={(event) => setRebateStatus(event.target.value as typeof rebateStatus)}>
                   <option value="PENDING">Pending</option>
-                  <option value="APPROVED">Approved and withdrawable</option>
+                  <option value="APPROVED">Approved for broker reporting</option>
                 </SelectField>
                 <TextField label="Description" maxLength={500} value={rebateDescription} onChange={(event) => setRebateDescription(event.target.value)} placeholder="Reason or payment context" />
                 <PrimaryButton type="submit" disabled={rebate.isPending || !rebateAmount} className="w-full">

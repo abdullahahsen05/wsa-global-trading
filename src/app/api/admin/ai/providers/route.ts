@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof AuthError) return jsonFail(error.code, error.message, error.statusCode);
     const message = error instanceof Error ? error.message : "";
-    if (message.startsWith("API key must")) return jsonFail("INVALID_AI_PROVIDER_KEY", message, 400);
+    if (message.startsWith("Secret key must")) return jsonFail("INVALID_AI_PROVIDER_KEY", message, 400);
     return jsonFail("AI_PROVIDER_SAVE_FAILED", "The provider key could not be saved.", 500);
   }
 }

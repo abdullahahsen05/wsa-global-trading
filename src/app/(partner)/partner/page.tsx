@@ -65,11 +65,15 @@ export default function PartnerOverviewPage() {
     queryKey: ["partner", "summary"],
     queryFn: () => getJson("/api/partner/summary"),
     enabled: isActive,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
   const tradersQuery = useQuery<PartnerTraderDto[]>({
     queryKey: ["partner", "traders", "all"],
     queryFn: () => getJson("/api/partner/traders"),
     enabled: isActive,
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   });
   const riskEventsQuery = useQuery<PartnerRiskEventDto[]>({
     queryKey: ["partner", "risk-events"],
@@ -95,7 +99,7 @@ export default function PartnerOverviewPage() {
       <WorkspacePage
         eyebrow="Partner"
         title="Partner access is being prepared"
-        description="Your partner profile could not be loaded yet. No trader, Rebate / CPA / Hybrid, or payout data was requested."
+        description="Your partner profile could not be loaded yet. No trader, broker earnings, or payout data was requested."
       >
         <Panel>
           <p className="text-sm leading-6 text-muted">
@@ -111,11 +115,11 @@ export default function PartnerOverviewPage() {
       <WorkspacePage
         eyebrow="Partner"
         title="Partner setup incomplete"
-        description="Your account has the partner role, but its Rebate / CPA / Hybrid profile has not been provisioned yet."
+        description="Your account has the partner role, but its broker earning profile has not been provisioned yet."
       >
         <Panel>
           <p className="text-sm leading-6 text-muted">
-            An administrator needs to complete partner setup before referral, trader, Rebate / CPA / Hybrid, and payout data can load.
+            An administrator needs to complete partner setup before referral, trader, broker earnings, and payout data can load.
           </p>
         </Panel>
       </WorkspacePage>
@@ -142,7 +146,7 @@ export default function PartnerOverviewPage() {
           </h2>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted">
             Your partner application has been received. Once approved, you&apos;ll get access to your
-            referral link, referred trader list, Rebate / CPA / Hybrid ledger, and payout history.
+            referral link, referred trader list, broker earning ledger, and payout history.
           </p>
 
           <div className="mx-auto mt-8 max-w-sm space-y-3 text-left">
@@ -189,7 +193,7 @@ export default function PartnerOverviewPage() {
       >
         <Panel>
           <p className="text-sm leading-6 text-muted">
-            Contact an administrator to review your partner access. Trader and Rebate / CPA / Hybrid data has not been loaded.
+            Contact an administrator to review your partner access. Trader and broker earning data has not been loaded.
           </p>
         </Panel>
       </WorkspacePage>
@@ -210,7 +214,7 @@ export default function PartnerOverviewPage() {
     <WorkspacePage
       eyebrow="Partner"
       title={`Welcome, ${sessionUser?.name?.trim() || "Partner"}`}
-      description="Monitor your assigned traders, activity, risk, rebates, CPA, hybrid earnings, commission structure, and payout readiness."
+      description="Monitor assigned traders, read-only broker performance, WSA platform subscription commission, and WSA payout readiness."
     >
       <InlineStatusStrip
         items={[
@@ -232,7 +236,7 @@ export default function PartnerOverviewPage() {
             tone: "accent",
           },
           {
-            label: "Rebates earned",
+            label: "Broker rebates",
             value: summary ? formatMoney(summary.totalRebatesEarned) : "-",
             tone: "lime",
           },
@@ -247,7 +251,7 @@ export default function PartnerOverviewPage() {
             tone: (summary?.openRiskEvents ?? 0) > 0 ? "danger" : undefined,
           },
           {
-            label: "Pending earnings",
+            label: "Pending WSA commission",
             value: summary ? formatMoney(summary.pendingCommission) : "-",
             tone: "accent",
           },
@@ -257,14 +261,14 @@ export default function PartnerOverviewPage() {
       {summary ? (
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           <Panel>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">IB volume rebates</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Broker earnings</p>
             <p className="mt-3 text-2xl font-semibold text-foreground">{formatMoney(summary.ibEarnings)}</p>
-            <p className="mt-1 text-xs text-muted">Calculated from referred traders&apos; closed lots.</p>
+            <p className="mt-1 text-xs text-muted">Read-only IB/rebate performance, not WSA-payable balance.</p>
           </Panel>
           <Panel>
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">CPA rewards</p>
             <p className="mt-3 text-2xl font-semibold text-foreground">{formatMoney(summary.cpaEarnings)}</p>
-            <p className="mt-1 text-xs text-muted">Triggered once qualification volume and deposit tier are met.</p>
+            <p className="mt-1 text-xs text-muted">Read-only CPA performance, not WSA-payable balance.</p>
           </Panel>
           <Panel>
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Total team volume</p>
@@ -276,10 +280,11 @@ export default function PartnerOverviewPage() {
 
       <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { href: "/partner/rebate", label: "Rebate", helper: "Lot-based rebate earnings" },
-          { href: "/partner/cpa", label: "CPA", helper: "Qualified acquisition rewards" },
-          { href: "/partner/hybrid", label: "Hybrid", helper: "Combined rebate and CPA view" },
-          { href: "/partner/wsa-payout", label: "WSA Payout", helper: "Wallet, withdrawable, and request history" },
+          { href: "/partner/rebate", label: "Rebate", helper: "Broker lot-based rebate earnings" },
+          { href: "/partner/cpa", label: "CPA", helper: "Broker qualified acquisition rewards" },
+          { href: "/partner/hybrid", label: "Hybrid", helper: "Broker rebate + CPA calculation" },
+          { href: "/partner/wsa-commission", label: "WSA Commission %", helper: "Platform subscription affiliate rate" },
+          { href: "/partner/wsa-payout", label: "WSA Payout", helper: "WSA commission wallet and requests" },
         ].map((item) => (
           <Link
             key={item.href}
@@ -300,7 +305,7 @@ export default function PartnerOverviewPage() {
               {summary?.referralCode ?? profile?.referralCode}
             </p>
             <p className="mt-0.5 text-xs text-muted">
-              Share this link with traders. Valid signups are attributed to your account and eligible activity creates Rebate / CPA / Hybrid records.
+              Share this link with traders. Valid signups are attributed to your account for broker earnings and WSA platform subscription commission.
             </p>
             <p className="mt-1 truncate font-mono text-xs text-foreground">
               {siteUrl

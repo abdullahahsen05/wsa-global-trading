@@ -56,7 +56,7 @@ export async function GET(request: Request) {
         id: `${platform}:${index}:${server.serverName}`,
         serverName: server.serverName,
         brokerName: server.brokerName,
-        source: getBrokerProviderId() === "api2trade" ? "API2TRADE" as const : "METAAPI" as const,
+        source: "BROKER_SERVICE" as const,
       })),
       discoveryAvailable: discovered.available,
       discoveryMessage: discovered.message,

@@ -262,7 +262,7 @@ function TerminalContent() {
 
             <div className="mt-6 rounded-[4px] border border-zinc-700 bg-zinc-800/60 px-4 py-3 text-xs text-zinc-400">
               <strong className="text-zinc-300">Current status:</strong> Demo simulation data active.
-              Professional data will be enabled once the dxFeed agreement and API credentials are
+              Professional data will be enabled once the data agreement and secure connection are
               configured by your administrator.
             </div>
 

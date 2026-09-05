@@ -56,7 +56,7 @@ interface ConnectionStatusResult {
 interface BrokerServer {
   id: string;
   serverName: string;
-  source: "MANUAL" | "METAAPI" | "API2TRADE";
+  source: "MANUAL" | "BROKER_SERVICE";
   brokerName?: string;
 }
 

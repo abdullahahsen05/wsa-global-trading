@@ -47,7 +47,7 @@ export async function POST(
     }
 
     if (result.status === "PENDING") {
-      // MetaAPI deploy/connect timed out — still in progress
+      // Broker connection setup timed out — still in progress
       return jsonOk({
         accountId: result.accountId,
         status: "SYNCING",

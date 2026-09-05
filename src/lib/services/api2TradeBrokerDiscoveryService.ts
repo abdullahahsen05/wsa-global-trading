@@ -19,7 +19,7 @@ export interface Api2TradeBrokerSearchResult {
     name: string;
     access: string[];
   }>;
-  source: "API2TRADE" | "WORKSPACE";
+  source: "BROKER_SERVICE" | "WORKSPACE";
 }
 
 export interface Api2TradeBrokerSearchResponse {
@@ -155,7 +155,7 @@ export async function searchApi2TradeBrokers(params: {
   const query = params.query.trim().slice(0, 100);
   const normalizedQuery = query.toLowerCase();
   const cacheKey = normalizedQuery
-    ? `api2trade:${params.platform ?? "ANY"}:${normalizedQuery}`
+    ? `broker:${params.platform ?? "ANY"}:${normalizedQuery}`
     : `workspace:${params.userId}:${params.role}:${params.platform ?? "ANY"}`;
   const cached = cacheGet(cacheKey);
   if (cached) return cached;
@@ -191,14 +191,14 @@ export async function searchApi2TradeBrokers(params: {
         .filter((server) => server.name);
       const existing = byName.get(name.toLowerCase());
       const broker: Api2TradeBrokerSearchResult = existing ?? {
-        id: `api2trade:${stableId(name)}`,
+        id: `broker:${stableId(name)}`,
         name,
         logoUrl: pickString(record, ["logoUrl", "logo", "icon", "image"]),
         website: pickString(record, ["website", "site", "url"]),
         platforms: inferPlatformsFromServers(servers, params.platform),
         serverCount: 0,
         servers: [],
-        source: "API2TRADE",
+        source: "BROKER_SERVICE",
       };
       for (const server of servers) {
         if (!broker.servers.some((item) => item.name === server.name)) {

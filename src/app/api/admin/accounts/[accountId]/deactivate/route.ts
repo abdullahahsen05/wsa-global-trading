@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin, AuthError } from "@/lib/auth/session";
-import { createBrokerAdapter, getBrokerProviderLabel } from "@/lib/broker/provider";
+import { createBrokerAdapter } from "@/lib/broker/provider";
 import { logBrokerOperation } from "@/lib/services/brokerOperationLog";
 
 export async function POST(
@@ -54,7 +54,7 @@ export async function POST(
       }
     } else {
       providerResult = "skipped";
-      providerError = "BROKER_EXECUTION_ENABLED is false — MetaAPI undeploy skipped.";
+      providerError = "Broker execution is disabled — provider disconnect skipped.";
     }
   }
 

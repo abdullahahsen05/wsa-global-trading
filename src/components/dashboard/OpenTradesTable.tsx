@@ -1,5 +1,5 @@
 import type { TradeDto } from "@/lib/domain/types";
-import { formatMoney } from "@/lib/utils/format";
+import { formatMoney, formatPrice } from "@/lib/utils/format";
 
 export function OpenTradesTable({
   trades,
@@ -46,7 +46,7 @@ export function OpenTradesTable({
                   </span>
                 </td>
                 <td className="px-4 py-3 text-muted">{trade.volume}</td>
-                <td className="px-4 py-3 text-muted">{trade.openPrice}</td>
+                <td className="px-4 py-3 text-muted">{formatPrice(trade.openPrice)}</td>
                 <td
                   className={`px-4 py-3 font-medium ${
                     trade.profit.amount >= 0 ? "text-accent" : "text-danger"
@@ -81,7 +81,7 @@ export function OpenTradesTable({
               </div>
               <div>
                 <dt className="text-muted">Open</dt>
-                <dd className="mt-1 font-semibold text-foreground">{trade.openPrice}</dd>
+                <dd className="mt-1 font-semibold text-foreground">{formatPrice(trade.openPrice)}</dd>
               </div>
               <div className="text-right">
                 <dt className="text-muted">Floating PnL</dt>

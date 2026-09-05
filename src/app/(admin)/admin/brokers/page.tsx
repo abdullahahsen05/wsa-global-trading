@@ -28,7 +28,7 @@ interface Server {
   id: string;
   platform: Platform;
   serverName: string;
-  source: "MANUAL" | "METAAPI";
+  source: "MANUAL" | "BROKER_SERVICE";
   isActive: boolean;
 }
 
@@ -284,7 +284,7 @@ export default function AdminBrokersPage() {
                   rows={(servers.data?.servers ?? []).map((server) => [
                     <span key="platform">{server.platform}</span>,
                     <span key="name" className="font-mono text-xs text-foreground">{server.serverName}</span>,
-                    <span key="source">{server.source}</span>,
+                    <span key="source">{server.source === "MANUAL" ? "Manual" : "Live broker data"}</span>,
                     <StatusPill key="status" tone={server.isActive ? "lime" : "danger"}>
                       {server.isActive ? "ACTIVE" : "INACTIVE"}
                     </StatusPill>,
@@ -365,7 +365,7 @@ export default function AdminBrokersPage() {
                   value={serverName}
                   onChange={(event) => setServerName(event.target.value)}
                   placeholder="Broker-Server-Name"
-                  hint="Enter the exact server string expected by MetaApi."
+                  hint="Enter the exact server string expected by the broker connection."
                 />
                 <PrimaryButton type="submit" disabled={mutate.isPending || !serverName.trim()} className="mt-auto w-full">
                   Add server

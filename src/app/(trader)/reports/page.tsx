@@ -1,7 +1,6 @@
 "use client";
 
 import { Download } from "lucide-react";
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DataTable,
@@ -12,8 +11,10 @@ import {
   WorkspacePage,
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
-import type { TradeDto } from "@/lib/domain/types";
-import { formatMoney } from "@/lib/utils/format";
+import { resolveLiveSelectedAccountId } from "@/lib/accounts/lifecycle";
+import type { AnalyticsSummary, TradeDto, TraderAccountSummary } from "@/lib/domain/types";
+import { formatMoney, formatPrice } from "@/lib/utils/format";
+import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 import {
   EMPTY_PLATFORM_SUBSCRIPTION_ACCESS,
   useTraderAccessSummary,
@@ -25,6 +26,8 @@ type ReportRow = {
   status: "Ready";
   tradeCount: number;
   pnl: number;
+  equity: number;
+  currency: string;
   format: "CSV / PDF";
   trades: TradeDto[];
 };
@@ -66,20 +69,76 @@ export default function ReportsPage() {
 }
 
 function ReportsContent() {
-  const { data: trades = [] } = useQuery<TradeDto[]>({
-    queryKey: ["trades"],
+  const { selectedAccountId } = useTradingAccountSelection();
+  const { data: accounts = [] } = useQuery<TraderAccountSummary[]>({
+    queryKey: ["trading-accounts", "TRADER"],
     queryFn: async () => {
-      const res = await fetch("/api/trades");
+      const res = await fetch("/api/trading-accounts", { cache: "no-store" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
+      return json.data;
+    },
+    staleTime: 1_000,
+    refetchInterval: 3_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+  });
+  const effectiveAccountId = resolveLiveSelectedAccountId(accounts, selectedAccountId);
+  const activeAccount = accounts.find((account) => account.accountId === effectiveAccountId);
+  const accountCurrency = activeAccount?.equity.currency ?? activeAccount?.balance.currency ?? "USD";
+
+  const { data: trades = [] } = useQuery<TradeDto[]>({
+    queryKey: ["trades", effectiveAccountId],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        accountId: effectiveAccountId!,
+        limit: "10000",
+      });
+      const res = await fetch(`/api/trades?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load trades");
       return json.data;
     },
+    enabled: Boolean(effectiveAccountId),
+    staleTime: 1_000,
+    refetchInterval: 3_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 
-  const reports = useMemo((): ReportRow[] => {
+  const { data: monthlySummary } = useQuery<AnalyticsSummary>({
+    queryKey: ["analytics-summary", effectiveAccountId, "MONTHLY"],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        accountId: effectiveAccountId!,
+        period: "MONTHLY",
+      });
+      const res = await fetch(`/api/analytics/summary?${params.toString()}`, { cache: "no-store" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load report performance");
+      return json.data;
+    },
+    enabled: Boolean(effectiveAccountId),
+    staleTime: 3_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+  });
+
+  const currentEquity = activeAccount?.equity.amount ?? 0;
+  const monthlyPeriodPnl = monthlySummary?.totalProfit.amount;
+
+  const reports = (() : ReportRow[] => {
     const closed = trades.filter((trade) => trade.status === "CLOSED");
     const open = trades.filter((trade) => trade.status === "OPEN");
     const byMonth = new Map<string, TradeDto[]>();
+    const currentMonth = new Date().toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
 
     for (const trade of closed) {
       const month = new Date(trade.closedAt ?? trade.openedAt).toLocaleDateString("en-US", {
@@ -98,7 +157,11 @@ function ReportsContent() {
         period: month,
         status: "Ready",
         tradeCount: monthTrades.length,
-        pnl: monthTrades.reduce((sum, trade) => sum + trade.profit.amount, 0),
+        pnl: month === currentMonth
+          ? monthlyPeriodPnl ?? monthTrades.reduce((sum, trade) => sum + trade.profit.amount, 0)
+          : monthTrades.reduce((sum, trade) => sum + trade.profit.amount, 0),
+        equity: currentEquity,
+        currency: accountCurrency,
         format: "CSV / PDF",
         trades: monthTrades,
       });
@@ -111,6 +174,8 @@ function ReportsContent() {
         status: "Ready",
         tradeCount: trades.length,
         pnl: closed.reduce((sum, trade) => sum + trade.profit.amount, 0),
+        equity: currentEquity,
+        currency: accountCurrency,
         format: "CSV / PDF",
         trades,
       });
@@ -123,21 +188,32 @@ function ReportsContent() {
         status: "Ready",
         tradeCount: closed.length,
         pnl: closed.reduce((sum, trade) => sum + trade.profit.amount, 0),
+        equity: currentEquity,
+        currency: accountCurrency,
         format: "CSV / PDF",
         trades: closed,
       });
     }
 
     return rows;
-  }, [trades]);
+  })();
 
   const closedCount = trades.filter((trade) => trade.status === "CLOSED").length;
   const openCount = trades.filter((trade) => trade.status === "OPEN").length;
   const totalClosedPnl = trades
     .filter((trade) => trade.status === "CLOSED")
     .reduce((sum, trade) => sum + trade.profit.amount, 0);
+  const periodPnl = monthlySummary?.totalProfit.amount ?? reports[0]?.pnl ?? 0;
 
   function exportCsv(report: ReportRow) {
+    const metadata = [
+      ["Report", report.name],
+      ["Period", report.period],
+      ["Account", activeAccount?.accountName ?? "Selected account"],
+      ["Equity", formatMoney({ amount: report.equity, currency: report.currency })],
+      ["Period P&L", formatMoney({ amount: report.pnl, currency: report.currency })],
+      [],
+    ];
     const header = [
       "Trade ID",
       "Symbol",
@@ -158,15 +234,15 @@ function ReportsContent() {
       trade.side,
       trade.status,
       String(trade.volume),
-      String(trade.openPrice ?? ""),
-      String(trade.closePrice ?? ""),
+      formatPrice(trade.openPrice),
+      formatPrice(trade.closePrice),
       String(trade.profit.amount),
       trade.profit.currency,
       trade.openedAt,
       trade.closedAt ?? "",
     ]);
 
-    const csv = [header, ...rows]
+    const csv = [...metadata, header, ...rows]
       .map((row) =>
         row.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","),
       )
@@ -184,7 +260,6 @@ function ReportsContent() {
   }
 
   async function exportPdf(report: ReportRow) {
-    const currency = report.trades[0]?.profit.currency ?? "USD";
     const response = await fetch("/api/reports/pdf", {
       method: "POST",
       headers: {
@@ -194,7 +269,10 @@ function ReportsContent() {
         reportName: report.name,
         period: report.period,
         trades: report.trades,
-        currency,
+        currency: report.currency,
+        accountName: activeAccount?.accountName ?? "Selected account",
+        currentEquity: report.equity,
+        periodPnl: report.pnl,
       }),
     });
     if (!response.ok) {
@@ -220,7 +298,9 @@ function ReportsContent() {
     >
       <InlineStatusStrip
         items={[
-          { label: "Ready reports", value: reports.length, helper: "Derived from live trades", tone: "lime" },
+          { label: "Ready reports", value: reports.length, helper: "Selected live account", tone: "lime" },
+          { label: "Current equity", value: formatMoney({ amount: currentEquity, currency: accountCurrency }), helper: activeAccount?.accountName ?? "No connected account", tone: "lime" },
+          { label: "Period P&L", value: formatMoney({ amount: periodPnl, currency: accountCurrency }), helper: "Matches dashboard monthly period", tone: periodPnl >= 0 ? "lime" : "danger" },
           { label: "Closed trades", value: closedCount, helper: "Export basis" },
           { label: "Export format", value: "CSV / PDF", helper: "Branded direct download" },
         ]}
@@ -234,7 +314,7 @@ function ReportsContent() {
           />
         ) : (
           <DataTable
-            headers={["Report", "Period", "Status", "Trades", "Net P&L", "Format", "Export"]}
+            headers={["Report", "Period", "Status", "Trades", "Equity", "Period P&L", "Format", "Export"]}
             paginated
             initialPageSize={10}
             rows={reports.map((report) => [
@@ -246,13 +326,16 @@ function ReportsContent() {
                 {report.status}
               </StatusPill>,
               report.tradeCount,
+              <span key="equity" className="font-semibold text-accent-2">
+                {formatMoney({ amount: report.equity, currency: report.currency })}
+              </span>,
               <span
                 key="pnl"
                 className={`font-semibold ${
                   report.pnl >= 0 ? "text-accent-2" : "text-danger"
                 }`}
               >
-                {formatMoney({ amount: report.pnl, currency: "USD" })}
+                {formatMoney({ amount: report.pnl, currency: report.currency })}
               </span>,
               report.format,
               <div key="export" className="flex items-center gap-3">

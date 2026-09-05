@@ -60,6 +60,44 @@ interface ConfigRow {
   broker_providers?: { display_name?: string | null; name?: string | null } | null;
 }
 
+interface TradeRebateLogRow {
+  id: string;
+  trader_id: string | null;
+  trade_id: string | null;
+  source_type: string;
+  amount: number | string;
+  currency: string;
+  status: string;
+  created_at: string;
+  model_type: PartnerModelType | null;
+  calculation_type: "IB_VOLUME" | "CPA_TIER" | "ADMIN_ADJUSTMENT" | null;
+  volume_lots: number | string | null;
+  trades?: { external_trade_id?: string | null; symbol?: string | null } | null;
+  profiles?: { full_name?: string | null } | null;
+  broker_providers?: { display_name?: string | null; name?: string | null } | null;
+}
+
+interface ClosedTradeScanRow {
+  id: string;
+  trading_account_id: string;
+  symbol: string | null;
+  status: string;
+  volume: number | string | null;
+  profit: number | string | null;
+  currency: string | null;
+  closed_at: string | null;
+  trading_accounts?: {
+    user_id?: string | null;
+    broker_provider_id?: string | null;
+    broker_name?: string | null;
+    initial_balance?: number | string | null;
+  } | null;
+}
+
+interface TraderVolumeRow {
+  volume: number | string | null;
+}
+
 function mapConfig(row: ConfigRow): PartnerBrokerConfigurationDto {
   return {
     id: row.id,
@@ -189,7 +227,7 @@ export async function listPartnerTradeRebateLogs(
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(`Failed to load partner trade rebates: ${error.message}`);
-  return (data ?? []).map((row: any) => ({
+  return ((data ?? []) as TradeRebateLogRow[]).map((row) => ({
     id: row.id,
     traderId: row.trader_id,
     traderName: row.profiles?.full_name ?? null,
@@ -259,7 +297,7 @@ export async function calculatePartnerRebatesForTradingAccounts(
   let created = 0;
   const now = new Date().toISOString();
 
-  for (const trade of (trades ?? []) as any[]) {
+  for (const trade of (trades ?? []) as ClosedTradeScanRow[]) {
     const account = trade.trading_accounts;
     const traderId = account?.user_id as string | undefined;
     if (!traderId) continue;
@@ -317,7 +355,10 @@ export async function calculatePartnerRebatesForTradingAccounts(
         ? traderTradesQuery.eq("trading_accounts.broker_provider_id", brokerProviderId)
         : traderTradesQuery.is("trading_accounts.broker_provider_id", null);
       const { data: traderTrades } = await traderTradesQuery;
-      const totalLots = (traderTrades ?? []).reduce((sum: number, row: any) => sum + Math.abs(Number(row.volume ?? 0)), 0);
+      const totalLots = ((traderTrades ?? []) as TraderVolumeRow[]).reduce(
+        (sum, row) => sum + Math.abs(Number(row.volume ?? 0)),
+        0,
+      );
       if (totalLots < Number(config.cpa_qualification_lots)) continue;
       const deposit = Number(account.initial_balance ?? 0);
       const amount = cpaPayout(config, deposit);

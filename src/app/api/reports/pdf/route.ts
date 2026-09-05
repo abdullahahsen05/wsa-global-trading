@@ -25,6 +25,9 @@ const requestSchema = z.object({
   reportName: z.string().min(1).max(120),
   period: z.string().min(1).max(120),
   currency: z.string().min(1).max(12),
+  accountName: z.string().min(1).max(160).optional(),
+  currentEquity: z.number().optional(),
+  periodPnl: z.number().optional(),
   trades: z.array(tradeSchema).max(5000),
 });
 
@@ -37,6 +40,9 @@ export async function POST(request: Request) {
       period: body.period,
       trades: body.trades as TradeDto[],
       currency: body.currency,
+      accountName: body.accountName,
+      currentEquity: body.currentEquity,
+      periodPnl: body.periodPnl,
     });
     const pdfBytes = Uint8Array.from(pdf);
     return new Response(pdfBytes, {

@@ -6,6 +6,9 @@ interface TradeReportPdfInput {
   period: string;
   trades: TradeDto[];
   currency: string;
+  accountName?: string;
+  currentEquity?: number;
+  periodPnl?: number;
 }
 
 function drawBrand(page: PDFPage, bold: PDFFont) {
@@ -126,12 +129,8 @@ export async function generateTradeReportPdf(input: TradeReportPdfInput): Promis
 
   const closedTrades = input.trades.filter((trade) => trade.status === "CLOSED");
   const totalPnl = closedTrades.reduce((sum, trade) => sum + trade.profit.amount, 0);
-  const winningDays = new Set(
-    closedTrades
-      .filter((trade) => trade.profit.amount > 0)
-      .map((trade) => new Date(trade.closedAt ?? trade.openedAt).toISOString().slice(0, 10)),
-  ).size;
-
+  const reportPnl = input.periodPnl ?? totalPnl;
+  const currentEquity = input.currentEquity ?? null;
   let page = pdf.addPage([595, 842]);
   drawPageFrame(page);
   drawBrand(page, bold);
@@ -150,19 +149,37 @@ export async function generateTradeReportPdf(input: TradeReportPdfInput): Promis
     font: regular,
     color: rgb(0.7, 0.7, 0.68),
   });
+  if (input.accountName) {
+    page.drawText(`Account: ${input.accountName}`, {
+      x: 42,
+      y: 654,
+      size: 9,
+      font: regular,
+      color: rgb(0.7, 0.7, 0.68),
+    });
+  }
 
-  drawSummaryCard(page, { x: 42, y: 586, w: 160, title: "Trades", value: String(input.trades.length), regular, bold });
+  drawSummaryCard(page, {
+    x: 42,
+    y: 586,
+    w: 160,
+    title: "Current equity",
+    value: currentEquity == null ? "—" : money(currentEquity, input.currency),
+    tone: "positive",
+    regular,
+    bold,
+  });
   drawSummaryCard(page, {
     x: 218,
     y: 586,
     w: 160,
-    title: "Closed P&L",
-    value: money(totalPnl, input.currency),
-    tone: totalPnl >= 0 ? "positive" : "negative",
+    title: "Period P&L",
+    value: money(reportPnl, input.currency),
+    tone: reportPnl >= 0 ? "positive" : "negative",
     regular,
     bold,
   });
-  drawSummaryCard(page, { x: 394, y: 586, w: 158, title: "Winning days", value: String(winningDays), regular, bold });
+  drawSummaryCard(page, { x: 394, y: 586, w: 158, title: "Trades", value: String(input.trades.length), regular, bold });
 
   page.drawText("Trade ledger", {
     x: 42,

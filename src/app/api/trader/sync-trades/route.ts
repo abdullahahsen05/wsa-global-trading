@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       body = {};
     }
 
-    // Vercel must not create long-lived MetaApi websocket sessions. The AWS
+    // Vercel must not create long-lived broker websocket sessions. The AWS
     // stream worker owns real-time projection; a stale account gets a bounded
     // worker-side fallback job instead.
     let accountQuery = supabase

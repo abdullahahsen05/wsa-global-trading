@@ -15,7 +15,7 @@ export type BrokerSearchOption = {
   platforms: BrokerPlatform[];
   serverCount: number;
   servers: Array<{ name: string; access: string[] }>;
-  source: "API2TRADE" | "WORKSPACE";
+  source: "BROKER_SERVICE" | "WORKSPACE";
 };
 
 async function loadBrokerOptions(params: {
@@ -73,7 +73,7 @@ export function BrokerAutocompleteField({
   }, [value]);
 
   const brokersQuery = useQuery({
-    queryKey: ["api2trade-broker-search", platform, query],
+    queryKey: ["broker-search", platform, query],
     queryFn: () => loadBrokerOptions({ query, platform }),
     enabled: !disabled && open,
     staleTime: 10 * 60 * 1000,
@@ -182,7 +182,7 @@ export function BrokerAutocompleteField({
                       <span className="mt-1 block text-sm text-muted">
                         {broker.serverCount ? `${broker.serverCount} server${broker.serverCount === 1 ? "" : "s"} available` : "Server can be entered manually"}
                         {" · "}
-                        {broker.source === "API2TRADE" ? "Live broker data" : "Workspace recommendation"}
+                        {broker.source === "BROKER_SERVICE" ? "Live broker data" : "Workspace recommendation"}
                       </span>
                     </span>
                     <span className="hidden rounded-full border border-line px-3 py-1 text-xs font-semibold text-muted sm:inline-flex">

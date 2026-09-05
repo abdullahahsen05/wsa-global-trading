@@ -65,12 +65,6 @@ const WITHDRAWAL_TONE: Record<string, "lime" | "accent" | "danger" | "muted"> = 
   REJECTED: "danger",
 };
 
-const RULE_LABELS: Record<PartnerCommissionSummaryDto["commissionType"], string> = {
-  CPA: "CPA (Cost Per Acquisition)",
-  REBATE: "Rebate",
-  PROFIT_SHARE: "Profit Share",
-};
-
 function titleFor(mode: FinanceMode) {
   if (mode === "REBATE") return "Rebate";
   if (mode === "CPA") return "CPA";
@@ -82,15 +76,15 @@ function titleFor(mode: FinanceMode) {
 function descriptionFor(mode: FinanceMode) {
   switch (mode) {
     case "REBATE":
-      return "Track lot-based rebate earnings from referred trader trading activity.";
+      return "Track broker-side, lot-based rebate earnings from referred trader trading activity.";
     case "CPA":
-      return "Review qualified CPA rewards, deposit tiers, and approved acquisition payouts.";
+      return "Review broker-side CPA performance as read-only partner reporting.";
     case "HYBRID":
-      return "Monitor accounts where rebate and CPA logic both contribute to partner earnings.";
+      return "Monitor broker setups where rebate and CPA logic both contribute to partner earnings.";
     case "COMMISSION":
-      return "See the active WSA commission structure, payout model, and what is currently earning.";
+      return "See WSA platform-subscription affiliate commission, separate from broker rebate/CPA/hybrid calculations.";
     case "PAYOUT":
-      return "Review wallet balance, withdrawable funds, and every payout request step.";
+      return "Review WSA commission balance, withdrawable funds, and every payout request step.";
   }
 }
 
@@ -129,21 +123,17 @@ function CommissionRulePanel({ summary }: { summary: PartnerCommissionSummaryDto
   return (
     <div className="mt-4 rounded-[4px] border border-line bg-panel p-4">
       <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">
-        WSA commission structure
+        WSA platform subscription commission
       </p>
-      <div className="definition-grid mt-3 grid grid-cols-2 gap-0 sm:grid-cols-4">
-        <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Type</p>
-          <p className="mt-1 text-sm font-semibold text-foreground">{RULE_LABELS[summary.commissionType]}</p>
-        </div>
+      <div className="definition-grid mt-3 grid gap-0 sm:grid-cols-3">
         <div className="rounded-[4px] border border-line bg-background px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">WSA commission %</p>
           <p className="mt-1 text-sm font-semibold text-foreground">{summary.commissionPercent}%</p>
         </div>
         <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">CPA amount</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Pending payout</p>
           <p className="mt-1 text-sm font-semibold text-foreground">
-            {summary.cpaAmount != null ? formatMoney({ amount: summary.cpaAmount, currency: summary.currency }) : "-"}
+            {formatMoney(summary.pending)}
           </p>
         </div>
         <div className="rounded-[4px] border border-line bg-background px-4 py-3">
@@ -152,7 +142,7 @@ function CommissionRulePanel({ summary }: { summary: PartnerCommissionSummaryDto
         </div>
       </div>
       <p className="mt-3 text-xs text-muted">
-        This mirrors the current partner model configuration used by the backend to calculate earnings and payout readiness.
+        This is the WSA-payable commission. Broker rebate, CPA, and hybrid figures stay in their own performance pages.
       </p>
     </div>
   );
@@ -227,9 +217,15 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
     .filter((record: PartnerCommissionDto) => statusFilter === "ALL" ? true : record.status === statusFilter);
 
   const ledgerTotal = filteredLedgerItems.reduce((sum: number, item: PartnerFinancialLedgerDto["items"][number]) => sum + item.amount, 0);
-  const pendingCount = filteredCommissionRecords.filter((record: PartnerCommissionDto) => record.status === "PENDING").length;
-  const approvedCount = filteredCommissionRecords.filter((record: PartnerCommissionDto) => record.status === "APPROVED").length;
-  const paidCount = filteredCommissionRecords.filter((record: PartnerCommissionDto) => record.status === "PAID").length;
+  const tradeLots = filteredTradeRows.reduce((sum, row) => sum + row.lots, 0);
+  const tradeEarnings = filteredTradeRows.reduce((sum, row) => sum + row.rebateAmount, 0);
+  const activeBrokerCount = new Set(filteredTradeRows.map((row) => row.brokerName).filter(Boolean)).size;
+  const activeTraderCount = new Set(filteredTradeRows.map((row) => row.traderName).filter(Boolean)).size;
+  const qualifiedTradeCount = filteredTradeRows.filter((row) => row.status === "APPROVED" || row.status === "PAID").length;
+  const ibRows = filteredTradeRows.filter((row) => row.calculationType === "IB_VOLUME" || row.modelType === "IB");
+  const cpaRows = filteredTradeRows.filter((row) => row.calculationType === "CPA_TIER" || row.modelType === "CPA");
+  const ibTotal = ibRows.reduce((sum, row) => sum + row.rebateAmount, 0);
+  const cpaTotal = cpaRows.reduce((sum, row) => sum + row.rebateAmount, 0);
 
   const title = titleFor(mode);
 
@@ -252,54 +248,90 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
       }
     >
       <InlineStatusStrip
-        items={[
+        items={mode === "COMMISSION" ? [
           {
-            label: mode === "COMMISSION" ? "WSA commission %" : "Tracked records",
-            value: mode === "COMMISSION" ? `${summary?.commissionPercent ?? 0}%` : filteredTradeRows.length,
+            label: "WSA commission %",
+            value: `${summary?.commissionPercent ?? 0}%`,
             tone: "accent",
           },
           {
             label: "Pending",
-            value: mode === "COMMISSION" ? (summary ? formatMoney(summary.pending) : "-") : pendingCount,
+            value: summary ? formatMoney(summary.pending) : "-",
             tone: "accent",
           },
           {
             label: "Approved",
-            value: mode === "COMMISSION" ? (summary ? formatMoney(summary.approved) : "-") : approvedCount,
+            value: summary ? formatMoney(summary.approved) : "-",
             tone: "lime",
           },
           {
             label: "Paid",
-            value: mode === "COMMISSION" ? (summary ? formatMoney(summary.paid) : "-") : paidCount,
+            value: summary ? formatMoney(summary.paid) : "-",
             tone: "lime",
           },
           {
-            label: mode === "CPA" ? "Qualified value" : mode === "REBATE" ? "Rebate value" : mode === "HYBRID" ? "Hybrid value" : "Ledger total",
+            label: "Ledger total",
             value: filteredLedgerItems.length > 0
               ? formatMoney({ amount: ledgerTotal, currency: filteredLedgerItems[0]?.currency ?? summary?.currency ?? "USD" })
               : "-",
             tone: ledgerTotal < 0 ? "danger" : "lime",
           },
+        ] : mode === "CPA" ? [
+          { label: "CPA records", value: filteredTradeRows.length, tone: "accent" },
+          { label: "Brokers", value: activeBrokerCount },
+          { label: "Clients", value: activeTraderCount },
+          { label: "Lots", value: tradeLots.toFixed(2), tone: "accent" },
+          { label: "Qualified", value: qualifiedTradeCount, tone: "lime" },
+          {
+            label: "Total CPA",
+            value: formatMoney({ amount: tradeEarnings, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
+            tone: "lime",
+          },
+        ] : mode === "HYBRID" ? [
+          { label: "Hybrid records", value: filteredTradeRows.length, tone: "accent" },
+          { label: "Brokers", value: activeBrokerCount },
+          { label: "Clients", value: activeTraderCount },
+          { label: "Lots", value: tradeLots.toFixed(2), tone: "accent" },
+          {
+            label: "IB",
+            value: formatMoney({ amount: ibTotal, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
+            tone: "lime",
+          },
+          {
+            label: "CPA",
+            value: formatMoney({ amount: cpaTotal, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
+            tone: "lime",
+          },
+        ] : [
+          { label: "Broker records", value: filteredTradeRows.length, tone: "accent" },
+          { label: "Brokers", value: activeBrokerCount },
+          { label: "Traders", value: activeTraderCount },
+          { label: "Lots", value: tradeLots.toFixed(2), tone: "accent" },
+          {
+            label: mode === "REBATE" ? "Rebate earned" : mode === "CPA" ? "CPA earned" : "Hybrid earned",
+            value: formatMoney({ amount: tradeEarnings, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
+            tone: "lime",
+          },
         ]}
       />
 
-      {summary ? <CommissionRulePanel summary={summary} /> : null}
+      {mode === "COMMISSION" && summary ? <CommissionRulePanel summary={summary} /> : null}
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+      <div className={mode === "REBATE" || mode === "CPA" || mode === "HYBRID" ? "mt-5 grid gap-5" : "mt-5 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]"}>
         <Panel className="min-w-0">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">
-                {mode === "COMMISSION" ? "Commission ledger" : `${title} activity`}
+                {mode === "REBATE" ? "Rebate performance" : mode === "CPA" ? "CPA performance" : mode === "HYBRID" ? "Hybrid performance" : mode === "COMMISSION" ? "Commission ledger" : `${title} activity`}
               </h2>
               <p className="mt-1 text-sm text-muted">
                 {mode === "REBATE"
-                  ? "Lot-driven rebate events and related credited earnings."
+                  ? "Broker → trader → symbol → lots → rebate. Only rebate performance is shown here."
                   : mode === "CPA"
-                    ? "CPA qualification events and their resulting partner rewards."
+                    ? "Broker → client → symbol → lots → qualified → total. Only CPA performance is shown here."
                     : mode === "HYBRID"
-                      ? "Trades and rewards where rebate and CPA logic overlap under a hybrid setup."
-                      : "Combined commission records generated for the partner account."}
+                      ? "Broker → client → symbol → lots → IB → CPA. WSA commission is not shown here."
+                      : "Platform subscription commission records generated for the partner account."}
               </p>
             </div>
             <StatusPill tone="accent">
@@ -329,26 +361,48 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
                 />
               )
             ) : filteredTradeRows.length === 0 ? (
-              <EmptyState title={`No ${title.toLowerCase()} records yet`} description={`When ${title.toLowerCase()} activity is created for your traders, it will appear here.`} />
+              <EmptyState
+                title={`No ${title.toLowerCase()} records yet`}
+                description={mode === "REBATE"
+                  ? "When referred traders close eligible lots, broker, trader, symbol, lots, and rebate values will appear here."
+                  : mode === "CPA"
+                    ? "When referred clients qualify for CPA, broker, client, lot, qualified, and total values will appear here."
+                    : mode === "HYBRID"
+                      ? "When referred clients generate hybrid activity, broker, client, lot, IB, and CPA values will appear here."
+                  : `When ${title.toLowerCase()} activity is created for your traders, it will appear here.`}
+              />
             ) : (
               <DataTable
                 initialPageSize={10}
                 pageSizeOptions={[10, 20, 50]}
                 maxBodyHeight="420px"
-                headers={["Date", "Trader", "Trade", "Broker", "Lots", "Model", "Amount", "Status"]}
+                headers={mode === "REBATE"
+                  ? ["Broker", "Trader", "Symbol", "Lots", "Rebate", "Status"]
+                  : mode === "CPA"
+                    ? ["Broker", "Client", "Symbol", "Lots", "Qualified", "Total", "Status"]
+                    : ["Broker", "Client", "Symbol", "Lots", "IB", "CPA", "Status"]}
                 rows={filteredTradeRows.map((row: PartnerTradeRebateLogDto) => [
-                  <span key="date" className="text-xs text-muted">{new Date(row.createdAt).toLocaleString()}</span>,
-                  <span key="trader">{row.traderName ?? "Trader"}</span>,
-                  <div key="trade" className="min-w-0">
-                    <p className="truncate font-semibold text-foreground">{row.symbol ?? "Trade"}</p>
-                    <p className="truncate font-mono text-[11px] text-muted">{row.externalTradeId ?? "—"}</p>
-                  </div>,
                   <span key="broker" className="text-xs text-muted">{row.brokerName ?? "All brokers"}</span>,
+                  <span key="trader">{row.traderName ?? (mode === "CPA" || mode === "HYBRID" ? "Client" : "Trader")}</span>,
+                  <span key="symbol" className="font-semibold text-foreground">{row.symbol ?? "—"}</span>,
                   <span key="lots">{row.lots.toFixed(2)}</span>,
-                  <span key="model">{row.modelType ?? row.calculationType ?? "—"}</span>,
+                  ...(mode === "CPA" ? [
+                    <StatusPill key="qualified" tone={row.status === "APPROVED" || row.status === "PAID" ? "lime" : row.status === "PENDING" ? "accent" : "muted"}>
+                      {row.status === "APPROVED" || row.status === "PAID" ? "Qualified" : "Pending"}
+                    </StatusPill>,
+                  ] : []),
+                  ...(mode === "HYBRID" ? [
+                    <span key="ib" className="font-semibold text-accent-2">
+                      {row.calculationType === "IB_VOLUME" ? formatMoney({ amount: row.rebateAmount, currency: row.currency }) : "—"}
+                    </span>,
+                    <span key="cpa" className="font-semibold text-accent-2">
+                      {row.calculationType === "CPA_TIER" ? formatMoney({ amount: row.rebateAmount, currency: row.currency }) : "—"}
+                    </span>,
+                  ] : [
                   <span key="amount" className="font-semibold text-accent-2">
                     {formatMoney({ amount: row.rebateAmount, currency: row.currency })}
                   </span>,
+                  ]),
                   <StatusPill key="status" tone={STATUS_TONE[row.status as PartnerCommissionDto["status"]] ?? "muted"}>
                     {row.status}
                   </StatusPill>,
@@ -358,37 +412,37 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
           </div>
         </Panel>
 
-        <Panel className="min-w-0">
+        {mode !== "REBATE" && mode !== "CPA" && mode !== "HYBRID" ? <Panel className="min-w-0">
           <h2 className="text-lg font-semibold text-foreground">
             {mode === "COMMISSION" ? "Commission mix" : `${title} ledger`}
           </h2>
           <p className="mt-1 text-sm text-muted">
             {mode === "COMMISSION"
-              ? "Current commission rules, pending balances, and what has already cleared."
+              ? "Current platform subscription commission rules, pending balances, and what has already cleared."
               : "Server-calculated ledger items used to make wallet and payout balances accurate."}
           </p>
           {mode === "COMMISSION" ? (
             <div className="mt-4 space-y-3">
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Commission type</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">
-                  {summary ? RULE_LABELS[summary.commissionType as keyof typeof RULE_LABELS] : "Loading…"}
-                </p>
-              </div>
-              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Commission %</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">WSA commission %</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">{summary ? `${summary.commissionPercent}%` : "Loading…"}</p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">CPA base</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Approved for WSA payout</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">
-                  {summary?.cpaAmount != null ? formatMoney({ amount: summary.cpaAmount, currency: summary.currency }) : "Not configured"}
+                  {summary ? formatMoney(summary.approved) : "Loading…"}
                 </p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Cellxpert-style intent</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Paid WSA commission</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {summary ? formatMoney(summary.paid) : "Loading…"}
+                </p>
+              </div>
+              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Payout rule</p>
                 <p className="mt-1 text-sm leading-6 text-muted">
-                  We now expose separated Rebate, CPA, Hybrid, Commission, and Payout views, while still using one consistent backend ledger.
+                  Only WSA commission is eligible for WSA payout. Broker Rebate, CPA, and Hybrid are shown separately as broker performance.
                 </p>
               </div>
             </div>
@@ -401,10 +455,10 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
               <FinanceLedgerTable items={filteredLedgerItems.slice(0, 100)} />
             </div>
           )}
-        </Panel>
+        </Panel> : null}
       </div>
 
-      <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
+      {mode === "COMMISSION" ? <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
         <FilterChipRow
           chips={(["ALL", "PENDING", "APPROVED", "PAID", "CANCELLED"] as const).map((status) => ({
             label: status === "ALL"
@@ -414,7 +468,7 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
             onClick: () => setStatusFilter(status),
           }))}
         />
-      </div>
+      </div> : null}
 
       <div className="mt-5">
         {isLoading ? (
@@ -475,6 +529,7 @@ function PayoutModePage() {
   const isLoading = withdrawalQuery.isLoading;
   const balance = data?.balance;
   const withdrawals: PartnerWithdrawalDto[] = data?.withdrawals ?? [];
+  const commissionLedgerItems = (data?.ledger.items ?? []).filter((item) => item.type === "COMMISSION");
   const hasActive = withdrawals.some((row) => row.status === "PENDING_REVIEW" || row.status === "APPROVED");
 
   return (
@@ -482,8 +537,8 @@ function PayoutModePage() {
       <InlineStatusStrip
         items={[
           { label: "Withdrawable", value: balance ? formatMoney({ amount: balance.available, currency: balance.currency }) : "…", tone: "lime" },
-          { label: "Approved unpaid CPA", value: data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidCommissions, currency: data.ledger.currency }) : "…", tone: "lime" },
-          { label: "Approved unpaid rebates", value: data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidRebates, currency: data.ledger.currency }) : "…", tone: "lime" },
+          { label: "Approved WSA commission", value: data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidCommissions, currency: data.ledger.currency }) : "…", tone: "lime" },
+          { label: "Paid WSA commission", value: data?.ledger ? formatMoney({ amount: data.ledger.paidCommissions, currency: data.ledger.currency }) : "…", tone: "lime" },
           { label: "Reserved / reconciled", value: balance ? formatMoney({ amount: balance.reserved, currency: balance.currency }) : "…", tone: "accent" },
         ]}
       />
@@ -497,18 +552,18 @@ function PayoutModePage() {
           <p className="mt-1 text-xs text-muted">Immediately withdrawable after approvals and existing locks.</p>
         </Panel>
         <Panel>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Approved rebates</p>
-          <p className="mt-3 text-2xl font-semibold text-foreground">
-            {data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidRebates, currency: data.ledger.currency }) : "…"}
-          </p>
-          <p className="mt-1 text-xs text-muted">Lot-based earnings cleared for payout.</p>
-        </Panel>
-        <Panel>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Approved CPA</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Approved WSA commission</p>
           <p className="mt-3 text-2xl font-semibold text-foreground">
             {data?.ledger ? formatMoney({ amount: data.ledger.approvedUnpaidCommissions, currency: data.ledger.currency }) : "…"}
           </p>
-          <p className="mt-1 text-xs text-muted">Qualified acquisition rewards cleared for payout.</p>
+          <p className="mt-1 text-xs text-muted">WSA commission cleared for payout.</p>
+        </Panel>
+        <Panel>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Paid WSA commission</p>
+          <p className="mt-3 text-2xl font-semibold text-foreground">
+            {data?.ledger ? formatMoney({ amount: data.ledger.paidCommissions, currency: data.ledger.currency }) : "…"}
+          </p>
+          <p className="mt-1 text-xs text-muted">WSA commission already reconciled.</p>
         </Panel>
         <Panel>
           <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Locked requests</p>
@@ -523,7 +578,7 @@ function PayoutModePage() {
         <Panel className="invisible-scrollbar min-h-0 overflow-y-auto xl:h-full">
           <h2 className="text-lg font-semibold text-foreground">Request WSA payout</h2>
           <p className="mt-1 text-sm leading-6 text-muted">
-            Approved rebate, CPA, and hybrid balances that are not already locked can be paid out. One active request is allowed at a time.
+            Only approved WSA platform subscription commission that is not already locked can be paid out. One active request is allowed at a time.
           </p>
           {message ? <p className="mt-4 rounded-[4px] border border-accent/20 bg-accent/10 px-4 py-3 text-sm text-accent">{message}</p> : null}
           {error ? <p className="mt-4 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
@@ -580,13 +635,13 @@ function PayoutModePage() {
       <Panel className="mt-5">
         <h2 className="text-lg font-semibold text-foreground">Wallet ledger</h2>
         <p className="mt-1 text-sm text-muted">
-          This is the full ledger that feeds the partner wallet, withdrawable balance, and payout lock logic.
+          WSA commission entries that feed the partner wallet, withdrawable balance, and payout lock logic.
         </p>
         <div className="mt-4">
-          {(data?.ledger.items.length ?? 0) === 0 ? (
-            <EmptyState title="No ledger entries" description="Rebate, CPA, and hybrid entries will appear here." />
+          {commissionLedgerItems.length === 0 ? (
+            <EmptyState title="No ledger entries" description="WSA commission entries will appear here." />
           ) : (
-            <FinanceLedgerTable items={(data?.ledger.items ?? []).slice(0, 100)} />
+            <FinanceLedgerTable items={commissionLedgerItems.slice(0, 100)} />
           )}
         </div>
       </Panel>

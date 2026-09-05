@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mapTradeToDto } from "@/lib/mappers/tradeMapper";
 import { listPartnerTradeRebateLogs } from "@/lib/services/partnerRebateCalculationService";
+import { getPartnerFinancialLedger } from "@/lib/services/partnerWithdrawalService";
 import {
   PARTNER_ERROR,
   PartnerError,
@@ -395,17 +396,23 @@ export async function getPartnerSummary(partnerUserId: string): Promise<PartnerS
   const activeTraders = traders.filter((t) => t.status === "ACTIVE").length;
 
   const commission = await getPartnerCommissionSummary(partnerUserId);
-  const rebateLogs = await listPartnerTradeRebateLogs(partnerUserId, 5000);
+  const [rebateLogs, financialLedger] = await Promise.all([
+    listPartnerTradeRebateLogs(partnerUserId, 5000),
+    getPartnerFinancialLedger(partnerUserId, commission.currency, { includeItems: false }),
+  ]);
   const totalTeamLots = traders.reduce((sum, trader) => sum + trader.totalLotsTraded, 0);
-  const ibEarnings = rebateLogs
+  const tradeIbEarnings = rebateLogs
     .filter((row) => row.calculationType === "IB_VOLUME")
     .reduce((sum, row) => sum + row.rebateAmount, 0);
   const cpaEarnings = rebateLogs
     .filter((row) => row.calculationType === "CPA_TIER")
     .reduce((sum, row) => sum + row.rebateAmount, 0);
-  const totalRebatesEarned = rebateLogs
+  const tradeRebatesEarned = rebateLogs
     .filter((row) => row.status === "APPROVED" || row.status === "PAID")
     .reduce((sum, row) => sum + row.rebateAmount, 0);
+  const ledgerRebatesEarned = financialLedger.approvedUnpaidRebates + financialLedger.paidRebates;
+  const totalRebatesEarned = Math.max(tradeRebatesEarned, ledgerRebatesEarned);
+  const ibEarnings = Math.max(tradeIbEarnings, ledgerRebatesEarned - cpaEarnings);
 
   const supabase = createAdminClient();
   const { data: profileRow } = await supabase
@@ -424,8 +431,8 @@ export async function getPartnerSummary(partnerUserId: string): Promise<PartnerS
     pendingCommission: commission.pending,
     earnedCommission: { amount: commission.approved.amount + commission.paid.amount, currency: commission.currency },
     totalTeamLots: Number(totalTeamLots.toFixed(2)),
-    totalRebatesEarned: { amount: Number(totalRebatesEarned.toFixed(2)), currency: commission.currency },
-    ibEarnings: { amount: Number(ibEarnings.toFixed(2)), currency: commission.currency },
+    totalRebatesEarned: { amount: Number(totalRebatesEarned.toFixed(2)), currency: financialLedger.currency ?? commission.currency },
+    ibEarnings: { amount: Number(ibEarnings.toFixed(2)), currency: financialLedger.currency ?? commission.currency },
     cpaEarnings: { amount: Number(cpaEarnings.toFixed(2)), currency: commission.currency },
     commissionPercent: commission.commissionPercent,
     referralCode: (profileRow?.referral_code as string | null) ?? null,

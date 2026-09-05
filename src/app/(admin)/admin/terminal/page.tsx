@@ -125,7 +125,7 @@ export default function AdminTerminalPage() {
             </h3>
             <p className="mt-1.5 max-w-xl text-sm text-zinc-400">
               dxFeed / Devexperts integration is built and ready. Live professional market data
-              will be unlocked once a data redistribution agreement is signed and API credentials
+              will be unlocked once a data redistribution agreement is signed and secure connection details
               are configured below.
             </p>
           </div>
@@ -136,7 +136,7 @@ export default function AdminTerminalPage() {
         <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-3">
           {[
             { label: "Data Agreement", status: "Required", ok: false },
-            { label: "dxFeed API Credentials", status: "Not configured", ok: false },
+            { label: "Live data connection", status: "Not configured", ok: false },
             { label: "Demo Fallback", status: "Active", ok: true },
           ].map(({ label, status: st, ok }) => (
             <div key={label} className="px-3 py-2">
@@ -224,14 +224,14 @@ export default function AdminTerminalPage() {
                 note='Set to "mock" (default) or "dxfeed". Unset defaults to mock.'
               />
               <CheckRow
-                label="DXFEED_API_BASE_URL"
+                label="Live data base URL"
                 ok={env["DXFEED_API_BASE_URL"]}
-                note="Base URL for the dxFeed REST API. Required for dxFeed provider."
+                note="Base URL for the live data provider."
               />
               <CheckRow
-                label="DXFEED_API_KEY"
+                label="Live data secret key"
                 ok={env["DXFEED_API_KEY"]}
-                note="Server-side secret API key. Never exposed to the browser."
+                note="Server-side secret key. Never exposed to the browser."
               />
               <CheckRow
                 label="DXFEED_ACCOUNT_ID"
@@ -262,24 +262,24 @@ export default function AdminTerminalPage() {
                 provider.
               </p>
               <p>
-                <strong className="text-foreground">API contract:</strong> The dxFeed provider
+                <strong className="text-foreground">Provider contract:</strong> The dxFeed provider
                 skeleton in{" "}
                 <code className="rounded bg-border px-1 text-xs">
                   src/lib/terminal/providers/dxfeedMarketDataProvider.ts
                 </code>{" "}
-                contains TODO markers for each endpoint. Implement these once the official API
+                contains TODO markers for each endpoint. Implement these once the official
                 documentation is received from dxFeed / Devexperts.
               </p>
               <p>
                 <strong className="text-foreground">Safe fallback:</strong> While the dxFeed
-                provider is not configured, all terminal API endpoints automatically use the mock
+                provider is not configured, all terminal data endpoints automatically use the mock
                 provider and clearly label data as &quot;Demo Market Data&quot;. No live data is ever
                 displayed unless the provider reports{" "}
                 <code className="rounded bg-border px-1 text-xs">connected: true</code>.
               </p>
               <p>
                 <strong className="text-foreground">Next steps:</strong> Obtain dxFeed credentials
-                and API docs → set env vars → run health check → implement TODO endpoints →
+                and provider docs → set env vars → run health check → implement TODO endpoints →
                 switch provider to &quot;dxfeed&quot; here.
               </p>
             </div>

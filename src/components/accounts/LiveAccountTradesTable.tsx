@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { DataTable, EmptyState, Panel, StatusPill } from "@/components/app/WorkspaceUI";
-import { formatMoney } from "@/lib/utils/format";
+import { formatMoney, formatPrice } from "@/lib/utils/format";
 import type { TradeDto } from "@/lib/domain/types";
 
 type Props = {
@@ -84,7 +84,7 @@ export function LiveAccountTradesTable({ accountId }: Props) {
               >
                 {formatMoney(trade.profit)}
               </span>,
-              trade.closePrice ?? "—",
+              formatPrice(trade.closePrice),
               trade.closedAt ? new Date(trade.closedAt).toLocaleString() : "—",
             ])}
           />

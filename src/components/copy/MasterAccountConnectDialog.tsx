@@ -12,7 +12,7 @@ type BrokerServer = {
   id: string;
   serverName: string;
   brokerName?: string;
-  source: "MANUAL" | "METAAPI" | "API2TRADE";
+  source: "MANUAL" | "BROKER_SERVICE";
 };
 
 const CUSTOM = "__custom__";

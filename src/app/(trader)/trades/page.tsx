@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DirectorySearchOverlay } from "@/components/app/DirectorySearchOverlay";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
 import { EmptyState, GhostButton, InlineStatusStrip, Panel, PageActionGroup, PrimaryButton, StatusPill, WorkspacePage } from "@/components/app/WorkspaceUI";
-import { formatMoney } from "@/lib/utils/format";
+import { formatMoney, formatPrice } from "@/lib/utils/format";
 import type { TradeDto } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 
@@ -253,11 +253,11 @@ function TradesContent() {
                       </td>
                       <td className="px-3 py-3 font-mono text-foreground">{trade.volume}</td>
                       <td className="px-3 py-3">
-                        <p className="font-mono font-semibold text-foreground">{trade.openPrice}</p>
+                        <p className="font-mono font-semibold text-foreground">{formatPrice(trade.openPrice)}</p>
                         <p className="mt-0.5 text-xs text-muted">{new Date(trade.openedAt).toLocaleString()}</p>
                       </td>
                       <td className="px-3 py-3">
-                        <p className="font-mono font-semibold text-foreground">{trade.closePrice ?? "—"}</p>
+                        <p className="font-mono font-semibold text-foreground">{formatPrice(trade.closePrice)}</p>
                         <p className="mt-0.5 text-xs text-muted">{trade.closedAt ? new Date(trade.closedAt).toLocaleString() : "Still open"}</p>
                       </td>
                       <td className={`px-5 py-3 text-right font-mono font-semibold ${trade.profit.amount >= 0 ? "text-lime" : "text-danger"}`}>
@@ -297,13 +297,13 @@ function TradesContent() {
                   <dl className="grid grid-cols-2 gap-3 text-xs">
                     <div>
                       <dt className="text-muted">Opened</dt>
-                      <dd className="mt-1 font-mono font-semibold text-foreground">{trade.openPrice}</dd>
+                      <dd className="mt-1 font-mono font-semibold text-foreground">{formatPrice(trade.openPrice)}</dd>
                       <dd className="mt-0.5 text-muted">{new Date(trade.openedAt).toLocaleString()}</dd>
                     </div>
                     <div className="text-right">
                       <dt className="text-muted">{trade.status === "OPEN" ? "Volume" : "Closed"}</dt>
                       <dd className="mt-1 font-mono font-semibold text-foreground">
-                        {trade.status === "OPEN" ? trade.volume : trade.closePrice ?? "—"}
+                        {trade.status === "OPEN" ? trade.volume : formatPrice(trade.closePrice)}
                       </dd>
                       <dd className="mt-0.5 text-muted">
                         {trade.status === "OPEN"
@@ -421,7 +421,7 @@ function TradesContent() {
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Open price</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">{trade.openPrice}</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{formatPrice(trade.openPrice)}</p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Profit</p>
@@ -439,7 +439,7 @@ function TradesContent() {
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Close price</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">{trade.closePrice ?? "—"}</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{formatPrice(trade.closePrice)}</p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted">Closed</p>

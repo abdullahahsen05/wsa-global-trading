@@ -48,7 +48,7 @@ export function PartnerWorkspaceGate({ children }: { children: React.ReactNode }
     return (
       <AccessNotice
         title="Partner access is being prepared"
-        description="Your partner profile is being created or refreshed. Rebate, CPA, Hybrid, and payout data was not requested yet."
+        description="Your partner profile is being created or refreshed. Broker earnings and payout data was not requested yet."
       />
     );
   }
@@ -57,7 +57,7 @@ export function PartnerWorkspaceGate({ children }: { children: React.ReactNode }
     return (
       <AccessNotice
         title="Partner setup incomplete"
-        description="Your account has the partner role, but its Rebate / CPA / Hybrid profile still needs to be provisioned."
+        description="Your account has the partner role, but its broker earning profile still needs to be provisioned."
       />
     );
   }
@@ -66,7 +66,7 @@ export function PartnerWorkspaceGate({ children }: { children: React.ReactNode }
     return (
       <AccessNotice
         title="Partner application under review"
-        description="Trader, Rebate / CPA / Hybrid, CRM, and payout tools become available after approval."
+        description="Trader, broker earnings, CRM, and payout tools become available after approval."
       />
     );
   }

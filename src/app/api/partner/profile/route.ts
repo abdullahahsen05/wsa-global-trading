@@ -9,11 +9,13 @@ export async function GET() {
     const user = await requirePartner();
     const supabase = createAdminClient();
 
-    let { data, error } = await supabase
+    const profileResult = await supabase
       .from("partner_profiles")
       .select("status, referral_code, commission_percent")
       .eq("user_id", user.id)
       .maybeSingle();
+    let data = profileResult.data;
+    const error = profileResult.error;
 
     if (error) throw new Error(error.message);
     if (!data) {

@@ -32,7 +32,7 @@ type BrokerServerOption = {
   id: string;
   serverName: string;
   brokerName?: string;
-  source: "MANUAL" | "METAAPI" | "API2TRADE";
+  source: "MANUAL" | "BROKER_SERVICE";
 };
 const CUSTOM_SERVER_OPTION = "__custom__";
 

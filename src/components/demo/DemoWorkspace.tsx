@@ -138,7 +138,7 @@ function DemoTradingChartSection() {
               <span className="inline-flex h-3 w-3 rounded-full bg-accent" />
               <div>
                 <p className="text-sm font-semibold text-foreground">Demo market data</p>
-                <p className="text-xs text-muted">No live feed, dxFeed, or broker API is used.</p>
+                <p className="text-xs text-muted">No live feed or broker connection is used.</p>
               </div>
             </div>
           </div>

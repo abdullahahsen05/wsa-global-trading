@@ -4,7 +4,7 @@
  * Exchanges the server-side dxFeed feed credential for a short-lived connection
  * token that the browser can use to open the WebSocket feed directly.
  *
- * Why: browser WebSocket API cannot send custom HTTP headers. The main
+ * Why: browser WebSocket connections cannot send custom HTTP headers. The main
  * DXFEED_FEED_AUTH_HEADER never reaches the client — only the short-lived
  * token returned here does. Configure DXFEED_TOKEN_EXCHANGE_URL to the
  * endpoint your dxFeed provisioner gives you.
@@ -35,7 +35,7 @@ export async function POST() {
     }
 
     // Call dxFeed's token exchange endpoint to obtain a short-lived connection token.
-    // The exact request/response shape depends on your dxFeed provisioner's API contract.
+    // The exact request/response shape depends on your dxFeed provisioner's contract.
     const resp = await fetch(paths.tokenExchange, {
       method: "POST",
       headers: {
@@ -58,7 +58,7 @@ export async function POST() {
     }
 
     // Return the full WebSocket URL with the short-lived token as a query parameter.
-    // The client connects to this URL — the main API key never leaves the server.
+    // The client connects to this URL — the main secret never leaves the server.
     const feedUrl = `${paths.feed}${paths.feed.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
 
     return jsonOk({ feedUrl, hasToken: true });

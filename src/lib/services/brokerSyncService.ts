@@ -204,9 +204,9 @@ function sanitizeMessage(msg: string, creds: BrokerCredentialPayload): string {
   if (creds.server) s = s.split(creds.server).join('[redacted]');
   if (msg.includes('high reliability') && msg.includes('top up')) {
     return (
-      'MetaAPI rejected regular-reliability provisioning. ' +
-      'Your MetaAPI account may have no available slots. ' +
-      'Delete unused accounts at app.metaapi.cloud and retry.'
+      'Broker connection setup could not be started right now. ' +
+      'There may be no available connection slots. ' +
+      'Free up an unused broker connection and retry.'
     );
   }
   return s.slice(0, 500);
@@ -1119,10 +1119,10 @@ export async function getBrokerConnectionStatus(
       providerReady: false,
       lastSyncedAt: account.last_synced_at,
       message: account.provider_account_id
-        ? 'MetaApi status is unavailable because the provider is not configured.'
+        ? 'Broker connection status is unavailable because the provider is not configured.'
         : effectiveLocalStatus === 'PENDING'
           ? 'Account setup is incomplete. Add broker credentials to start the connection.'
-          : 'The MetaApi account has not been provisioned yet.',
+          : 'The broker connection has not been provisioned yet.',
     };
   }
 
@@ -1155,9 +1155,9 @@ export async function getBrokerConnectionStatus(
         ? 'This account has had no successful broker activity for 10 days. Re-enter or confirm the credentials, then sync it to reconnect.'
         : providerReady
         ? synchronized
-          ? 'MetaApi is connected and the account has synchronized.'
-          : 'MetaApi is connected, but the first account-data sync has not completed. Run Sync account to finish connecting.'
-        : 'MetaApi is still deploying or connecting this account. No action is required yet.',
+          ? 'Broker connection is active and the account has synchronized.'
+          : 'Broker connection is active, but the first account-data sync has not completed. Run Sync account to finish connecting.'
+        : 'Broker connection is still starting for this account. No action is required yet.',
     };
   } catch (providerError) {
     const safeMessage = (providerError instanceof Error ? providerError.message : 'Provider status lookup failed.')
@@ -1316,7 +1316,7 @@ export async function refreshAccountTrades(
 
   const token = process.env.METAAPI_TOKEN;
   if (!token) {
-    return { accountId, providerAccountId: account.provider_account_id, snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: 'METAAPI_TOKEN is not configured.' };
+    return { accountId, providerAccountId: account.provider_account_id, snapshotInserted: false, openPositions: 0, tradesUpserted: 0, balance: 0, equity: 0, currency: 'USD', error: 'Broker connection service is not configured.' };
   }
 
   const lock = await acquireOperationalLock(`account-sync:${accountId}`, 120);

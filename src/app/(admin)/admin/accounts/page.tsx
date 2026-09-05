@@ -82,7 +82,7 @@ export default function AdminAccountsPage() {
   const handleVerify = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setVerifyOpen(false);
-    setSuccessMessage("Verification queued (feature coming soon — no API call made).");
+    setSuccessMessage("Verification queued. No external connection was contacted yet.");
   };
 
   const storeCreds = useMutation({
@@ -128,7 +128,7 @@ export default function AdminAccountsPage() {
       queryClient.invalidateQueries({ queryKey: ["admin-accounts"] });
       setSuccessMessage(
         data.status === "PENDING"
-          ? `MetaAPI is still deploying — sync will complete automatically. Check back in a minute.`
+          ? `Broker connection is still starting — sync will complete automatically. Check back in a minute.`
           : `Sync complete: ${data.tradesUpserted} trade${data.tradesUpserted !== 1 ? "s" : ""} updated.`,
       );
     },
@@ -146,7 +146,7 @@ export default function AdminAccountsPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["admin-accounts"] });
       setSuccessMessage(
-        `Account deactivated. MetaAPI: ${data.providerResult}.${data.providerError ? ` Note: ${data.providerError}` : ""}`,
+        `Account deactivated. Broker connection: ${data.providerResult}.${data.providerError ? " Some broker cleanup may continue in the background." : ""}`,
       );
     },
     onError: (err: Error) => setAccountMessage(err.message),
@@ -163,7 +163,7 @@ export default function AdminAccountsPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["admin-accounts"] });
       setSuccessMessage(
-        `Account reactivated (${data.status}). MetaAPI: ${data.providerResult}.${data.providerError ? ` Note: ${data.providerError}` : ""}`,
+        `Account reactivated (${data.status}). Broker connection: ${data.providerResult}.${data.providerError ? " Some broker startup may continue in the background." : ""}`,
       );
     },
     onError: (err: Error) => setAccountMessage(err.message),
@@ -525,7 +525,7 @@ export default function AdminAccountsPage() {
           <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-danger/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="text-xl font-semibold text-foreground">Deactivate account?</Dialog.Title>
             <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
-              <strong className="text-foreground">{selectedAccount?.accountName}</strong> will be undeployed from MetaAPI (saves cost). The account data stays intact — you can reactivate at any time.
+              <strong className="text-foreground">{selectedAccount?.accountName}</strong> will be disconnected from the live broker service. The account data stays intact — you can reactivate at any time.
             </Dialog.Description>
             <div className="mt-5 flex justify-end gap-3 border-t border-line pt-4">
               <Dialog.Close asChild>
@@ -555,7 +555,7 @@ export default function AdminAccountsPage() {
           <Dialog.Content className="max-h-[90vh] invisible-scrollbar overflow-y-auto fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[7px] border border-accent/30 bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
             <Dialog.Title className="text-xl font-semibold text-foreground">Reactivate account?</Dialog.Title>
             <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
-              <strong className="text-foreground">{selectedAccount?.accountName}</strong> will be redeployed on MetaAPI. This will resume MetaAPI billing for this account.
+              <strong className="text-foreground">{selectedAccount?.accountName}</strong> will be reconnected to the live broker service. This may resume broker-service usage for this account.
             </Dialog.Description>
             <div className="mt-5 flex justify-end gap-3 border-t border-line pt-4">
               <Dialog.Close asChild>

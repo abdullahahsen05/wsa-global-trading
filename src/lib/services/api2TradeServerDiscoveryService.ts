@@ -35,7 +35,7 @@ export async function searchApi2TradeServers(params: {
     return {
       available: true,
       servers: [],
-      message: "Enter a broker or server name to search known MetaTrader servers.",
+      message: "Enter a broker or server name to search known broker servers.",
     };
   }
 

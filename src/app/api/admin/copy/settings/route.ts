@@ -1,7 +1,7 @@
 import { jsonFail, jsonOk } from "@/lib/api/envelope";
 import { requireAdmin, AuthError } from "@/lib/auth/session";
 import { getCopyGlobalSettings, updateCopyGlobalSettings } from "@/lib/services/copyTradingService";
-import { brokerProviderConfigured, createBrokerAdapter, getBrokerProviderId, getBrokerProviderLabel } from "@/lib/broker/provider";
+import { brokerProviderConfigured, createBrokerAdapter } from "@/lib/broker/provider";
 import { copyGlobalSettingsSchema } from "@/lib/validation/schemas";
 
 export async function GET() {
@@ -14,12 +14,9 @@ export async function GET() {
     const encryptionConfigured = Boolean(process.env.ENCRYPTION_KEY);
     return jsonOk({
       ...settings,
-      brokerProvider: getBrokerProviderId(),
-      brokerProviderLabel: getBrokerProviderLabel(),
       executionConfigured,
       providerConfigured,
-      metaapiTokenConfigured: false,
-      api2TradeConfigured: getBrokerProviderId() === "api2trade" ? providerConfigured : false,
+      brokerServiceConfigured: providerConfigured,
       encryptionConfigured,
     });
   } catch (err) {

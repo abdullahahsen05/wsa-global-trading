@@ -5,7 +5,7 @@ import { enqueueJob } from "@/lib/services/backgroundJobService";
 
 // POST /api/worker/jobs/schedule — protected. Enqueues the recurring fan-out
 // jobs (which themselves enqueue per-account / per-strategy children). It does
-// NOT run long MetaAPI calls — /api/worker/jobs/run does the processing.
+// Do not run long broker sync calls here — /api/worker/jobs/run does the processing.
 // Intended as a Vercel Cron target (not auto-enabled in this phase).
 export async function POST(request: Request) {
   try {

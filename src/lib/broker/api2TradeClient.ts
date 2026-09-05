@@ -196,11 +196,12 @@ export function loadApi2TradeConfig(): Api2TradeConfig | null {
   };
 }
 
-function assertRecord(value: unknown, endpoint: string): Record<string, unknown> {
+function assertRecord(value: unknown, _endpoint: string): Record<string, unknown> {
+  void _endpoint;
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
-  throw new Error(`${endpoint} returned an unexpected response.`);
+  throw new Error("Broker service returned an unexpected response.");
 }
 
 export class Api2TradeClient {
@@ -292,7 +293,7 @@ export class Api2TradeClient {
     });
     const bodyText = await response.text();
     if (!response.ok) {
-      throw new Error(publicApi2TradeError(`Broker service ${endpoint} failed (${response.status}): ${bodyText}`));
+      throw new Error(publicApi2TradeError(`Broker service request failed (${response.status}): ${bodyText}`));
     }
     if (options?.expectText) return bodyText as T;
     if (!bodyText.trim()) return null as T;

@@ -6,11 +6,14 @@ export function publicApi2TradeError(error: unknown): string {
     .replace(/Api2Trade/gi, "broker service")
     .replace(/https?:\/\/(?:mt4|mt5)\.mt4api\.dev[^\s,)"]*/gi, "broker service")
     .replace(/\b(?:mt4|mt5)\.mt4api\.dev\b/gi, "broker service")
+    .replace(/\bConnectEx\b/gi, "connection")
+    .replace(/\bRegisterAccount\b/gi, "account registration")
     .replace(/password[^,\s]*/gi, "password=[redacted]")
     .replace(/user=\d+/gi, "user=[redacted]")
     .replace(/login[^,\s]*/gi, "login=[redacted]")
     .replace(/Authorization:\s*Basic\s+[A-Za-z0-9+/=]+/gi, "Authorization: Basic [redacted]")
-    .replace(/x-api-key:\s*[^,\s]+/gi, "x-api-key: [redacted]")
+    .replace(/x-api-key:\s*[^,\s]+/gi, "credentials: [redacted]")
+    .replace(/\bAPI\b/gi, "service")
     .slice(0, 500);
 }
 

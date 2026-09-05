@@ -69,7 +69,7 @@ export function Sidebar({
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
         </div>
         <div className="mt-2 flex min-h-0 flex-1 flex-col">
-          <div className="invisible-scrollbar flex-1 overflow-y-auto">
+          <div className="sidebar-scrollbar flex-1 overflow-y-auto pr-1">
             {renderNav()}
           </div>
           <div className="border-t border-line/70 pt-4">
@@ -102,7 +102,7 @@ export function Sidebar({
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
             </div>
             <div className="mt-2 flex min-h-0 flex-1 flex-col">
-              <div className="invisible-scrollbar flex-1 overflow-y-auto">
+              <div className="sidebar-scrollbar flex-1 overflow-y-auto pr-1">
                 {renderNav(() => onMobileNavOpenChange(false))}
               </div>
               <div className="border-t border-line/70 pt-4">

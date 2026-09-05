@@ -277,7 +277,7 @@ export default function AdminRiskPage() {
                 LIMIT blocks new WSA copy openings. RESTRICT also locks the account until the breach clears.
               </p>
             </div>
-            <StatusPill tone="lime">MetaApi live monitor</StatusPill>
+            <StatusPill tone="lime">Live broker monitor</StatusPill>
           </div>
           <div className="invisible-scrollbar mt-4 min-h-0 flex-1 overflow-auto">
             <DataTable
@@ -362,7 +362,7 @@ export default function AdminRiskPage() {
                 {editingRuleId ? "Edit risk rule" : "Create risk rule"}
               </h2>
               <p className="mt-1 text-sm leading-5 text-muted">
-                Rules are evaluated from the MetaApi account stream and again after every manual sync.
+                Rules are evaluated from the live broker connection and again after every manual sync.
               </p>
             </div>
           </div>
@@ -511,7 +511,7 @@ export default function AdminRiskPage() {
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-muted">
             <Bell className="h-4 w-4 text-accent" />
-            MetaApi stream changes are evaluated without waiting for the trader to press Sync.
+            Live broker changes are evaluated without waiting for the trader to press Sync.
           </div>
         </Panel>
       </div>

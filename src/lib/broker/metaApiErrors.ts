@@ -38,9 +38,25 @@ export function publicMetaApiError(error: unknown): string {
     return "The broker rejected the saved account credentials. Reconnect the account and verify the login, password, and server.";
   }
 
-  return message
+  const sanitized = message
     .replace(PROVIDER_ACCOUNT_ID, "provider account")
+    .replace(/API\s*2\s*Trade/gi, "broker service")
+    .replace(/API2Trade/gi, "broker service")
+    .replace(/Api2Trade/gi, "broker service")
+    .replace(/MetaTrader\s+API/gi, "broker connection")
+    .replace(/MetaAPI|MetaApi|metaapi/gi, "broker service")
+    .replace(/\bAPI\b/gi, "service")
+    .replace(/https?:\/\/[^\s,)"]+/gi, "broker service")
+    .replace(/\b(?:mt4|mt5)\.mt4api\.dev\b/gi, "broker service")
+    .replace(/auth-token:\s*[^,\s]+/gi, "credentials: [redacted]")
+    .replace(/x-api-key:\s*[^,\s]+/gi, "credentials: [redacted]")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 300);
+
+  if (!sanitized || /token|secret|credential|authorization/i.test(sanitized)) {
+    return "Broker connection failed. Please verify the account details and try again.";
+  }
+
+  return sanitized;
 }

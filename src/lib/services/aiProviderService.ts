@@ -143,7 +143,7 @@ export async function saveAiProviderKey(params: {
 }): Promise<void> {
   const apiKey = params.apiKey.trim();
   if (apiKey.length < 12 || apiKey.length > 500) {
-    throw new Error("API key must be between 12 and 500 characters.");
+    throw new Error("Secret key must be between 12 and 500 characters.");
   }
   const supabase = createAdminClient();
   const { error } = await supabase.from("ai_provider_settings").upsert({

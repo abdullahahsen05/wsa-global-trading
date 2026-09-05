@@ -46,7 +46,7 @@ export async function GET(
         platform: value as BrokerPlatform,
         serverName: server.serverName,
         brokerName: server.brokerName,
-        source: activeBrokerProvider === "api2trade" ? "API2TRADE" as const : "METAAPI" as const,
+        source: "BROKER_SERVICE" as const,
         isActive: true,
         lastRefreshedAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
@@ -58,12 +58,10 @@ export async function GET(
         ...liveServers,
       ],
       source: liveServers.length > 0
-        ? activeBrokerProvider === "api2trade" ? "ADMIN_AND_API2TRADE" : "ADMIN_AND_METAAPI"
+        ? "ADMIN_AND_BROKER_SERVICE"
         : "ADMIN_CONFIGURED",
       sourceLabel: liveServers.length > 0
-        ? activeBrokerProvider === "api2trade"
-          ? "Configured and live-discovered broker servers"
-          : "Configured and MetaApi-known broker servers"
+        ? "Configured and live-discovered broker servers"
         : "Configured broker servers",
       discoveryAvailable: discovered.available,
       discoveryMessage: discovered.message,

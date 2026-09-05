@@ -27,7 +27,7 @@ export async function searchKnownMetaApiServers(params: {
     return {
       available: false,
       servers: [],
-      message: "MetaApi server discovery is not configured.",
+      message: "Broker server discovery is not configured.",
     };
   }
   const query = params.query.trim().slice(0, 100);
@@ -35,7 +35,7 @@ export async function searchKnownMetaApiServers(params: {
     return {
       available: true,
       servers: [],
-      message: "Enter at least two characters to search known MetaTrader servers.",
+      message: "Enter at least two characters to search known broker servers.",
     };
   }
 
@@ -58,7 +58,7 @@ export async function searchKnownMetaApiServers(params: {
       return {
         available: false,
         servers: [],
-        message: "MetaApi server search is temporarily unavailable.",
+        message: "Broker server search is temporarily unavailable.",
       };
     }
     const payload: unknown = await response.json();
@@ -80,14 +80,14 @@ export async function searchKnownMetaApiServers(params: {
       available: true,
       servers: servers.slice(0, 100),
       message: servers.length === 0
-        ? "No known MetaApi servers matched this search. You can still enter an exact server manually."
+        ? "No broker servers matched this search. You can still enter an exact server manually."
         : null,
     };
   } catch {
     return {
       available: false,
       servers: [],
-      message: "MetaApi server search is temporarily unavailable.",
+      message: "Broker server search is temporarily unavailable.",
     };
   } finally {
     clearTimeout(timeout);

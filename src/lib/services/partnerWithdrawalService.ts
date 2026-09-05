@@ -83,32 +83,6 @@ async function getAllocationUsage(partnerId: string, currency: string): Promise<
   return used;
 }
 
-async function getRebateAllocationUsage(partnerId: string, currency: string): Promise<Map<string, number>> {
-  const supabase = createAdminClient();
-  const { data: requests, error: requestError } = await supabase
-    .from("partner_withdrawal_requests")
-    .select("id")
-    .eq("partner_id", partnerId)
-    .eq("currency", currency)
-    .in("status", ["PENDING_REVIEW", "APPROVED", "PAID"]);
-  if (requestError) throw new Error(`Failed to load rebate reservations: ${requestError.message}`);
-  const requestIds = (requests ?? []).map((row) => row.id);
-  const used = new Map<string, number>();
-  if (requestIds.length === 0) return used;
-  const { data, error } = await supabase
-    .from("partner_withdrawal_rebate_allocations")
-    .select("rebate_id, allocated_amount")
-    .in("withdrawal_request_id", requestIds);
-  if (error) throw new Error(`Failed to load rebate allocations: ${error.message}`);
-  for (const allocation of data ?? []) {
-    used.set(
-      allocation.rebate_id,
-      (used.get(allocation.rebate_id) ?? 0) + Number(allocation.allocated_amount),
-    );
-  }
-  return used;
-}
-
 async function getIncludedItemsByRequestIds(
   requestIds: string[],
 ): Promise<Map<string, PartnerWithdrawalIncludedItemDto[]>> {
@@ -189,18 +163,12 @@ export async function getPartnerWithdrawalBalance(
   ]);
   if (error) throw new Error(`Failed to load approved commissions: ${error.message}`);
   if (rebateError) throw new Error(`Failed to load approved rebates: ${rebateError.message}`);
-  const [commissionUsage, rebateUsage] = await Promise.all([
-    getAllocationUsage(partnerId, currency),
-    getRebateAllocationUsage(partnerId, currency),
-  ]);
+  const commissionUsage = await getAllocationUsage(partnerId, currency);
   const commissionAmounts = (commissions ?? []).map((commission) => Number(commission.commission_amount));
   const rebateAmounts = (rebates ?? []).map((rebate) => Number(rebate.amount));
-  const reserved = [
-    ...(commissions ?? []).map((commission) => commissionUsage.get(commission.id) ?? 0),
-    ...(rebates ?? []).map((rebate) => rebateUsage.get(rebate.id) ?? 0),
-  ];
+  const reserved = (commissions ?? []).map((commission) => commissionUsage.get(commission.id) ?? 0);
   return calculateWithdrawalBalance(
-    [...commissionAmounts, ...rebateAmounts],
+    commissionAmounts,
     reserved,
     currency,
     commissionAmounts.reduce((sum, amount) => sum + amount, 0),
@@ -276,28 +244,12 @@ export async function createPartnerWithdrawal(params: {
     .eq("status", "APPROVED")
     .order("created_at", { ascending: true });
   if (commissionError) throw new Error(`Failed to load approved commissions: ${commissionError.message}`);
-  const { data: rebates, error: rebateError } = await supabase
-    .from("partner_rebates")
-    .select("id, amount, created_at")
-    .eq("partner_id", params.partnerId)
-    .eq("currency", currency)
-    .eq("status", "APPROVED")
-    .order("created_at", { ascending: true });
-  if (rebateError) throw new Error(`Failed to load approved rebates: ${rebateError.message}`);
-  const [used, usedRebates] = await Promise.all([
-    getAllocationUsage(params.partnerId, currency),
-    getRebateAllocationUsage(params.partnerId, currency),
-  ]);
+  const used = await getAllocationUsage(params.partnerId, currency);
   const availableCommissions = (commissions ?? []).reduce(
     (sum, commission) => sum + Math.max(0, Number(commission.commission_amount) - (used.get(commission.id) ?? 0)),
     0,
   );
-  const availableRebates = (rebates ?? []).reduce(
-    (sum, rebate) => sum + Math.max(0, Number(rebate.amount) - (usedRebates.get(rebate.id) ?? 0)),
-    0,
-  );
-  const available = availableCommissions + availableRebates;
-  if (amount > available + 0.001) throw new Error("Withdrawal amount exceeds your available approved balance.");
+  if (amount > availableCommissions + 0.001) throw new Error("Withdrawal amount exceeds your available WSA commission balance.");
 
   const { data: request, error: insertError } = await supabase
     .from("partner_withdrawal_requests")
@@ -318,7 +270,6 @@ export async function createPartnerWithdrawal(params: {
 
   let remaining = amount;
   const allocations: Array<{ withdrawal_request_id: string; commission_id: string; allocated_amount: number }> = [];
-  const rebateAllocations: Array<{ withdrawal_request_id: string; rebate_id: string; allocated_amount: number }> = [];
   for (const commission of commissions ?? []) {
     if (remaining <= 0) break;
     const commissionAvailable = Math.max(0, Number(commission.commission_amount) - (used.get(commission.id) ?? 0));
@@ -328,28 +279,10 @@ export async function createPartnerWithdrawal(params: {
       remaining = Number((remaining - allocated).toFixed(2));
     }
   }
-  for (const rebate of rebates ?? []) {
-    if (remaining <= 0) break;
-    const rebateAvailable = Math.max(0, Number(rebate.amount) - (usedRebates.get(rebate.id) ?? 0));
-    const allocated = Math.min(remaining, rebateAvailable);
-    if (allocated > 0) {
-      rebateAllocations.push({
-        withdrawal_request_id: request.id,
-        rebate_id: rebate.id,
-        allocated_amount: Number(allocated.toFixed(2)),
-      });
-      remaining = Number((remaining - allocated).toFixed(2));
-    }
-  }
-  const [{ error: allocationError }, { error: rebateAllocationError }] = await Promise.all([
-    allocations.length
-      ? supabase.from("partner_withdrawal_allocations").insert(allocations)
-      : Promise.resolve({ error: null }),
-    rebateAllocations.length
-      ? supabase.from("partner_withdrawal_rebate_allocations").insert(rebateAllocations)
-      : Promise.resolve({ error: null }),
-  ]);
-  if (allocationError || rebateAllocationError || remaining > 0.001) {
+  const { error: allocationError } = allocations.length
+    ? await supabase.from("partner_withdrawal_allocations").insert(allocations)
+    : { error: null };
+  if (allocationError || remaining > 0.001) {
     await supabase.from("partner_withdrawal_requests").delete().eq("id", request.id);
     throw new Error("Withdrawal balance changed while the request was being created. Please retry.");
   }
@@ -579,14 +512,11 @@ export async function getPartnerFinancialLedger(
       ),
     0,
   );
-  const lockedWithdrawalAmount = [
-    ...(commissionAllocations ?? []).map((allocation) =>
+  const lockedWithdrawalAmount = (commissionAllocations ?? [])
+    .map((allocation) =>
       activeIdSet.has(allocation.withdrawal_request_id) ? Number(allocation.allocated_amount) : 0,
-    ),
-    ...(rebateAllocations ?? []).map((allocation) =>
-      activeIdSet.has(allocation.withdrawal_request_id) ? Number(allocation.allocated_amount) : 0,
-    ),
-  ].reduce((sum, amount) => sum + amount, 0);
+    )
+    .reduce((sum, amount) => sum + amount, 0);
 
   const amountByStatus = (
     rows: Array<{ status: string; amount: number }>,
@@ -661,7 +591,7 @@ export async function getPartnerFinancialLedger(
     ),
     lockedWithdrawalAmount: Number(lockedWithdrawalAmount.toFixed(2)),
     withdrawableBalance: Number(
-      Math.max(0, approvedUnpaidCommissions + approvedUnpaidRebates - lockedWithdrawalAmount).toFixed(2),
+      Math.max(0, approvedUnpaidCommissions - lockedWithdrawalAmount).toFixed(2),
     ),
     activeWithdrawalCount: activeWithdrawalIds.length,
     historicalPaidWithdrawals: Number(

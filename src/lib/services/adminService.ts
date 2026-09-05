@@ -8,8 +8,14 @@ import type {
 } from '@/lib/domain/types'
 import { mapAccountToDto } from '@/lib/mappers/accountMapper'
 
+function relationOne<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null
+  return Array.isArray(value) ? value[0] ?? null : value
+}
+
 export async function getAdminSummary(): Promise<AdminSummaryDto> {
   const supabase = createAdminClient()
+  const nowIso = new Date().toISOString()
 
   const [
     { count: activeTraders },
@@ -31,23 +37,49 @@ export async function getAdminSummary(): Promise<AdminSummaryDto> {
       .is('acknowledged_at', null),
   ])
 
-  const { data: activeSubscriptions, error: subscriptionError } = await supabase
-    .from('subscriptions')
-    .select('billing_products(amount, currency, billing_interval)')
-    .eq('status', 'ACTIVE')
+  const [
+    { data: activeSubscriptions, error: subscriptionError },
+    { data: activeCopyEntitlements, error: copyEntitlementError },
+  ] = await Promise.all([
+    supabase
+      .from('subscriptions')
+      .select('current_period_end, billing_products(amount, currency, billing_interval)')
+      .eq('status', 'ACTIVE'),
+    supabase
+      .from('copy_account_entitlements')
+      .select('amount, currency, current_period_end, status')
+      .eq('status', 'ACTIVE'),
+  ])
   if (subscriptionError) throw new Error(`Failed to calculate MRR: ${subscriptionError.message}`)
+  if (copyEntitlementError) throw new Error(`Failed to calculate copy trading MRR: ${copyEntitlementError.message}`)
 
   const recurringProducts = (activeSubscriptions ?? [])
     .map((subscription) => {
-      const relation = subscription.billing_products
-      return Array.isArray(relation) ? relation[0] : relation
+      const product = relationOne(subscription.billing_products)
+      const periodEnd = subscription.current_period_end
+      if (periodEnd && periodEnd < nowIso) return null
+      return product
     })
     .filter((product) => product?.billing_interval === 'MONTHLY')
-  const recurringCurrencies = [...new Set(recurringProducts.map((product) => product?.currency).filter(Boolean))]
+  const activeMonthlyCopyEntitlements = (activeCopyEntitlements ?? [])
+    .filter((entitlement) => !entitlement.current_period_end || entitlement.current_period_end >= nowIso)
+    .map((entitlement) => ({
+      amount: entitlement.amount,
+      currency: entitlement.currency,
+    }))
+  const recurringCurrencies = [
+    ...new Set([
+      ...recurringProducts.map((product) => product?.currency).filter(Boolean),
+      ...activeMonthlyCopyEntitlements.map((entitlement) => entitlement.currency).filter(Boolean),
+    ]),
+  ]
   const monthlyRecurringRevenue = recurringCurrencies.length > 1
     ? { amount: 0, currency: 'USD' }
     : {
-        amount: Number(recurringProducts.reduce((sum, product) => sum + Number(product?.amount ?? 0), 0).toFixed(2)),
+        amount: Number((
+          recurringProducts.reduce((sum, product) => sum + Number(product?.amount ?? 0), 0)
+          + activeMonthlyCopyEntitlements.reduce((sum, entitlement) => sum + Number(entitlement.amount ?? 0), 0)
+        ).toFixed(2)),
         currency: recurringCurrencies[0] ?? 'USD',
       }
 
