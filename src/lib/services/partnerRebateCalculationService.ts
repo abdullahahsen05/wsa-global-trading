@@ -390,6 +390,7 @@ export async function calculatePartnerRebatesForTradingAccounts(
 
   for (const trade of (trades ?? []) as ClosedTradeScanRow[]) {
     const account = trade.trading_accounts;
+    if (!account) continue;
     if (!isEligibleLiveCommissionAccount(account)) continue;
     const traderId = account.user_id as string | undefined;
     if (!traderId) continue;
