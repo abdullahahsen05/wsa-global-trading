@@ -217,7 +217,6 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
       }))
     .filter((record: PartnerCommissionDto) => statusFilter === "ALL" ? true : record.status === statusFilter);
 
-  const ledgerTotal = filteredLedgerItems.reduce((sum: number, item: PartnerFinancialLedgerDto["items"][number]) => sum + item.amount, 0);
   const tradeLots = filteredTradeRows.reduce((sum, row) => sum + row.lots, 0);
   const tradeEarnings = filteredTradeRows.reduce((sum, row) => sum + row.rebateAmount, 0);
   const activeBrokerCount = new Set(filteredTradeRows.map((row) => row.brokerName).filter(Boolean)).size;
@@ -269,13 +268,6 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
             label: "Paid",
             value: summary ? formatMoney(summary.paid) : "-",
             tone: "lime",
-          },
-          {
-            label: "Ledger total",
-            value: filteredLedgerItems.length > 0
-              ? formatMoney({ amount: ledgerTotal, currency: filteredLedgerItems[0]?.currency ?? summary?.currency ?? "USD" })
-              : "-",
-            tone: ledgerTotal < 0 ? "danger" : "lime",
           },
         ] : mode === "CPA" ? [
           { label: "CPA records", value: filteredTradeRows.length, tone: "accent" },
