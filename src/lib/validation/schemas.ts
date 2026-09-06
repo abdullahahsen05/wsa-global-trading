@@ -232,6 +232,7 @@ export const partnerBrokerConfigurationSchema = z.object({
   brokerName: z.string().trim().min(2).max(120).nullable().optional(),
   modelType: z.enum(["IB", "CPA", "HYBRID"]),
   rebateRatePerLot: z.number().min(0).max(1_000_000),
+  xauusdRatePerLot: z.number().min(0).max(1_000_000).optional(),
   cpaQualificationLots: z.number().min(0).max(1_000_000).default(1),
   cpaTier1Deposit: z.number().min(0).max(100_000_000).default(300),
   cpaTier1Payout: z.number().min(0).max(100_000_000).default(350),

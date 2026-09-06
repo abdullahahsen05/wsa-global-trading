@@ -10,6 +10,7 @@ export interface PartnerBrokerConfigurationDto {
   brokerName: string;
   modelType: PartnerModelType;
   rebateRatePerLot: number;
+  xauusdRatePerLot: number;
   cpaQualificationLots: number;
   cpaTier1Deposit: number;
   cpaTier1Payout: number;
@@ -34,6 +35,7 @@ export interface PartnerTradeRebateLogDto {
   modelType: PartnerModelType | null;
   calculationType: "IB_VOLUME" | "CPA_TIER" | "ADMIN_ADJUSTMENT" | null;
   rebateAmount: number;
+  ratePerLot: number | null;
   currency: string;
   status: string;
   createdAt: string;
@@ -47,6 +49,7 @@ interface ConfigRow {
   broker_provider_id: string | null;
   model_type: PartnerModelType;
   rebate_rate_per_lot: number | string;
+  xauusd_rate_per_lot?: number | string | null;
   cpa_qualification_lots: number | string;
   cpa_tier_1_deposit: number | string;
   cpa_tier_1_payout: number | string;
@@ -72,6 +75,7 @@ interface TradeRebateLogRow {
   model_type: PartnerModelType | null;
   calculation_type: "IB_VOLUME" | "CPA_TIER" | "ADMIN_ADJUSTMENT" | null;
   volume_lots: number | string | null;
+  rate_per_lot: number | string | null;
   trades?: { external_trade_id?: string | null; symbol?: string | null } | null;
   profiles?: { full_name?: string | null } | null;
   broker_providers?: { display_name?: string | null; name?: string | null } | null;
@@ -91,11 +95,17 @@ interface ClosedTradeScanRow {
     broker_provider_id?: string | null;
     broker_name?: string | null;
     initial_balance?: number | string | null;
+    status?: string | null;
+    account_usage?: string | null;
   } | null;
 }
 
 interface TraderVolumeRow {
   volume: number | string | null;
+  trading_accounts?: {
+    account_usage?: string | null;
+    status?: string | null;
+  } | null;
 }
 
 function mapConfig(row: ConfigRow): PartnerBrokerConfigurationDto {
@@ -106,6 +116,7 @@ function mapConfig(row: ConfigRow): PartnerBrokerConfigurationDto {
     brokerName: row.broker_providers?.display_name ?? row.broker_providers?.name ?? "All brokers",
     modelType: row.model_type,
     rebateRatePerLot: Number(row.rebate_rate_per_lot),
+    xauusdRatePerLot: Number(row.xauusd_rate_per_lot ?? row.rebate_rate_per_lot),
     cpaQualificationLots: Number(row.cpa_qualification_lots),
     cpaTier1Deposit: Number(row.cpa_tier_1_deposit),
     cpaTier1Payout: Number(row.cpa_tier_1_payout),
@@ -135,7 +146,7 @@ export async function listPartnerBrokerConfigurations(
   const { data, error } = await supabase
     .from("partner_broker_configurations")
     .select(
-      "id, partner_id, broker_provider_id, model_type, rebate_rate_per_lot, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_1_payout, cpa_tier_2_deposit, cpa_tier_2_payout, cpa_tier_3_deposit, cpa_tier_3_payout, currency, is_active, updated_at, broker_providers(display_name, name)",
+      "id, partner_id, broker_provider_id, model_type, rebate_rate_per_lot, xauusd_rate_per_lot, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_1_payout, cpa_tier_2_deposit, cpa_tier_2_payout, cpa_tier_3_deposit, cpa_tier_3_payout, currency, is_active, updated_at, broker_providers(display_name, name)",
     )
     .eq("partner_id", partnerId)
     .order("updated_at", { ascending: false });
@@ -149,6 +160,7 @@ export async function upsertPartnerBrokerConfiguration(params: {
   brokerProviderId: string | null;
   modelType: PartnerModelType;
   rebateRatePerLot: number;
+  xauusdRatePerLot: number;
   cpaQualificationLots: number;
   cpaTier1Deposit: number;
   cpaTier1Payout: number;
@@ -165,6 +177,7 @@ export async function upsertPartnerBrokerConfiguration(params: {
     broker_provider_id: params.brokerProviderId,
     model_type: params.modelType,
     rebate_rate_per_lot: params.rebateRatePerLot,
+    xauusd_rate_per_lot: params.xauusdRatePerLot,
     cpa_qualification_lots: params.cpaQualificationLots,
     cpa_tier_1_deposit: params.cpaTier1Deposit,
     cpa_tier_1_payout: params.cpaTier1Payout,
@@ -179,7 +192,7 @@ export async function upsertPartnerBrokerConfiguration(params: {
   };
 
   const selectColumns =
-    "id, partner_id, broker_provider_id, model_type, rebate_rate_per_lot, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_1_payout, cpa_tier_2_deposit, cpa_tier_2_payout, cpa_tier_3_deposit, cpa_tier_3_payout, currency, is_active, updated_at, broker_providers(display_name, name)";
+    "id, partner_id, broker_provider_id, model_type, rebate_rate_per_lot, xauusd_rate_per_lot, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_1_payout, cpa_tier_2_deposit, cpa_tier_2_payout, cpa_tier_3_deposit, cpa_tier_3_payout, currency, is_active, updated_at, broker_providers(display_name, name)";
   const existingQuery = supabase
     .from("partner_broker_configurations")
     .select("id")
@@ -229,7 +242,7 @@ export async function listPartnerTradeRebateLogs(
   const { data, error } = await supabase
     .from("partner_rebates")
     .select(
-      "id, trader_id, trade_id, source_type, amount, currency, status, created_at, model_type, calculation_type, volume_lots, trades(external_trade_id, symbol), profiles!trader_id(full_name), broker_providers(display_name, name)",
+      "id, trader_id, trade_id, source_type, amount, currency, status, created_at, model_type, calculation_type, volume_lots, rate_per_lot, trades(external_trade_id, symbol), profiles!trader_id(full_name), broker_providers(display_name, name)",
     )
     .eq("partner_id", partnerId)
     .in("source_type", ["TRADE_VOLUME", "CPA_TIER"])
@@ -248,10 +261,40 @@ export async function listPartnerTradeRebateLogs(
     modelType: row.model_type ?? null,
     calculationType: row.calculation_type ?? null,
     rebateAmount: Number(row.amount),
+    ratePerLot: row.rate_per_lot == null ? null : Number(row.rate_per_lot),
     currency: row.currency,
     status: row.status,
     createdAt: row.created_at,
   }));
+}
+
+export async function ensurePartnerRebateLedgerCurrent(
+  partnerId: string,
+): Promise<{ created: number; scannedTrades: number; accounts: number }> {
+  const supabase = createAdminClient();
+  const { data: profiles, error: profileError } = await supabase
+    .from("trader_profiles")
+    .select("user_id")
+    .eq("partner_id", partnerId)
+    .limit(1000);
+  if (profileError) throw new Error(`Failed to load assigned traders for rebate refresh: ${profileError.message}`);
+
+  const traderIds = [...new Set((profiles ?? []).map((profile) => profile.user_id as string).filter(Boolean))];
+  if (traderIds.length === 0) return { created: 0, scannedTrades: 0, accounts: 0 };
+
+  const { data: accounts, error: accountError } = await supabase
+    .from("trading_accounts")
+    .select("id")
+    .in("user_id", traderIds)
+    .eq("status", "CONNECTED")
+    .in("account_usage", ["TRADER", "COPY_MASTER"])
+    .limit(2000);
+  if (accountError) throw new Error(`Failed to load live accounts for rebate refresh: ${accountError.message}`);
+
+  const accountIds = [...new Set((accounts ?? []).map((account) => account.id as string).filter(Boolean))];
+  if (accountIds.length === 0) return { created: 0, scannedTrades: 0, accounts: 0 };
+  const result = await calculatePartnerRebatesForTradingAccounts(accountIds);
+  return { ...result, accounts: accountIds.length };
 }
 
 function cpaPayout(config: ConfigRow, deposit: number): number {
@@ -259,6 +302,27 @@ function cpaPayout(config: ConfigRow, deposit: number): number {
   if (deposit >= Number(config.cpa_tier_2_deposit)) return Number(config.cpa_tier_2_payout);
   if (deposit >= Number(config.cpa_tier_1_deposit)) return Number(config.cpa_tier_1_payout);
   return 0;
+}
+
+function isEligibleLiveCommissionAccount(
+  account: ClosedTradeScanRow["trading_accounts"] | TraderVolumeRow["trading_accounts"],
+): boolean {
+  if (!account) return false;
+  if ((account.status ?? "").toUpperCase() !== "CONNECTED") return false;
+  const usage = (account.account_usage ?? "TRADER").toUpperCase();
+  return usage === "TRADER" || usage === "COPY_MASTER";
+}
+
+function symbolClass(symbol: string | null | undefined): "XAUUSD" | "FOREX" {
+  const normalized = (symbol ?? "").toUpperCase().replace(/[^A-Z]/g, "");
+  return normalized.includes("XAUUSD") ? "XAUUSD" : "FOREX";
+}
+
+function rebateRateForSymbol(config: ConfigRow, symbol: string | null | undefined): number {
+  if (symbolClass(symbol) === "XAUUSD") {
+    return Number(config.xauusd_rate_per_lot ?? config.rebate_rate_per_lot);
+  }
+  return Number(config.rebate_rate_per_lot);
 }
 
 async function findConfig(
@@ -313,7 +377,7 @@ export async function calculatePartnerRebatesForTradingAccounts(
   const supabase = createAdminClient();
   const { data: trades, error } = await supabase
     .from("trades")
-    .select("id, trading_account_id, symbol, status, volume, profit, currency, closed_at, trading_accounts(user_id, broker_provider_id, broker_name, initial_balance)")
+    .select("id, trading_account_id, symbol, status, volume, profit, currency, closed_at, trading_accounts(user_id, broker_provider_id, broker_name, initial_balance, status, account_usage)")
     .in("trading_account_id", accountIds)
     .eq("status", "CLOSED")
     .not("closed_at", "is", null)
@@ -326,7 +390,7 @@ export async function calculatePartnerRebatesForTradingAccounts(
 
   for (const trade of (trades ?? []) as ClosedTradeScanRow[]) {
     const account = trade.trading_accounts;
-    if (!account) continue;
+    if (!isEligibleLiveCommissionAccount(account)) continue;
     const traderId = account.user_id as string | undefined;
     if (!traderId) continue;
 
@@ -346,7 +410,9 @@ export async function calculatePartnerRebatesForTradingAccounts(
     if (volumeLots <= 0) continue;
 
     if (config.model_type === "IB" || config.model_type === "HYBRID") {
-      const amount = Number((volumeLots * Number(config.rebate_rate_per_lot)).toFixed(2));
+      const ratePerLot = rebateRateForSymbol(config, trade.symbol);
+      const resolvedSymbolClass = symbolClass(trade.symbol);
+      const amount = Number((volumeLots * ratePerLot).toFixed(2));
       if (amount > 0) {
         const { error: insertError } = await supabase.from("partner_rebates").insert({
           partner_id: partnerId,
@@ -362,9 +428,9 @@ export async function calculatePartnerRebatesForTradingAccounts(
           status: "APPROVED",
           approved_at: now,
           volume_lots: volumeLots,
-          rate_per_lot: Number(config.rebate_rate_per_lot),
-          description: `${volumeLots} lot(s) × ${Number(config.rebate_rate_per_lot).toFixed(2)} per lot`,
-          metadata: { tradeId: trade.id, symbol: trade.symbol, brokerProviderId },
+          rate_per_lot: ratePerLot,
+          description: `${resolvedSymbolClass} ${volumeLots} lot(s) × ${ratePerLot.toFixed(2)} per lot`,
+          metadata: { tradeId: trade.id, symbol: trade.symbol, symbolClass: resolvedSymbolClass, brokerProviderId },
         });
         if (!insertError) created++;
         else if ((insertError as { code?: string }).code !== "23505") {
@@ -376,7 +442,7 @@ export async function calculatePartnerRebatesForTradingAccounts(
     if (config.model_type === "CPA" || config.model_type === "HYBRID") {
       let traderTradesQuery = supabase
         .from("trades")
-        .select("volume, trading_accounts!inner(user_id, broker_provider_id)")
+        .select("volume, trading_accounts!inner(user_id, broker_provider_id, broker_name, status, account_usage)")
         .eq("status", "CLOSED")
         .eq("trading_accounts.user_id", traderId);
       traderTradesQuery = brokerProviderId
@@ -385,7 +451,9 @@ export async function calculatePartnerRebatesForTradingAccounts(
           ? traderTradesQuery.ilike("trading_accounts.broker_name", account.broker_name)
           : traderTradesQuery.is("trading_accounts.broker_provider_id", null);
       const { data: traderTrades } = await traderTradesQuery;
-      const totalLots = ((traderTrades ?? []) as TraderVolumeRow[]).reduce(
+      const totalLots = ((traderTrades ?? []) as TraderVolumeRow[])
+        .filter((row) => isEligibleLiveCommissionAccount(row.trading_accounts))
+        .reduce(
         (sum, row) => sum + Math.abs(Number(row.volume ?? 0)),
         0,
       );

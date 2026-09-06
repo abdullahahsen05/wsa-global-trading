@@ -46,6 +46,7 @@ type PartnerTradeRebateLogDto = {
   modelType: "IB" | "CPA" | "HYBRID" | null;
   calculationType: "IB_VOLUME" | "CPA_TIER" | "ADMIN_ADJUSTMENT" | null;
   rebateAmount: number;
+  ratePerLot: number | null;
   currency: string;
   status: string;
   createdAt: string;
@@ -377,7 +378,7 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
                 pageSizeOptions={[10, 20, 50]}
                 maxBodyHeight="420px"
                 headers={mode === "REBATE"
-                  ? ["Broker", "Trader", "Symbol", "Lots", "Rebate", "Status"]
+                  ? ["Broker", "Trader", "Symbol", "Lots", "Rate", "Rebate", "Status"]
                   : mode === "CPA"
                     ? ["Broker", "Client", "Symbol", "Lots", "Qualified", "Total", "Status"]
                     : ["Broker", "Client", "Symbol", "Lots", "IB", "CPA", "Status"]}
@@ -386,6 +387,9 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
                   <span key="trader">{row.traderName ?? (mode === "CPA" || mode === "HYBRID" ? "Client" : "Trader")}</span>,
                   <span key="symbol" className="font-semibold text-foreground">{row.symbol ?? "—"}</span>,
                   <span key="lots">{row.lots.toFixed(2)}</span>,
+                  ...(mode === "REBATE" ? [
+                    <span key="rate">{row.ratePerLot == null ? "—" : `${formatMoney({ amount: row.ratePerLot, currency: row.currency })}/lot`}</span>,
+                  ] : []),
                   ...(mode === "CPA" ? [
                     <StatusPill key="qualified" tone={row.status === "APPROVED" || row.status === "PAID" ? "lime" : row.status === "PENDING" ? "accent" : "muted"}>
                       {row.status === "APPROVED" || row.status === "PAID" ? "Qualified" : "Pending"}

@@ -39,6 +39,7 @@ interface PartnerBrokerConfigurationDto {
   brokerName: string;
   modelType: PartnerModelType;
   rebateRatePerLot: number;
+  xauusdRatePerLot: number;
   cpaQualificationLots: number;
   cpaTier1Deposit: number;
   cpaTier1Payout: number;
@@ -111,6 +112,7 @@ export default function AdminPartnerWithdrawalsPage() {
   const [configModel, setConfigModel] = useState<PartnerModelType>("IB");
   const [configCurrency, setConfigCurrency] = useState("USD");
   const [rebateRatePerLot, setRebateRatePerLot] = useState("5");
+  const [xauusdRatePerLot, setXauusdRatePerLot] = useState("10");
   const [cpaQualificationLots, setCpaQualificationLots] = useState("1");
   const [cpaTier1Deposit, setCpaTier1Deposit] = useState("300");
   const [cpaTier1Payout, setCpaTier1Payout] = useState("350");
@@ -259,6 +261,7 @@ export default function AdminPartnerWithdrawalsPage() {
       setConfigModel("IB");
       setConfigCurrency(selectedLedger?.currency ?? "USD");
       setRebateRatePerLot("5");
+      setXauusdRatePerLot("10");
       setCpaQualificationLots("1");
       setCpaTier1Deposit("300");
       setCpaTier1Payout("350");
@@ -272,6 +275,7 @@ export default function AdminPartnerWithdrawalsPage() {
     setConfigModel(selectedConfig.modelType);
     setConfigCurrency(selectedConfig.currency);
     setRebateRatePerLot(String(selectedConfig.rebateRatePerLot));
+    setXauusdRatePerLot(String(selectedConfig.xauusdRatePerLot ?? selectedConfig.rebateRatePerLot));
     setCpaQualificationLots(String(selectedConfig.cpaQualificationLots));
     setCpaTier1Deposit(String(selectedConfig.cpaTier1Deposit));
     setCpaTier1Payout(String(selectedConfig.cpaTier1Payout));
@@ -344,6 +348,7 @@ export default function AdminPartnerWithdrawalsPage() {
             : undefined,
           modelType: configModel,
           rebateRatePerLot: Number(rebateRatePerLot),
+          xauusdRatePerLot: Number(xauusdRatePerLot),
           cpaQualificationLots: Number(cpaQualificationLots),
           cpaTier1Deposit: Number(cpaTier1Deposit),
           cpaTier1Payout: Number(cpaTier1Payout),
@@ -586,7 +591,9 @@ export default function AdminPartnerWithdrawalsPage() {
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Broker model rate</p>
                 <p className="mt-1 text-sm font-semibold text-foreground">
-                  {selectedConfig ? `${selectedConfig.rebateRatePerLot.toFixed(2)} / lot` : "By broker model"}
+                  {selectedConfig
+                    ? `FX ${selectedConfig.rebateRatePerLot.toFixed(2)} · XAU ${selectedConfig.xauusdRatePerLot.toFixed(2)} / lot`
+                    : "By broker model"}
                 </p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
@@ -651,7 +658,8 @@ export default function AdminPartnerWithdrawalsPage() {
                   </div>
                   {(configModel === "IB" || configModel === "HYBRID") ? (
                     <div className="mt-3 grid gap-3 md:grid-cols-3">
-                      <TextField label="Rebate rate per lot" type="number" min="0" step="0.01" value={rebateRatePerLot} onChange={(event) => setRebateRatePerLot(event.target.value)} />
+                      <TextField label="Forex rebate per lot" type="number" min="0" step="0.01" value={rebateRatePerLot} onChange={(event) => setRebateRatePerLot(event.target.value)} />
+                      <TextField label="XAUUSD rebate per lot" type="number" min="0" step="0.01" value={xauusdRatePerLot} onChange={(event) => setXauusdRatePerLot(event.target.value)} />
                     </div>
                   ) : null}
                   {(configModel === "CPA" || configModel === "HYBRID") ? (

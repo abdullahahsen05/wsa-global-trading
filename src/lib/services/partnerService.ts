@@ -1,6 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mapTradeToDto } from "@/lib/mappers/tradeMapper";
-import { listPartnerTradeRebateLogs } from "@/lib/services/partnerRebateCalculationService";
+import {
+  ensurePartnerRebateLedgerCurrent,
+  listPartnerTradeRebateLogs,
+} from "@/lib/services/partnerRebateCalculationService";
 import { getPartnerFinancialLedger } from "@/lib/services/partnerWithdrawalService";
 import {
   PARTNER_ERROR,
@@ -43,6 +46,7 @@ interface AccountRow {
   broker_provider_id: string | null;
   initial_balance: number | string | null;
   last_synced_at: string | null;
+  account_usage: string | null;
 }
 
 interface SnapshotRow {
@@ -132,6 +136,11 @@ function cpaTierLabel(config: BrokerConfigRow | null, deposit: number): string |
   return null;
 }
 
+function isLiveCommissionAccount(account: AccountRow): boolean {
+  if (account.status !== "CONNECTED") return false;
+  return account.account_usage === "TRADER" || account.account_usage === "COPY_MASTER";
+}
+
 /** Load the partner's assigned traders + their accounts/snapshots/risk in bounded queries. */
 async function loadAssignedContext(partnerUserId: string): Promise<AssignedContext> {
   const supabase = createAdminClient();
@@ -167,12 +176,13 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
 
   const { data: accountRows, error: aErr } = await supabase
     .from("trading_accounts")
-    .select("id, user_id, status, currency, account_name, broker_name, broker_provider_id, initial_balance, last_synced_at")
+    .select("id, user_id, status, currency, account_name, broker_name, broker_provider_id, initial_balance, last_synced_at, account_usage")
     .in("user_id", userIds)
     .limit(2000);
   if (aErr) throw new Error(`Failed to fetch accounts: ${aErr.message}`);
 
   const accounts = (accountRows ?? []) as AccountRow[];
+  const liveCommissionAccountIds = accounts.filter(isLiveCommissionAccount).map((a) => a.id);
   const allAccountIds = accounts.map((a) => a.id);
   const accountToTraderUserId = new Map(accounts.map((a) => [a.id, a.user_id]));
 
@@ -200,11 +210,11 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
             .in("trading_account_id", allAccountIds)
             .limit(5000)
         : Promise.resolve({ data: [] }),
-      allAccountIds.length
+      liveCommissionAccountIds.length
         ? supabase
             .from("trades")
             .select("trading_account_id, volume, profit")
-            .in("trading_account_id", allAccountIds)
+            .in("trading_account_id", liveCommissionAccountIds)
             .limit(20000)
         : Promise.resolve({ data: [] }),
       supabase
@@ -410,6 +420,7 @@ function buildTraderDto(
 }
 
 export async function getPartnerSummary(partnerUserId: string): Promise<PartnerSummaryDto> {
+  await ensurePartnerRebateLedgerCurrent(partnerUserId);
   const ctx = await loadAssignedContext(partnerUserId);
   const traders = ctx.profiles.map((p) => buildTraderDto(p, ctx));
 

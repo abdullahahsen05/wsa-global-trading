@@ -141,6 +141,7 @@ export async function POST(
       brokerProviderId,
       modelType: parsed.data.modelType,
       rebateRatePerLot: parsed.data.rebateRatePerLot,
+      xauusdRatePerLot: parsed.data.xauusdRatePerLot ?? parsed.data.rebateRatePerLot,
       cpaQualificationLots: parsed.data.cpaQualificationLots,
       cpaTier1Deposit: parsed.data.cpaTier1Deposit,
       cpaTier1Payout: parsed.data.cpaTier1Payout,
