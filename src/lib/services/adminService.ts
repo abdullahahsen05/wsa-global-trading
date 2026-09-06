@@ -220,7 +220,7 @@ export async function listAllAccounts(): Promise<AdminTradingAccountSummary[]> {
 
   const { data: accounts, error } = await supabase
     .from('trading_accounts')
-    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, user_id')
+    .select('id, account_name, broker_name, broker_server, broker_platform, status, currency, updated_at, last_synced_at, user_id')
     .order('created_at', { ascending: false })
     .limit(500)
 
@@ -237,7 +237,7 @@ export async function listAllAccounts(): Promise<AdminTradingAccountSummary[]> {
   ] = await Promise.all([
     supabase
       .from('latest_account_snapshots')
-      .select('trading_account_id, balance, equity, floating_pnl, drawdown_percent')
+      .select('trading_account_id, balance, equity, floating_pnl, drawdown_percent, captured_at')
       .in('trading_account_id', accountIds),
     supabase
       .from('account_open_trade_counts')

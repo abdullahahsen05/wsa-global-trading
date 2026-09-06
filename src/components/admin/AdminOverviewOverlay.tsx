@@ -28,6 +28,7 @@ type AdminOverviewOverlayProps = {
   openRiskEvents: number;
   monthlyRecurringRevenue: MoneyValue;
   equityCurve: EquityPoint[];
+  equityCurrency?: string;
   trades: TradeDto[];
   tradingAccounts: TraderAccountSummary[];
   traders: TraderProfileDto[];
@@ -135,6 +136,7 @@ export function AdminOverviewOverlay({
   connectedAccounts,
   monthlyRecurringRevenue,
   equityCurve,
+  equityCurrency = "USD",
   trades,
   tradingAccounts,
   traders,
@@ -201,6 +203,7 @@ export function AdminOverviewOverlay({
                 <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.9fr)_minmax(300px,0.8fr)]">
                   <EquityCurve
                     data={equityCurve}
+                    currency={equityCurrency}
                     title="Platform oversight"
                     description="A calm trend line for operational health and account movement across the platform."
                   />

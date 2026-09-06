@@ -52,8 +52,8 @@ function GrowthGraph({ points }: { points: EquityPoint[] }) {
   const height = 220;
   const padding = 18;
   const values = points.map((point) => point.equity);
-  const min = Math.min(...values) - 250;
-  const max = Math.max(...values) + 250;
+  const min = values.length > 0 ? Math.min(...values) - 250 : 0;
+  const max = values.length > 0 ? Math.max(...values) + 250 : 1;
   const range = max - min || 1;
   const coordinates = points.map((point, index) => {
     const x = padding + (index / Math.max(points.length - 1, 1)) * (width - padding * 2);
@@ -151,6 +151,7 @@ function AnalyticsContent() {
   });
 
   const connectedAccounts = accounts.filter((account) => account.status === "CONNECTED");
+  const selectedAccount = connectedAccounts.find((account) => account.accountId === accountScope);
 
   const {
     data: analyticsSummary,
@@ -183,6 +184,11 @@ function AnalyticsContent() {
     },
     enabled: !accountsLoading && connectedAccounts.length > 0,
   });
+  const selectedCurrency =
+    analyticsSummary?.totalProfit.currency ??
+    selectedAccount?.equity.currency ??
+    selectedAccount?.balance.currency ??
+    "USD";
 
   if (accountsLoading) {
     return (
@@ -228,8 +234,8 @@ function AnalyticsContent() {
     ["Profit factor", (analyticsSummary?.profitFactor ?? 0).toFixed(2), "Gross profit / gross loss"],
     ["Win rate", formatPercent(analyticsSummary?.winRatePercent ?? 0), "Closed trades only"],
     ["Consistency", formatPercent(analyticsSummary?.consistencyScore ?? 0), "Profitable trading days"],
-    ["Average win", formatMoney(analyticsSummary?.averageWin ?? { amount: 0, currency: "USD" }), "Mean profitable trade"],
-    ["Average loss", formatMoney(analyticsSummary?.averageLoss ?? { amount: 0, currency: "USD" }), "Mean losing trade"],
+    ["Average win", formatMoney(analyticsSummary?.averageWin ?? { amount: 0, currency: selectedCurrency }), "Mean profitable trade"],
+    ["Average loss", formatMoney(analyticsSummary?.averageLoss ?? { amount: 0, currency: selectedCurrency }), "Mean losing trade"],
   ];
 
   return (
@@ -312,7 +318,7 @@ function AnalyticsContent() {
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[0.64fr_0.36fr]">
-        <EquityCurve data={equityCurve} />
+        <EquityCurve data={equityCurve} currency={selectedCurrency} />
         <DrawdownMeter value={analyticsSummary?.maxDrawdownPercent ?? 0} />
       </div>
 
@@ -350,7 +356,7 @@ function AnalyticsContent() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted">Primary KPI</p>
-                <p className="mt-3 text-5xl font-semibold text-accent-2">{formatMoney({ amount: kpi.netProfit, currency: "USD" })}</p>
+                <p className="mt-3 text-5xl font-semibold text-accent-2">{formatMoney({ amount: kpi.netProfit, currency: selectedCurrency })}</p>
                 <p className="mt-2 max-w-md text-sm text-muted">Net profit for the selected period</p>
               </div>
               <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-foreground">

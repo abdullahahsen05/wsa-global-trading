@@ -47,6 +47,7 @@ describe("buildAccountInput", () => {
       "acc1",
       "Test Account",
       "MT5",
+      "USD",
       "CONNECTED",
       { balance: 10000, equity: 9000, drawdown_percent: 10 },
       3,
@@ -57,7 +58,7 @@ describe("buildAccountInput", () => {
   });
 
   test("defaults to zero values when snapshot is null", () => {
-    const result = buildAccountInput("acc1", "Test", "MT5", "CONNECTED", null, 0);
+    const result = buildAccountInput("acc1", "Test", "MT5", "USD", "CONNECTED", null, 0);
     expect(result.drawdownPercent).toBe(0);
     expect(result.balance.amount).toBe(0);
   });
@@ -89,6 +90,7 @@ const mockAccount = {
   user_id: "user1",
   account_name: "Eval 100K",
   broker_name: "MT5 Demo",
+  currency: "USD",
   status: "CONNECTED",
   risk_restricted_at: null,
 };

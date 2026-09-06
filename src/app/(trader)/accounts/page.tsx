@@ -328,6 +328,11 @@ function AccountsContent() {
   const reconnectCount = tradingAccounts.filter((a) => a.status === "INACTIVE" || a.status === "DISCONNECTED").length;
   const liveAccounts = tradingAccounts.filter((a) => a.status === "CONNECTED" && a.live !== false);
   const totalPnl = liveAccounts.reduce((sum, a) => sum + a.floatingPnl.amount, 0);
+  const liveCurrencies = [...new Set(liveAccounts.map((account) => account.floatingPnl.currency).filter(Boolean))];
+  const totalPnlValue =
+    liveCurrencies.length > 1
+      ? "Mixed"
+      : formatMoney({ amount: totalPnl, currency: liveCurrencies[0] ?? "USD" });
 
   return (
     <WorkspacePage
@@ -603,7 +608,7 @@ function AccountsContent() {
           { label: "Reconnect", value: reconnectCount, helper: "Disconnected or inactive", tone: reconnectCount ? "danger" : "default" },
           {
             label: "Open exposure",
-            value: formatMoney({ amount: totalPnl, currency: "USD" }),
+            value: totalPnlValue,
             helper: "Live accounts only",
             tone: totalPnl < 0 ? "danger" : "default",
           },

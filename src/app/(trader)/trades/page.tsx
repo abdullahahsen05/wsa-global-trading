@@ -130,6 +130,14 @@ function TradesContent() {
   const openTrades = useMemo(() => tradeList.filter((trade) => trade.status === "OPEN"), [tradeList]);
   const closedTrades = useMemo(() => tradeList.filter((trade) => trade.status === "CLOSED"), [tradeList]);
   const netProfit = useMemo(() => tradeList.reduce((total, trade) => total + trade.profit.amount, 0), [tradeList]);
+  const profitCurrencies = useMemo(
+    () => [...new Set(tradeList.map((trade) => trade.profit.currency).filter(Boolean))],
+    [tradeList],
+  );
+  const netProfitValue =
+    profitCurrencies.length > 1
+      ? "Mixed"
+      : formatMoney({ amount: netProfit, currency: profitCurrencies[0] ?? "USD" });
 
   const uniqueSymbols = useMemo(
     () => [...new Set(tradeList.map((t) => t.symbol))],
@@ -161,7 +169,7 @@ function TradesContent() {
           { label: "Closed trades", value: closedTrades.length, helper: "Current review period" },
           {
             label: "Net PnL",
-            value: formatMoney({ amount: netProfit, currency: "USD" }),
+            value: netProfitValue,
             helper: "Ledger total",
             tone: netProfit >= 0 ? "lime" : "danger",
           },
@@ -261,7 +269,7 @@ function TradesContent() {
                         <p className="mt-0.5 text-xs text-muted">{trade.closedAt ? new Date(trade.closedAt).toLocaleString() : "Still open"}</p>
                       </td>
                       <td className={`px-5 py-3 text-right font-mono font-semibold ${trade.profit.amount >= 0 ? "text-lime" : "text-danger"}`}>
-                        {trade.copySyncPending ? <span className="text-xs text-muted">Sync pending</span> : formatMoney(trade.profit)}
+                        {trade.copySyncPending ? <span className="text-xs text-muted">Updating</span> : formatMoney(trade.profit)}
                       </td>
                     </tr>
                   ))}
@@ -317,7 +325,7 @@ function TradesContent() {
                   <div className="flex items-center justify-between border-t border-line pt-3">
                     <span className="text-xs text-muted">Profit &amp; loss</span>
                     <span className={`font-mono font-semibold ${trade.profit.amount >= 0 ? "text-lime" : "text-danger"}`}>
-                      {trade.copySyncPending ? "Sync pending" : formatMoney(trade.profit)}
+                      {trade.copySyncPending ? "Updating" : formatMoney(trade.profit)}
                     </span>
                   </div>
                 </button>
@@ -430,7 +438,7 @@ function TradesContent() {
                     trade.profit.amount >= 0 ? "text-accent-2" : "text-danger"
                   }`}
                 >
-                  {trade.copySyncPending ? "Sync pending" : formatMoney(trade.profit)}
+                  {trade.copySyncPending ? "Updating" : formatMoney(trade.profit)}
                 </p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">

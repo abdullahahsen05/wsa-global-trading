@@ -151,6 +151,19 @@ function PlatformMetricRail({ items }: { items: PlatformMetric[] }) {
   );
 }
 
+function formatClosedTradeProfit(trades: TradeDto[]): string {
+  const closedTrades = trades.filter((trade) => trade.status === "CLOSED");
+  const currencies = [
+    ...new Set(closedTrades.map((trade) => trade.profit.currency).filter(Boolean)),
+  ];
+
+  if (currencies.length > 1) return "Mixed";
+
+  return formatMoney(
+    calculateTotalProfit(closedTrades, currencies[0] ?? "USD"),
+  );
+}
+
 function PlatformOversightChart({
   data,
   currency,
@@ -595,6 +608,9 @@ export default function AdminOverviewPage() {
   const connectedAccountRows = tradingAccounts.filter((account) => account.status === "CONNECTED");
   const accountCurrencies = [...new Set(connectedAccountRows.map((account) => account.equity.currency))];
   const portfolioCurrency = accountCurrencies.length === 1 ? accountCurrencies[0] : null;
+  const mixedAccountCurrencies = accountCurrencies.length > 1;
+  const mixedCurrencies = equityTimeline?.mixedCurrencies ?? mixedAccountCurrencies;
+  const liveCurrency = portfolioCurrency ?? equityTimeline?.currency ?? "USD";
   const totalEquity = connectedAccountRows.reduce((sum, account) => sum + account.equity.amount, 0);
   const totalFloatingPnl = connectedAccountRows.reduce((sum, account) => sum + account.floatingPnl.amount, 0);
   const newestAccountUpdate = connectedAccountRows
@@ -616,6 +632,12 @@ export default function AdminOverviewPage() {
             },
           ]
         : [];
+  const latestTimelineEquity = !mixedCurrencies ? liveEquityCurve.at(-1)?.equity : null;
+  const displayTotalEquity = latestTimelineEquity ?? totalEquity;
+  const liveMaxDrawdown = Math.max(
+    calculateMaxDrawdown(liveEquityCurve),
+    ...connectedAccountRows.map((account) => account.drawdownPercent),
+  );
   const overlayTraders: TraderProfileDto[] = traders.map((trader) => ({
     traderId: trader.traderId,
     name: trader.name,
@@ -645,9 +667,9 @@ export default function AdminOverviewPage() {
     },
     {
       label: "Live account equity",
-      value: portfolioCurrency
-        ? formatMoney({ amount: totalEquity, currency: portfolioCurrency })
-        : accountCurrencies.length > 1 ? "Mixed" : "$0",
+      value: !mixedCurrencies
+        ? formatMoney({ amount: displayTotalEquity, currency: liveCurrency })
+        : "Mixed",
       status: connectedAccounts > 0 ? "Live" : "No accounts",
       tone: connectedAccounts > 0 ? "lime" : "muted",
       progress: connectedAccounts > 0 ? 1 : 0.04,
@@ -663,12 +685,12 @@ export default function AdminOverviewPage() {
     },
     {
       label: "Floating P&L",
-      value: portfolioCurrency
-        ? formatMoney({ amount: totalFloatingPnl, currency: portfolioCurrency })
-        : accountCurrencies.length > 1 ? "Mixed" : "$0",
+      value: !mixedCurrencies
+        ? formatMoney({ amount: totalFloatingPnl, currency: liveCurrency })
+        : "Mixed",
       status: totalFloatingPnl > 0 ? "Positive" : totalFloatingPnl < 0 ? "Negative" : "Flat",
       tone: totalFloatingPnl > 0 ? "lime" : totalFloatingPnl < 0 ? "danger" : "muted",
-      progress: connectedAccounts > 0 ? Math.min(Math.max(Math.abs(totalFloatingPnl) / Math.max(totalEquity, 1), 0.04), 1) : 0.04,
+      progress: connectedAccounts > 0 ? Math.min(Math.max(Math.abs(totalFloatingPnl) / Math.max(displayTotalEquity, 1), 0.04), 1) : 0.04,
       icon: Activity,
     },
   ];
@@ -717,8 +739,8 @@ export default function AdminOverviewPage() {
       <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2.05fr)_minmax(300px,0.95fr)]">
         <PlatformOversightChart
           data={liveEquityCurve}
-          currency={portfolioCurrency ?? equityTimeline?.currency ?? "USD"}
-          mixedCurrencies={equityTimeline?.mixedCurrencies ?? false}
+          currency={liveCurrency}
+          mixedCurrencies={mixedCurrencies}
           isRefreshing={equityRefreshing}
         />
 
@@ -742,7 +764,7 @@ export default function AdminOverviewPage() {
             <div className="flex min-h-11 items-center justify-between gap-4 border-b border-line px-5">
               <dt className="text-sm text-muted">Net profit</dt>
               <dd className="text-sm font-semibold text-accent-2 tabular-nums">
-                {formatMoney(calculateTotalProfit(trades))}
+                {formatClosedTradeProfit(trades)}
               </dd>
             </div>
 
@@ -756,9 +778,7 @@ export default function AdminOverviewPage() {
             <div className="flex min-h-11 items-center justify-between gap-4 border-b border-line px-5">
               <dt className="text-sm text-muted">Max drawdown</dt>
               <dd className="text-sm font-semibold text-danger tabular-nums">
-                {formatPercent(
-                  calculateMaxDrawdown(liveEquityCurve),
-                )}
+                {formatPercent(liveMaxDrawdown)}
               </dd>
             </div>
 
@@ -892,6 +912,7 @@ export default function AdminOverviewPage() {
         openRiskEvents={adminSummary?.openRiskEvents ?? 0}
         monthlyRecurringRevenue={monthlyRecurringRevenue}
         equityCurve={equityCurve}
+        equityCurrency={liveCurrency}
         trades={trades}
         tradingAccounts={tradingAccounts}
         traders={overlayTraders}

@@ -37,6 +37,7 @@ type RiskAccountRow = {
   user_id: string;
   account_name: string;
   broker_name: string;
+  currency: string | null;
   status: string;
   risk_restricted_at: string | null;
 };
@@ -51,6 +52,7 @@ export function buildAccountInput(
   accountId: string,
   accountName: string,
   brokerName: string,
+  currency: string | null,
   status: string,
   snapshot: {
     balance: number | string;
@@ -59,6 +61,7 @@ export function buildAccountInput(
   } | null,
   openTradeCount: number,
 ): TraderAccountSummary {
+  const accountCurrency = currency ?? "USD";
   return {
     accountId,
     accountName,
@@ -66,9 +69,9 @@ export function buildAccountInput(
     serverName: null,
     platform: null,
     status: status as AccountStatus,
-    balance: { amount: Number(snapshot?.balance ?? 0), currency: "USD" },
-    equity: { amount: Number(snapshot?.equity ?? 0), currency: "USD" },
-    floatingPnl: { amount: 0, currency: "USD" },
+    balance: { amount: Number(snapshot?.balance ?? 0), currency: accountCurrency },
+    equity: { amount: Number(snapshot?.equity ?? 0), currency: accountCurrency },
+    floatingPnl: { amount: 0, currency: accountCurrency },
     openTradeCount,
     drawdownPercent: Number(snapshot?.drawdown_percent ?? 0),
     updatedAt: new Date().toISOString(),
@@ -174,7 +177,7 @@ export async function evaluateAndEnforceRiskValues(params: {
   if (!account) {
     const result = await supabase
       .from("trading_accounts")
-      .select("id, user_id, account_name, broker_name, status, risk_restricted_at")
+      .select("id, user_id, account_name, broker_name, currency, status, risk_restricted_at")
       .eq("id", params.accountId)
       .single();
     if (result.error || !result.data) {
@@ -191,6 +194,7 @@ export async function evaluateAndEnforceRiskValues(params: {
     account.id,
     account.account_name,
     account.broker_name,
+    account.currency,
     account.status,
     { balance, equity, drawdown_percent: drawdownPercent },
     params.values.openTradeCount,
@@ -290,7 +294,7 @@ export async function evaluateAndPersistRiskEvents(
   const supabase = createAdminClient();
   const { data: account, error: accountError } = await supabase
     .from("trading_accounts")
-    .select("id, user_id, account_name, broker_name, status, risk_restricted_at")
+    .select("id, user_id, account_name, broker_name, currency, status, risk_restricted_at")
     .eq("id", accountId)
     .single();
   if (accountError || !account) {

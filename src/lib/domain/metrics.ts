@@ -5,6 +5,19 @@ const money = (amount: number, currency = "USD"): MoneyValue => ({
   currency,
 });
 
+function inferTradeCurrency(trades: TradeDto[], fallback = "USD"): string {
+  const currencies = [
+    ...new Set(
+      trades
+        .filter((trade) => trade.status === "CLOSED")
+        .map((trade) => trade.profit.currency)
+        .filter(Boolean),
+    ),
+  ];
+
+  return currencies[0] ?? fallback;
+}
+
 export function calculateTotalProfit(trades: TradeDto[], currency = "USD"): MoneyValue {
   return money(
     trades
@@ -95,6 +108,7 @@ export function buildAnalyticsSummary(
   trades: TradeDto[],
   equityCurve: EquityPoint[],
 ): AnalyticsSummary {
+  const currency = inferTradeCurrency(trades);
   const closedTradeCount = trades.filter((trade) => trade.status === "CLOSED").length;
   const winningTrades = trades.filter(
     (trade) => trade.status === "CLOSED" && trade.profit.amount > 0,
@@ -111,14 +125,14 @@ export function buildAnalyticsSummary(
 
   return {
     accountId,
-    totalProfit: calculateTotalProfit(trades),
+    totalProfit: calculateTotalProfit(trades, currency),
     winRatePercent: calculateWinRate(trades),
     maxDrawdownPercent: calculateMaxDrawdown(equityCurve),
     riskRewardRatio: calculateRiskRewardRatio(trades),
     consistencyScore: calculateConsistencyScore(trades),
     profitFactor: calculateProfitFactor(trades),
-    averageWin: money(averageWin),
-    averageLoss: money(averageLoss),
+    averageWin: money(averageWin, currency),
+    averageLoss: money(averageLoss, currency),
     winningTradeCount: winningTrades.length,
     losingTradeCount: losingTrades.length,
     tradeCount: closedTradeCount,

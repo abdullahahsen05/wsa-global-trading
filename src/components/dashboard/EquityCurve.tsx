@@ -5,22 +5,26 @@ export function EquityCurve({
   data,
   title,
   description,
+  currency = "USD",
 }: {
   data: EquityPoint[];
   title?: string;
   description?: string;
+  currency?: string;
 }) {
-  return EquityCurvePanel({ data, title, description });
+  return EquityCurvePanel({ data, title, description, currency });
 }
 
 function EquityCurvePanel({
   data,
   title = "Equity curve",
   description = "Account growth and intraday volatility",
+  currency,
 }: {
   data: EquityPoint[];
   title?: string;
   description?: string;
+  currency: string;
 }) {
   if (data.length === 0) {
     return (
@@ -60,7 +64,7 @@ function EquityCurvePanel({
           <p className="mt-1 text-xs text-muted">{description}</p>
         </div>
         <span className="shrink-0 text-base font-semibold tabular-nums text-accent">
-          {formatMoney({ amount: latest.equity, currency: "USD" })}
+          {formatMoney({ amount: latest.equity, currency })}
         </span>
       </div>
       <svg

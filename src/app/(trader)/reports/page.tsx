@@ -396,7 +396,7 @@ function ReportsContent() {
                   totalClosedPnl >= 0 ? "text-accent-2" : "text-danger"
                 }`}
               >
-                {formatMoney({ amount: totalClosedPnl, currency: "USD" })}
+                {formatMoney({ amount: totalClosedPnl, currency: accountCurrency })}
               </p>
             </div>
           </div>
