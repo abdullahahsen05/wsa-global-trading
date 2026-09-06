@@ -169,7 +169,11 @@ export async function ensureBrokerProviderForName(params: {
 
   const supabase = createAdminClient();
   const name = slugify(displayName);
-  const platformsSupported = [...new Set(params.platformsSupported?.length ? params.platformsSupported : ["MT5"])];
+  const platformsSupported: BrokerPlatform[] = [
+    ...new Set<BrokerPlatform>(
+      params.platformsSupported?.length ? params.platformsSupported : ["MT5"],
+    ),
+  ];
   const { data: existing, error: existingError } = await supabase
     .from("broker_providers")
     .select("id, name, display_name, platforms_supported, is_active, created_at, updated_at")
@@ -179,7 +183,9 @@ export async function ensureBrokerProviderForName(params: {
 
   if (existing) {
     const existingPlatforms = existing.platforms_supported as BrokerPlatform[];
-    const mergedPlatforms = [...new Set([...existingPlatforms, ...platformsSupported])];
+    const mergedPlatforms: BrokerPlatform[] = [
+      ...new Set<BrokerPlatform>([...existingPlatforms, ...platformsSupported]),
+    ];
     if (!existing.is_active || mergedPlatforms.length !== existingPlatforms.length || existing.display_name !== displayName) {
       const { error: updateError } = await supabase
         .from("broker_providers")
