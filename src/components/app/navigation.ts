@@ -48,7 +48,6 @@ export const navItems: NavItem[] = [
   { href: "/admin", label: "Overview", role: "ADMIN", icon: Gauge },
   { href: "/admin/users", label: "Users & Access", role: "ADMIN", icon: Users },
   { href: "/admin/accounts", label: "Supervision", role: "ADMIN", icon: WalletCards },
-  { href: "/admin/brokers", label: "Broker Catalog", role: "ADMIN", icon: WalletCards },
   { href: "/admin/crm", label: "Trader CRM", role: "ADMIN", icon: MessageSquare },
   { href: "/admin/contact-requests", label: "Contact Requests", role: "ADMIN", icon: MessageSquare },
   { href: "/admin/risk", label: "Risk Rules", role: "ADMIN", icon: ShieldAlert },

@@ -229,6 +229,7 @@ export const partnerRebateCreateSchema = z.object({
 
 export const partnerBrokerConfigurationSchema = z.object({
   brokerProviderId: z.string().uuid().nullable().optional(),
+  brokerName: z.string().trim().min(2).max(120).nullable().optional(),
   modelType: z.enum(["IB", "CPA", "HYBRID"]),
   rebateRatePerLot: z.number().min(0).max(1_000_000),
   cpaQualificationLots: z.number().min(0).max(1_000_000).default(1),

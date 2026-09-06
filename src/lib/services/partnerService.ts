@@ -63,6 +63,7 @@ interface AssignedContext {
   rebatesByTraderUserId: Map<string, RebateAggregate>;
   commissionsByTraderUserId: Map<string, CommissionAggregate>;
   configByBrokerProviderId: Map<string, BrokerConfigRow>;
+  configByBrokerName: Map<string, BrokerConfigRow>;
   fallbackConfig: BrokerConfigRow | null;
   allAccountIds: string[];
 }
@@ -89,6 +90,16 @@ interface BrokerConfigRow {
   cpa_tier_1_deposit: number | string;
   cpa_tier_2_deposit: number | string;
   cpa_tier_3_deposit: number | string;
+  broker_providers?: { display_name?: string | null; name?: string | null } | null;
+}
+
+function normalizeBrokerName(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function newestIso(values: Array<string | null | undefined>): string | null {
@@ -148,6 +159,7 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
       rebatesByTraderUserId: new Map(),
       commissionsByTraderUserId: new Map(),
       configByBrokerProviderId: new Map(),
+      configByBrokerName: new Map(),
       fallbackConfig: null,
       allAccountIds: [],
     };
@@ -170,6 +182,7 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
   const rebatesByTraderUserId = new Map<string, RebateAggregate>();
   const commissionsByTraderUserId = new Map<string, CommissionAggregate>();
   const configByBrokerProviderId = new Map<string, BrokerConfigRow>();
+  const configByBrokerName = new Map<string, BrokerConfigRow>();
   let fallbackConfig: BrokerConfigRow | null = null;
 
   const [{ data: snaps }, { data: riskRows }, { data: tradeRows }, { data: rebateRows }, { data: commissionRows }, { data: configRows }] = await Promise.all([
@@ -208,7 +221,7 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
         .limit(10000),
       supabase
         .from("partner_broker_configurations")
-        .select("broker_provider_id, model_type, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_2_deposit, cpa_tier_3_deposit")
+        .select("broker_provider_id, model_type, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_2_deposit, cpa_tier_3_deposit, broker_providers(display_name, name)")
         .eq("partner_id", partnerUserId)
         .eq("is_active", true)
         .limit(200),
@@ -255,8 +268,15 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
     commissionsByTraderUserId.set(traderId, current);
   }
   for (const config of (configRows ?? []) as BrokerConfigRow[]) {
-    if (config.broker_provider_id) configByBrokerProviderId.set(config.broker_provider_id, config);
-    else fallbackConfig = config;
+    if (config.broker_provider_id) {
+      configByBrokerProviderId.set(config.broker_provider_id, config);
+      const displayName = normalizeBrokerName(config.broker_providers?.display_name);
+      const name = normalizeBrokerName(config.broker_providers?.name);
+      if (displayName) configByBrokerName.set(displayName, config);
+      if (name) configByBrokerName.set(name, config);
+    } else {
+      fallbackConfig = config;
+    }
   }
 
   return {
@@ -269,6 +289,7 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
     rebatesByTraderUserId,
     commissionsByTraderUserId,
     configByBrokerProviderId,
+    configByBrokerName,
     fallbackConfig,
     allAccountIds,
   };
@@ -320,6 +341,9 @@ function buildTraderDto(
   const config =
     traderAccounts
       .map((acc) => acc.broker_provider_id ? ctx.configByBrokerProviderId.get(acc.broker_provider_id) ?? null : null)
+      .find(Boolean)
+    ?? traderAccounts
+      .map((acc) => ctx.configByBrokerName.get(normalizeBrokerName(acc.broker_name)) ?? null)
       .find(Boolean)
     ?? ctx.fallbackConfig;
   const qualificationTargetLots = config ? Number(config.cpa_qualification_lots) : null;

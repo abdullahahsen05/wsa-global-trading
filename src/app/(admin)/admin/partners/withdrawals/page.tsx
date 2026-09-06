@@ -30,6 +30,7 @@ interface BrokerOption {
   display_name: string;
   name: string;
   is_active: boolean;
+  logoUrl: string | null;
 }
 
 interface PartnerBrokerConfigurationDto {
@@ -47,6 +48,15 @@ interface PartnerBrokerConfigurationDto {
   cpaTier3Payout: number;
   currency: string;
   isActive: boolean;
+}
+
+function normalizeBrokerName(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const TONES: Record<string, "lime" | "accent" | "danger" | "muted"> = {
@@ -187,9 +197,21 @@ export default function AdminPartnerWithdrawalsPage() {
     enabled: Boolean(selectedLedgerSummary?.partnerId),
   });
   const selectedConfig = useMemo(
-    () => brokerConfig.data?.configurations.find((config) => (config.brokerProviderId ?? "") === configBrokerId) ?? null,
+    () => brokerConfig.data?.configurations.find((config) => {
+      if ((config.brokerProviderId ?? "") === configBrokerId) return true;
+      if (!configBrokerId.startsWith("broker-name:")) return false;
+      return normalizeBrokerName(config.brokerName) === normalizeBrokerName(configBrokerId.slice("broker-name:".length));
+    }) ?? null,
     [brokerConfig.data?.configurations, configBrokerId],
   );
+  const selectedBrokerOption = useMemo(
+    () => brokerConfig.data?.brokers.find((broker) => broker.id === configBrokerId) ?? null,
+    [brokerConfig.data?.brokers, configBrokerId],
+  );
+  const selectedBrokerName =
+    selectedBrokerOption?.display_name
+    || selectedBrokerOption?.name
+    || (configBrokerId.startsWith("broker-name:") ? configBrokerId.slice("broker-name:".length) : "All live brokers");
   const hybridConfigCount = useMemo(
     () => (brokerConfig.data?.configurations ?? []).filter((config) => config.modelType === "HYBRID" && config.isActive).length,
     [brokerConfig.data?.configurations],
@@ -316,7 +338,10 @@ export default function AdminPartnerWithdrawalsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          brokerProviderId: configBrokerId || null,
+          brokerProviderId: configBrokerId && !configBrokerId.startsWith("broker-name:") ? configBrokerId : null,
+          brokerName: configBrokerId.startsWith("broker-name:")
+            ? selectedBrokerOption?.display_name || selectedBrokerOption?.name || configBrokerId.slice("broker-name:".length)
+            : undefined,
           modelType: configModel,
           rebateRatePerLot: Number(rebateRatePerLot),
           cpaQualificationLots: Number(cpaQualificationLots),
@@ -593,14 +618,30 @@ export default function AdminPartnerWithdrawalsPage() {
                     <StatusPill tone={configActive ? "lime" : "muted"}>{configActive ? "ACTIVE" : "DISABLED"}</StatusPill>
                   </div>
                   <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <SelectField label="Broker" value={configBrokerId} onChange={(event) => setConfigBrokerId(event.target.value)}>
-                      <option value="">All brokers fallback</option>
-                      {(brokerConfig.data?.brokers ?? []).map((broker) => (
-                        <option key={broker.id} value={broker.id}>
-                          {broker.display_name || broker.name}{broker.is_active ? "" : " (inactive)"}
-                        </option>
-                      ))}
-                    </SelectField>
+                    <div className="grid gap-2">
+                      <SelectField label="Broker" value={configBrokerId} onChange={(event) => setConfigBrokerId(event.target.value)}>
+                        <option value="">All live brokers</option>
+                        {(brokerConfig.data?.brokers ?? []).map((broker) => (
+                          <option key={broker.id} value={broker.id}>
+                            {broker.display_name || broker.name}
+                          </option>
+                        ))}
+                      </SelectField>
+                      <div className="flex min-h-12 items-center gap-3 rounded-[4px] border border-line bg-panel/55 px-3 py-2">
+                        {selectedBrokerOption?.logoUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={selectedBrokerOption.logoUrl} alt="" className="h-8 w-8 rounded-full border border-line bg-background object-contain" />
+                        ) : (
+                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-accent/25 bg-accent/10 text-[11px] font-bold text-accent">
+                            {(selectedBrokerName.match(/\b\w/g) ?? ["B"]).slice(0, 2).join("").toUpperCase()}
+                          </span>
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">{selectedBrokerName}</p>
+                          <p className="text-[11px] text-muted">Detected from connected accounts</p>
+                        </div>
+                      </div>
+                    </div>
                     <SelectField label="Partnership model" value={configModel} onChange={(event) => setConfigModel(event.target.value as PartnerModelType)}>
                       <option value="IB">IB - volume rebate</option>
                       <option value="CPA">CPA - qualified payout</option>

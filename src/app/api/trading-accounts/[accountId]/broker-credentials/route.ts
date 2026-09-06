@@ -8,7 +8,7 @@ import { getBrokerProviderId } from "@/lib/broker/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { brokerConnectionSchema } from "@/lib/validation/schemas";
-import { resolveBrokerSelection } from "@/lib/services/brokerCatalogService";
+import { ensureBrokerProviderForName, resolveBrokerSelection } from "@/lib/services/brokerCatalogService";
 import { resolveAccountLifecycleStatus } from "@/lib/accounts/lifecycle";
 import type { AccountStatus } from "@/lib/domain/types";
 
@@ -111,6 +111,7 @@ export async function POST(
       connectNow,
     } = parsed.data;
     let resolvedBrokerName = brokerName;
+    let resolvedBrokerProviderId = brokerProviderId;
     if (brokerProviderId) {
       try {
         const brokerSelection = await resolveBrokerSelection({
@@ -128,11 +129,20 @@ export async function POST(
         );
       }
     }
+    if (!resolvedBrokerProviderId && resolvedBrokerName?.trim()) {
+      const brokerProvider = await ensureBrokerProviderForName({
+        displayName: resolvedBrokerName,
+        platformsSupported: [platform],
+        actorUserId: user.id,
+      });
+      resolvedBrokerProviderId = brokerProvider?.id ?? undefined;
+      resolvedBrokerName = brokerProvider?.displayName ?? resolvedBrokerName;
+    }
 
     const result = await connectBrokerAccount({
       accountId,
       actorUserId: user.id,
-      brokerProviderId,
+      brokerProviderId: resolvedBrokerProviderId,
       connectNow,
       credentials: {
         login,

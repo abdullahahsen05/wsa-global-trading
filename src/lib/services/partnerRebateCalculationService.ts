@@ -119,6 +119,15 @@ function mapConfig(row: ConfigRow): PartnerBrokerConfigurationDto {
   };
 }
 
+function normalizeBrokerName(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function listPartnerBrokerConfigurations(
   partnerId: string,
 ): Promise<PartnerBrokerConfigurationDto[]> {
@@ -256,17 +265,35 @@ async function findConfig(
   supabase: SupabaseAdmin,
   partnerId: string,
   brokerProviderId: string | null,
+  brokerName?: string | null,
 ): Promise<ConfigRow | null> {
   if (brokerProviderId) {
     const { data } = await supabase
       .from("partner_broker_configurations")
-      .select("*")
+      .select("*, broker_providers(display_name, name)")
       .eq("partner_id", partnerId)
       .eq("broker_provider_id", brokerProviderId)
       .eq("is_active", true)
       .maybeSingle();
     if (data) return data as ConfigRow;
   }
+
+  const normalizedBrokerName = normalizeBrokerName(brokerName);
+  if (normalizedBrokerName) {
+    const { data } = await supabase
+      .from("partner_broker_configurations")
+      .select("*, broker_providers(display_name, name)")
+      .eq("partner_id", partnerId)
+      .eq("is_active", true)
+      .not("broker_provider_id", "is", null);
+    const matched = ((data ?? []) as unknown as ConfigRow[]).find((config) => {
+      const displayName = normalizeBrokerName(config.broker_providers?.display_name);
+      const name = normalizeBrokerName(config.broker_providers?.name);
+      return displayName === normalizedBrokerName || name === normalizedBrokerName;
+    });
+    if (matched) return matched;
+  }
+
   const { data } = await supabase
     .from("partner_broker_configurations")
     .select("*")
@@ -312,7 +339,7 @@ export async function calculatePartnerRebatesForTradingAccounts(
     if (!partnerId) continue;
 
     const brokerProviderId = (account?.broker_provider_id as string | null) ?? null;
-    const config = await findConfig(supabase, partnerId, brokerProviderId);
+    const config = await findConfig(supabase, partnerId, brokerProviderId, account.broker_name);
     if (!config) continue;
 
     const volumeLots = Math.abs(Number(trade.volume ?? 0));
@@ -354,7 +381,9 @@ export async function calculatePartnerRebatesForTradingAccounts(
         .eq("trading_accounts.user_id", traderId);
       traderTradesQuery = brokerProviderId
         ? traderTradesQuery.eq("trading_accounts.broker_provider_id", brokerProviderId)
-        : traderTradesQuery.is("trading_accounts.broker_provider_id", null);
+        : account.broker_name
+          ? traderTradesQuery.ilike("trading_accounts.broker_name", account.broker_name)
+          : traderTradesQuery.is("trading_accounts.broker_provider_id", null);
       const { data: traderTrades } = await traderTradesQuery;
       const totalLots = ((traderTrades ?? []) as TraderVolumeRow[]).reduce(
         (sum, row) => sum + Math.abs(Number(row.volume ?? 0)),

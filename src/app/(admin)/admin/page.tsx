@@ -600,9 +600,6 @@ export default function AdminOverviewPage() {
   const newestAccountUpdate = connectedAccountRows
     .map((account) => account.updatedAt)
     .sort((left, right) => right.localeCompare(left))[0] ?? null;
-  const snapshotFresh = newestAccountUpdate
-    ? accountsFetchedAt - Date.parse(newestAccountUpdate) < 10 * 60_000
-    : false;
   const liveEquityCurve =
     equityCurve.length > 0
       ? equityCurve
@@ -651,8 +648,8 @@ export default function AdminOverviewPage() {
       value: portfolioCurrency
         ? formatMoney({ amount: totalEquity, currency: portfolioCurrency })
         : accountCurrencies.length > 1 ? "Mixed" : "$0",
-      status: snapshotFresh ? "Current" : "Awaiting sync",
-      tone: snapshotFresh ? "lime" : "muted",
+      status: connectedAccounts > 0 ? "Live" : "No accounts",
+      tone: connectedAccounts > 0 ? "lime" : "muted",
       progress: connectedAccounts > 0 ? 1 : 0.04,
       icon: TrendingUp,
     },
@@ -736,11 +733,9 @@ export default function AdminOverviewPage() {
               </p>
             </div>
 
-            <StatusPill
-              tone={snapshotFresh ? "lime" : "accent"}
-            >
-              {snapshotFresh ? "Live data" : "Sync pending"}
-            </StatusPill>
+            {connectedAccounts > 0 ? (
+              <StatusPill tone="lime">Live</StatusPill>
+            ) : null}
           </header>
 
           <dl>
@@ -786,7 +781,7 @@ export default function AdminOverviewPage() {
                 last updated{" "}
                 {newestAccountUpdate
                   ? new Date(newestAccountUpdate).toLocaleString()
-                  : "after the next account sync"}.
+                  : "as accounts update"}.
               </dd>
             </div>
           </dl>

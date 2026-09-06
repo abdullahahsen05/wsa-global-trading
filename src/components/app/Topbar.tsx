@@ -96,6 +96,19 @@ export function Topbar({
 
   async function handleMarkAllRead() {
     try {
+      queryClient.setQueryData<{ notifications: NotificationDto[]; unreadCount: number }>(
+        ["notifications"],
+        (current) =>
+          current
+            ? {
+                notifications: current.notifications.map((notification) => ({
+                  ...notification,
+                  readAt: notification.readAt ?? new Date().toISOString(),
+                })),
+                unreadCount: 0,
+              }
+            : current,
+      );
       await fetch("/api/notifications/read-all", { method: "PATCH" });
       queryClient.invalidateQueries({ queryKey: ["notifications"] });
     } catch {
@@ -156,6 +169,12 @@ export function Topbar({
     selectedAccountId,
     setSelectedAccountId,
   ]);
+
+  useEffect(() => {
+    if (!notificationsOpen || unreadCount <= 0) return;
+    void handleMarkAllRead();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only mark when the popover opens with unread notifications.
+  }, [notificationsOpen, unreadCount]);
 
   return (
     <header className="sticky top-0 z-20 min-h-16 border-b border-line bg-panel px-3 py-3 sm:px-4 lg:px-7">

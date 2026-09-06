@@ -159,6 +159,59 @@ export async function createBrokerProvider(params: {
   };
 }
 
+export async function ensureBrokerProviderForName(params: {
+  displayName: string;
+  platformsSupported?: BrokerPlatform[];
+  actorUserId: string;
+}): Promise<BrokerProviderDto | null> {
+  const displayName = params.displayName.trim();
+  if (displayName.length < 2) return null;
+
+  const supabase = createAdminClient();
+  const name = slugify(displayName);
+  const platformsSupported = [...new Set(params.platformsSupported?.length ? params.platformsSupported : ["MT5"])];
+  const { data: existing, error: existingError } = await supabase
+    .from("broker_providers")
+    .select("id, name, display_name, platforms_supported, is_active, created_at, updated_at")
+    .eq("name", name)
+    .maybeSingle();
+  if (existingError) throw new Error(`Failed to load broker provider: ${existingError.message}`);
+
+  if (existing) {
+    const existingPlatforms = existing.platforms_supported as BrokerPlatform[];
+    const mergedPlatforms = [...new Set([...existingPlatforms, ...platformsSupported])];
+    if (!existing.is_active || mergedPlatforms.length !== existingPlatforms.length || existing.display_name !== displayName) {
+      const { error: updateError } = await supabase
+        .from("broker_providers")
+        .update({
+          display_name: displayName,
+          platforms_supported: mergedPlatforms,
+          is_active: true,
+          updated_by: params.actorUserId,
+        })
+        .eq("id", existing.id);
+      if (updateError) throw new Error(`Failed to update broker provider: ${updateError.message}`);
+    }
+
+    return {
+      id: existing.id,
+      name: existing.name,
+      displayName,
+      platformsSupported: mergedPlatforms,
+      isActive: true,
+      serverCount: 0,
+      createdAt: existing.created_at,
+      updatedAt: existing.updated_at,
+    };
+  }
+
+  return createBrokerProvider({
+    displayName,
+    platformsSupported,
+    actorUserId: params.actorUserId,
+  });
+}
+
 export async function updateBrokerProvider(params: {
   id: string;
   patch: { displayName?: string; platformsSupported?: BrokerPlatform[]; isActive?: boolean };
