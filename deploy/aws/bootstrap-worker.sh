@@ -38,7 +38,7 @@ sudo -u wsa git fetch origin main
 sudo -u wsa git reset --hard origin/main
 sudo -u wsa npm ci --omit=dev
 
-# Keep enough headroom for the three Node/MetaApi workers during reconnect bursts.
+# Keep enough headroom for the three Node workers during reconnect bursts.
 if ! swapon --show=NAME --noheadings | grep -q '^/swapfile$'; then
   fallocate -l 2G /swapfile
   chmod 600 /swapfile

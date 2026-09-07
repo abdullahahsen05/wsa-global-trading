@@ -28,7 +28,7 @@ read_optional_parameter() {
 
 export NEXT_PUBLIC_SUPABASE_URL="$(read_parameter /wsa/test/NEXT_PUBLIC_SUPABASE_URL)"
 export SUPABASE_SERVICE_ROLE_KEY="$(read_parameter /wsa/test/SUPABASE_SERVICE_ROLE_KEY)"
-export METAAPI_TOKEN="$(read_parameter /wsa/test/METAAPI_TOKEN)"
+export METAAPI_TOKEN="$(read_optional_parameter /wsa/test/METAAPI_TOKEN)"
 export ENCRYPTION_KEY="$(read_parameter /wsa/test/ENCRYPTION_KEY)"
 export API2TRADE_BASE_URL="$(read_optional_parameter /wsa/test/API2TRADE_BASE_URL)"
 export API2TRADE_EVENTS_URL="$(read_optional_parameter /wsa/test/API2TRADE_EVENTS_URL)"
