@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, RefreshCcw, ShieldCheck, X } from "lucide-react";
+import { CheckCircle2, X } from "lucide-react";
 import { GhostButton, Panel, PrimaryButton, StatusPill } from "@/components/app/WorkspaceUI";
 import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
 
@@ -32,15 +32,6 @@ interface SyncResult {
   tradesUpserted: number;
   lastSyncedAt?: string;
   message?: string;
-}
-
-interface VerifyResult {
-  connected: boolean;
-  provider: string;
-  accountId: string;
-  checkedAt: string;
-  needsSync?: boolean;
-  message?: string | null;
 }
 
 interface ConnectionStatusResult {
@@ -90,7 +81,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
   });
   const [serverSearchQuery, setServerSearchQuery] = useState("");
   const [notice, setNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
-  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
 
   const { data: credStatus, isLoading } = useQuery<CredentialStatus>({
     queryKey: ["broker-cred-status", accountId],
@@ -195,51 +185,8 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
     onError: (err: Error) => setNotice({ type: "error", text: err.message }),
   });
 
-  const verifyMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<VerifyResult>(`/api/trading-accounts/${accountId}/broker-credentials/verify`, {
-        method: "POST",
-      }),
-    onSuccess: (data) => {
-      setVerifyResult(data);
-      if (data.needsSync) {
-        setNotice({ type: "info", text: "Account has not been synced yet. Run Sync Account first." });
-      } else if (data.connected) {
-        setNotice({ type: "success", text: "Connection verified. The broker provider is connected to your account." });
-      } else {
-        setNotice({ type: "error", text: data.message ?? "Connection verification failed." });
-      }
-    },
-    onError: (err: Error) => setNotice({ type: "error", text: err.message }),
-  });
-
-  const syncMutation = useMutation({
-    mutationFn: () =>
-      apiFetch<SyncResult>(`/api/trading-accounts/${accountId}/sync`, {
-        method: "POST",
-      }),
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["broker-cred-status", accountId] });
-      if (data.status === "PENDING" || data.status === "SYNCING") {
-        statusPollCount.current = 0;
-        setNotice({
-          type: "info",
-          text: data.message ?? "The broker provider is still connecting. Check back in a moment.",
-        });
-      } else {
-        setNotice({
-          type: "success",
-          text: `Account synced. ${data.tradesUpserted} trades upserted${data.snapshotStored ? ", live values updated" : ""}.`,
-        });
-      }
-    },
-    onError: (err: Error) => setNotice({ type: "error", text: err.message }),
-  });
-
   const busy =
     storeMutation.isPending ||
-    verifyMutation.isPending ||
-    syncMutation.isPending ||
     serversQuery.isFetching ||
     connectionStatusQuery.isFetching;
 
@@ -277,7 +224,6 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
       : displayedStatus === "SYNCING" || displayedStatus === "PENDING"
         ? ("accent" as const)
         : ("muted" as const);
-  const reconnecting = displayedStatus === "INACTIVE" || displayedStatus === "DISCONNECTED";
 
   return (
     <Panel>
@@ -359,56 +305,13 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         </div>
       ) : null}
 
-      {verifyResult && !displayedNotice?.type.startsWith("e") ? (
-        <div className="mt-3 flex items-center gap-2 rounded-[4px] border border-line bg-background px-4 py-3 text-sm">
-          {verifyResult.connected ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-accent-2" />
-          ) : (
-            <X className="h-4 w-4 shrink-0 text-danger" />
-          )}
-          <span className="text-muted">
-            Checked {new Date(verifyResult.checkedAt).toLocaleTimeString()}
-          </span>
+      {!(credStatus?.credentialsStored || credStatus?.providerAccountId) ? (
+        <div className="mt-4">
+        <GhostButton type="button" onClick={() => { setFormOpen((o) => !o); setNotice(null); }}>
+          Add broker connection
+        </GhostButton>
         </div>
       ) : null}
-
-      <div className="mt-4 flex flex-wrap gap-3">
-        <GhostButton type="button" onClick={() => { setFormOpen((o) => !o); setNotice(null); }}>
-          {credStatus?.credentialsStored ? "Update connection" : "Add broker connection"}
-        </GhostButton>
-        {(credStatus?.credentialsStored || credStatus?.providerAccountId) ? (
-          <>
-            <GhostButton
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setNotice(null);
-                statusPollCount.current = 0;
-                void connectionStatusQuery.refetch();
-              }}
-            >
-              <RefreshCcw className={`mr-1.5 inline-block h-3.5 w-3.5 ${connectionStatusQuery.isFetching ? "animate-spin" : ""}`} />
-              {connectionStatusQuery.isFetching ? "Checking…" : "Check status"}
-            </GhostButton>
-            <GhostButton
-              type="button"
-              disabled={busy}
-              onClick={() => { setNotice(null); verifyMutation.mutate(); }}
-            >
-              <ShieldCheck className="mr-1.5 inline-block h-3.5 w-3.5" />
-              {verifyMutation.isPending ? "Verifying…" : "Verify connection"}
-            </GhostButton>
-            <PrimaryButton
-              type="button"
-              disabled={busy}
-              onClick={() => { setNotice(null); syncMutation.mutate(); }}
-            >
-              <RefreshCcw className={`mr-1.5 inline-block h-3.5 w-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-              {syncMutation.isPending ? "Connecting…" : reconnecting ? "Reconnect account" : "Sync account"}
-            </PrimaryButton>
-          </>
-        ) : null}
-      </div>
 
       {formOpen ? (
         <form onSubmit={handleSubmit} className="mt-5 grid gap-4 border-t border-line pt-5">
