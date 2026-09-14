@@ -6,8 +6,25 @@ import {
   deriveMentorshipAccess,
   derivePlatformSubscriptionAccess,
   getVerifiedPaymentProvisioningDecision,
+  getStripeInvoiceSubscriptionId,
   type BillingAccessState,
 } from "@/lib/services/billingService";
+
+describe("getStripeInvoiceSubscriptionId", () => {
+  test("reads the legacy top-level Stripe invoice field", () => {
+    expect(getStripeInvoiceSubscriptionId({ subscription: "sub_legacy" })).toBe("sub_legacy");
+  });
+
+  test("reads the current nested Stripe invoice field", () => {
+    expect(getStripeInvoiceSubscriptionId({
+      parent: { subscription_details: { subscription: "sub_current" } },
+    })).toBe("sub_current");
+  });
+
+  test("returns null for a non-subscription invoice", () => {
+    expect(getStripeInvoiceSubscriptionId({ parent: null })).toBeNull();
+  });
+});
 
 describe("derivePlatformSubscriptionAccess", () => {
   test("returns ACTIVE when an approved subscription is still in period", () => {

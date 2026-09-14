@@ -1311,7 +1311,30 @@ export async function handleStripeCheckoutCompleted(session: {
   }
 }
 
-/** Called on invoice.paid — extends current_period_end for active subscriptions. */
+/**
+ * Stripe's newer invoice payloads nest the subscription under
+ * parent.subscription_details. Keep the legacy top-level field for events sent
+ * with older API versions.
+ */
+export function getStripeInvoiceSubscriptionId(invoice: unknown): string | null {
+  if (!invoice || typeof invoice !== "object") return null;
+  const row = invoice as Record<string, unknown>;
+  if (typeof row.subscription === "string") return row.subscription;
+
+  const parent = row.parent;
+  if (!parent || typeof parent !== "object") return null;
+  const details = (parent as Record<string, unknown>).subscription_details;
+  if (!details || typeof details !== "object") return null;
+  const subscription = (details as Record<string, unknown>).subscription;
+  if (typeof subscription === "string") return subscription;
+  if (subscription && typeof subscription === "object") {
+    const id = (subscription as Record<string, unknown>).id;
+    return typeof id === "string" ? id : null;
+  }
+  return null;
+}
+
+/** Called on invoice.paid — extends and restores paid subscription access. */
 export async function handleStripeInvoicePaid(invoice: {
   subscription?: string | null;
   lines?: { data?: Array<{ period?: { start?: number; end?: number } }> };
@@ -1327,19 +1350,29 @@ export async function handleStripeInvoicePaid(invoice: {
     ? new Date(periodData.start * 1000).toISOString()
     : new Date().toISOString();
 
-  // Only extend ACTIVE rows — renewals don't need re-approval
+  // A renewal event may arrive just after the expiry worker has marked the row
+  // EXPIRED. Successful payment is authoritative, so restore access as well as
+  // extending rows that are already active.
   await Promise.all([
     supabase
       .from("subscriptions")
-      .update({ current_period_start: newPeriodStart, current_period_end: newPeriodEnd })
+      .update({
+        status: "ACTIVE",
+        current_period_start: newPeriodStart,
+        current_period_end: newPeriodEnd,
+      })
       .eq("stripe_subscription_id", invoice.subscription)
-      .eq("status", "ACTIVE"),
+      .in("status", ["ACTIVE", "EXPIRED", "PAYMENT_FAILED"]),
 
     supabase
       .from("copy_account_entitlements")
-      .update({ current_period_start: newPeriodStart, current_period_end: newPeriodEnd })
+      .update({
+        status: "ACTIVE",
+        current_period_start: newPeriodStart,
+        current_period_end: newPeriodEnd,
+      })
       .eq("stripe_subscription_id", invoice.subscription)
-      .eq("status", "ACTIVE"),
+      .in("status", ["ACTIVE", "EXPIRED", "PAYMENT_FAILED"]),
   ]);
 }
 

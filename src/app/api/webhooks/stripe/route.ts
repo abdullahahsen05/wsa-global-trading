@@ -8,6 +8,7 @@ import {
   handleStripeSubscriptionUpdated,
   handleStripeChargeRefunded,
   expireStaleEntitlements,
+  getStripeInvoiceSubscriptionId,
 } from "@/lib/services/billingService";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -97,14 +98,14 @@ export async function POST(req: NextRequest) {
 
       case "invoice.paid":
         await handleStripeInvoicePaid({
-          subscription: (obj.subscription as string | null) ?? null,
+          subscription: getStripeInvoiceSubscriptionId(obj),
           lines: obj.lines as { data?: Array<{ period?: { start?: number; end?: number } }> },
         });
         processingStatus = "PROCESSED";
         break;
 
       case "invoice.payment_failed":
-        await handleStripeInvoicePaymentFailed((obj.subscription as string | null) ?? null);
+        await handleStripeInvoicePaymentFailed(getStripeInvoiceSubscriptionId(obj));
         processingStatus = "PROCESSED";
         break;
 

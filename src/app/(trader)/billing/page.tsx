@@ -14,6 +14,7 @@ import {
 } from "@/components/app/WorkspaceUI";
 import { formatMoney } from "@/lib/utils/format";
 import type { UserBillingSummaryDto } from "@/lib/services/billingService";
+import { PlatformSubscriptionCheckoutCTA } from "@/components/app/PlatformSubscriptionCheckoutCTA";
 
 const STATUS_TONE: Record<string, "lime" | "accent" | "muted" | "danger"> = {
   ACTIVE: "lime",
@@ -129,14 +130,20 @@ export default function BillingPage() {
               )}
               {platformSub.status === "EXPIRED" && (
                 <p className="mt-1 text-xs text-muted">
-                  Your subscription has expired. Go to the Dashboard to renew.
+                  Your subscription has expired. Renew to restore full access.
                 </p>
               )}
+              <div className="pt-2">
+                <PlatformSubscriptionCheckoutCTA access={platformSub} />
+              </div>
             </div>
           ) : (
-            <p className="text-sm text-muted">
-              No active platform subscription. You can subscribe from the Dashboard banner.
-            </p>
+            <div className="space-y-3">
+              <p className="text-sm text-muted">
+                No active platform subscription.
+              </p>
+              <PlatformSubscriptionCheckoutCTA access={platformSub} />
+            </div>
           )}
         </Panel>
 
