@@ -248,7 +248,7 @@ describe("deriveBotPurchaseAccess", () => {
 });
 
 describe("deriveMentorshipAccess", () => {
-  test("returns PENDING_APPROVAL after payment succeeds but before manual approval", () => {
+  test("returns ACTIVE as soon as mentorship payment succeeds", () => {
     const result = deriveMentorshipAccess({
       orders: [
         {
@@ -260,7 +260,7 @@ describe("deriveMentorshipAccess", () => {
       ],
     });
 
-    expect(result?.status).toBe("PENDING_APPROVAL");
+    expect(result?.status).toBe("ACTIVE");
   });
 
   test("returns ACTIVE when mentorship purchase was manually approved", () => {

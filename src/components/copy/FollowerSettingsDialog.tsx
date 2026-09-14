@@ -150,8 +150,8 @@ export function FollowerSettingsDialog(props: {
               <TextField label="Minimum lot" type="number" min="0.01" step="0.01" value={minLot} onChange={(event) => setMinLot(event.target.value)} />
               <TextField label="Maximum lot" type="number" min="0.01" step="0.01" value={maxLot} onChange={(event) => setMaxLot(event.target.value)} />
               <TextField label="Maximum open trades" type="number" min="1" step="1" value={maxOpenTrades} onChange={(event) => setMaxOpenTrades(event.target.value)} />
-              <TextField label="Maximum daily loss %" type="number" min="0.01" max="100" step="0.1" value={maxDailyLoss} onChange={(event) => setMaxDailyLoss(event.target.value)} />
-              <TextField label="Maximum drawdown %" type="number" min="0.01" max="100" step="0.1" value={maxDrawdown} onChange={(event) => setMaxDrawdown(event.target.value)} />
+              <TextField label="Maximum daily loss %" type="number" min="1" max="100" step="1" value={maxDailyLoss} onChange={(event) => setMaxDailyLoss(event.target.value)} />
+              <TextField label="Maximum drawdown %" type="number" min="1" max="100" step="1" value={maxDrawdown} onChange={(event) => setMaxDrawdown(event.target.value)} />
               <label className="flex items-center gap-2 self-end rounded-[4px] border border-line px-3 py-3 text-sm text-foreground">
                 <input type="checkbox" checked={reverseCopy} onChange={(event) => setReverseCopy(event.target.checked)} />
                 Reverse BUY / SELL

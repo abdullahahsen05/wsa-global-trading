@@ -56,6 +56,38 @@ const textareaCls = "min-h-24 w-full rounded-[4px] border border-line bg-backgro
 const selectCls = "h-10 w-full rounded-[4px] border border-line bg-background px-3 text-sm text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10";
 const labelCls = "block text-xs font-semibold uppercase tracking-[0.18em] text-muted mb-1.5";
 
+function CreateModuleDialog({ courses, onCreated }: { courses: AcademyCourseDto[]; onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [courseId, setCourseId] = useState("");
+  const [title, setTitle] = useState("");
+  const [error, setError] = useState("");
+  const mutation = useMutation({
+    mutationFn: () => apiFetch("/api/admin/academy/modules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ courseId, title: title.trim(), status: "PUBLISHED" }),
+    }),
+    onSuccess: () => { setOpen(false); setCourseId(""); setTitle(""); onCreated(); },
+    onError: (cause: Error) => setError(cause.message),
+  });
+  return <Dialog.Root open={open} onOpenChange={setOpen}>
+    <Dialog.Trigger asChild><GhostButton type="button"><Plus className="mr-1 inline-block h-4 w-4" />New module</GhostButton></Dialog.Trigger>
+    <Dialog.Portal>
+      <Dialog.Overlay className="fixed inset-0 z-40 bg-black/70" />
+      <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-6">
+        <Dialog.Title className="text-lg font-semibold text-foreground">Add course module</Dialog.Title>
+        <Dialog.Description className="mt-2 text-sm text-muted">A module groups lessons. Add it first, then attach a video lesson.</Dialog.Description>
+        <form className="mt-5 space-y-4" onSubmit={(event) => { event.preventDefault(); setError(""); mutation.mutate(); }}>
+          <div><label className={labelCls}>Course</label><select className={selectCls} value={courseId} onChange={(event) => setCourseId(event.target.value)} required><option value="">Select course…</option>{courses.map((course) => <option key={course.id} value={course.id}>{course.title}</option>)}</select></div>
+          <div><label className={labelCls}>Module title</label><input className={fieldCls} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Getting started" required /></div>
+          {error ? <p className="text-xs text-danger">{error}</p> : null}
+          <div className="flex justify-end gap-2"><GhostButton type="button" onClick={() => setOpen(false)}>Cancel</GhostButton><PrimaryButton type="submit" disabled={mutation.isPending}>{mutation.isPending ? "Creating…" : "Create module"}</PrimaryButton></div>
+        </form>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>;
+}
+
 // ── Create Course Dialog ──────────────────────────────────────
 function CreateCourseDialog({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
@@ -281,6 +313,7 @@ function CreateLessonDialog({ courses, onCreated }: { courses: AcademyCourseDto[
             <div>
               <label className={labelCls}>Video URL</label>
               <input type="url" value={form.videoUrl} onChange={(e) => setForm((f) => ({ ...f, videoUrl: e.target.value }))} placeholder="https://youtube.com/watch?v=…" className={fieldCls} />
+              <p className="mt-1 text-xs text-muted">Public or unlisted video links work here. Keep private video links accessible to enrolled traders.</p>
             </div>
             <div>
               <label className={labelCls}>Embed URL</label>
@@ -464,6 +497,7 @@ export default function AdminAcademyPage() {
       action={
         <PageActionGroup>
           {tab === "courses" && <CreateCourseDialog onCreated={refresh} />}
+          {tab === "lessons" && <CreateModuleDialog courses={courses} onCreated={refresh} />}
           {tab === "lessons" && <CreateLessonDialog courses={courses} onCreated={refresh} />}
           {tab === "webinars" && <CreateWebinarDialog courses={courses} onCreated={refresh} />}
         </PageActionGroup>
@@ -513,6 +547,7 @@ export default function AdminAcademyPage() {
         {/* Lessons */}
         {tab === "lessons" && (
           <div className="space-y-4">
+            <p className="text-sm text-muted">Create a module, then add a lesson with a video URL or embeddable link. Lesson starts and completions appear in Trader progress.</p>
             <Panel>
               <label className={labelCls}>Filter by course</label>
               <select value={selectedCourseId} onChange={(e) => setSelectedCourseId(e.target.value)} className={selectCls}>

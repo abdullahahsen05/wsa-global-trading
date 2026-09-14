@@ -26,6 +26,7 @@ import {
 } from "@/components/app/WorkspaceUI";
 import { AccountCombobox } from "@/components/copy/AccountCombobox";
 import { CopyExecutionLog } from "@/components/copy/CopyExecutionLog";
+import { FollowerSettingsDialog } from "@/components/copy/FollowerSettingsDialog";
 import { SelfCopyPanel, type SelfCopyResponse } from "@/components/copy/SelfCopyPanel";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 import type { CopyFollowerDto, CopyLogDto } from "@/lib/copy/types";
@@ -79,7 +80,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
   const queryClient = useQueryClient();
   const [view, setView] = useState<CopyView>("STRATEGIES");
   const [accountByStrategy, setAccountByStrategy] = useState<Record<string, string>>({});
-  const [tierByStrategy, setTierByStrategy] = useState<Record<string, "NORMAL" | "PREMIUM">>({});
+  const [settingsSubscription, setSettingsSubscription] = useState<CopyFollowerDto | null>(null);
   const [expandedStrategyId, setExpandedStrategyId] = useState<string | null>(null);
   const [strategySearch, setStrategySearch] = useState("");
   const [strategyPage, setStrategyPage] = useState(1);
@@ -260,10 +261,6 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
           </div>
         </div>
 
-        <div className="my-5 flex items-center gap-3 border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          <p>Live copying can place, change, and close real orders on connected accounts. Review lot sizing and risk limits before activating a route.</p>
-        </div>
         {notice ? (
           <div className={`mb-5 rounded-[4px] border px-4 py-3 text-sm ${notice.tone === "ok" ? "border-lime/30 bg-lime/10 text-lime" : "border-danger/30 bg-danger/10 text-danger"}`}>
             {notice.text}
@@ -275,7 +272,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line px-5 py-5">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Available live strategies</h2>
-                <p className="mt-1 text-sm text-muted">Choose a strategy, speed tier, and connected follower account.</p>
+                <p className="mt-1 text-sm text-muted">Choose a strategy and the connected account that will copy it. Every connection uses immediate dispatch.</p>
               </div>
               <div className="relative w-full sm:w-96">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -299,7 +296,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
                 <div className="divide-y divide-line">
                   {visibleStrategies.map((strategy) => {
                     const accountId = accountByStrategy[strategy.id] ?? connectedAccounts[0]?.accountId ?? "";
-                    const tier = tierByStrategy[strategy.id] ?? "NORMAL";
+                    const tier = "NORMAL" as const;
                     const access = entitlementMap.get(`${strategy.id}:${accountId}`);
                     const activeFollower = subscriptions.find(
                       (subscription) => subscription.strategyId === strategy.id
@@ -318,14 +315,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
                             </div>
                             <p className="mt-1 line-clamp-1 text-sm text-muted">{strategy.description || "Live WSA strategy."}</p>
                           </div>
-                          <div className="flex flex-wrap gap-2 lg:justify-end">
-                            <StatusPill tone="muted">
-                              Standard {formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })}
-                            </StatusPill>
-                            <StatusPill tone="accent">
-                              Fast {formatMoney({ amount: strategy.premiumMonthlyPrice, currency: strategy.currency })}
-                            </StatusPill>
-                          </div>
+                          <div className="flex flex-wrap gap-2 lg:justify-end"><StatusPill tone="accent">{formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} / month</StatusPill></div>
                           <GhostButton
                             type="button"
                             aria-expanded={expanded}
@@ -337,27 +327,9 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
 
                         {expanded ? (
                           <div className="mt-4 grid gap-5 border-t border-line pt-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(300px,1.2fr)]">
-                            <div className="grid grid-cols-2 border border-line bg-background">
-                              {(["NORMAL", "PREMIUM"] as const).map((option, index) => {
-                                const premium = option === "PREMIUM";
-                                const selected = tier === option;
-                                return (
-                                  <button
-                                    key={option}
-                                    type="button"
-                                    onClick={() => setTierByStrategy((current) => ({ ...current, [strategy.id]: option }))}
-                                    className={`p-4 text-left transition-colors ${index === 0 ? "border-r border-line" : ""} ${selected ? "bg-accent/10" : "hover:bg-panel-strong/50"}`}
-                                  >
-                                    <p className="text-[10px] uppercase tracking-widest text-muted">{premium ? "Premium / Fast" : "Standard"}</p>
-                                    <p className="mt-1 font-semibold text-foreground">
-                                      {formatMoney({ amount: premium ? strategy.premiumMonthlyPrice : strategy.standardMonthlyPrice, currency: strategy.currency })} / month
-                                    </p>
-                                    <p className="mt-1 text-xs text-muted">
-                                      {premium ? `${strategy.premiumDelayMs} ms` : `${strategy.standardDelayMs / 1000}s`} dispatch target
-                                    </p>
-                                  </button>
-                                );
-                              })}
+                            <div className="rounded-[4px] border border-line bg-background p-4">
+                              <p className="font-semibold text-foreground">One live connection</p>
+                              <p className="mt-1 text-sm text-muted">{formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} / month. New trades are dispatched as soon as the platform receives them.</p>
                             </div>
                             <div className="space-y-4">
                               <AccountCombobox
@@ -373,7 +345,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
                                 ) : activeFollower ? (
                                   <>
                                     <StatusPill tone={engineTone(activeFollower.engineStatus)}>{activeFollower.engineStatus}</StatusPill>
-                                    <StatusPill tone={activeFollower.tier === "PREMIUM" ? "accent" : "muted"}>{activeFollower.tier}</StatusPill>
+                                    <GhostButton type="button" onClick={() => setSettingsSubscription(activeFollower)}>Copy settings</GhostButton>
                                     {activeFollower.status === "ACTIVE" ? (
                                       <GhostButton type="button" onClick={() => updateMutation.mutate({ id: activeFollower.id, status: "PAUSED" })}>Pause new trades</GhostButton>
                                     ) : (
@@ -395,7 +367,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
                                   </PrimaryButton>
                                 ) : (
                                   <PrimaryButton type="button" onClick={() => setCheckout({ strategy, accountId, tier })}>
-                                    Subscribe {tier === "PREMIUM" ? "Premium" : "Standard"}
+                                    Subscribe
                                   </PrimaryButton>
                                 )}
                               </div>
@@ -459,7 +431,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
             </div>
             {filteredConnections.length ? (
               <DataTable
-                headers={["Strategy", "Follower account", "Speed", "Subscription", "Engine", "Last sync", "Action"]}
+                headers={["Strategy", "Follower account", "Subscription", "Connection", "Last sync", "Action"]}
                 initialPageSize={20}
                 pageSizeOptions={[20, 50, 100]}
                 maxBodyHeight="620px"
@@ -469,13 +441,13 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
                     {subscription.engineError ? <p className="mt-1 max-w-xs text-xs text-danger">{subscription.engineError}</p> : null}
                   </div>,
                   <span key="account" className="font-semibold text-foreground">{subscription.followerAccountName ?? "Connected account"}</span>,
-                  <StatusPill key="tier" tone={subscription.tier === "PREMIUM" ? "accent" : "muted"}>{subscription.tier}</StatusPill>,
                   <StatusPill key="status" tone={followerTone(subscription.status)}>{subscription.status}</StatusPill>,
                   <StatusPill key="engine" tone={engineTone(subscription.engineStatus)}>{subscription.engineStatus}</StatusPill>,
                   <span key="sync" className="whitespace-nowrap text-xs text-muted">
                     {subscription.engineSyncedAt ? new Date(subscription.engineSyncedAt).toLocaleString() : "Pending"}
                   </span>,
                   <div key="action" className="flex justify-end gap-2">
+                    <GhostButton type="button" onClick={() => setSettingsSubscription(subscription)}>Settings</GhostButton>
                     {subscription.status === "ACTIVE" ? (
                       <GhostButton type="button" onClick={() => updateMutation.mutate({ id: subscription.id, status: "PAUSED" })}>Pause</GhostButton>
                     ) : (
@@ -503,6 +475,10 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
 
         {view === "SELF_COPY" ? <SelfCopyPanel accounts={accounts} /> : null}
         {view === "ACTIVITY" ? <CopyExecutionLog logs={copyLogs} loading={copyLogsLoading} /> : null}
+        <div className="mt-8 flex items-start gap-3 rounded-[4px] border border-danger/25 bg-danger/5 px-4 py-3 text-sm text-muted">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
+          <p>Live copying can place, change, and close real orders on connected accounts. Review lot sizing and risk limits before activating a route.</p>
+        </div>
       </WorkspacePage>
 
       {checkout ? (
@@ -510,17 +486,19 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
           open
           onClose={() => setCheckout(null)}
           product={{
-            code: checkout.tier === "PREMIUM" ? checkout.strategy.premiumBillingProductCode : checkout.strategy.standardBillingProductCode,
-            name: `${checkout.strategy.name} · ${checkout.tier === "PREMIUM" ? "Premium / Fast" : "Standard"}`,
-            amount: checkout.tier === "PREMIUM" ? checkout.strategy.premiumMonthlyPrice : checkout.strategy.standardMonthlyPrice,
+            code: checkout.strategy.standardBillingProductCode,
+            name: checkout.strategy.name,
+            amount: checkout.strategy.standardMonthlyPrice,
             currency: checkout.strategy.currency,
             billingInterval: "MONTHLY",
-            description: `Monthly ${checkout.tier === "PREMIUM" ? "premium fast" : "standard"} live copy access for ${checkout.strategy.name} on the selected account.`,
+            description: `Monthly live copy access for ${checkout.strategy.name} on the selected account.`,
           }}
           tradingAccountId={checkout.accountId}
           copyStrategyId={checkout.strategy.id}
         />
       ) : null}
+
+      <FollowerSettingsDialog subscription={settingsSubscription} onClose={() => setSettingsSubscription(null)} onSaved={refresh} />
 
       {follow ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4">

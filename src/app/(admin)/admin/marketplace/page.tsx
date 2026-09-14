@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, Upload, X } from "lucide-react";
+import { Plus, Trash2, Upload, X } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   DataTable,
@@ -86,6 +86,7 @@ const BLANK_PRODUCT = {
 export default function AdminMarketplacePage() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"products" | "access" | "licenses">("products");
+  const [showRemovedProducts, setShowRemovedProducts] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [uploadProduct, setUploadProduct] = useState<BotProductDto | null>(null);
   const [form, setForm] = useState(BLANK_PRODUCT);
@@ -313,14 +314,18 @@ export default function AdminMarketplacePage() {
       {/* Products tab */}
       {tab === "products" ? (
         <div className="mt-4">
+          <label className="mb-3 flex items-center gap-2 text-sm text-muted">
+            <input type="checkbox" checked={showRemovedProducts} onChange={(event) => setShowRemovedProducts(event.target.checked)} />
+            Show removed products
+          </label>
           {productsLoading ? (
             <div className="h-32 animate-pulse rounded-[4px] bg-panel" />
-          ) : products.length === 0 ? (
+          ) : products.filter((product) => showRemovedProducts || product.status !== "ARCHIVED").length === 0 ? (
             <EmptyState title="No products yet" description="Create your first bot product." />
           ) : (
             <DataTable
               headers={["Name", "Platform", "Status", "Version", "Actions"]}
-              rows={products.map((p) => [
+              rows={products.filter((product) => showRemovedProducts || product.status !== "ARCHIVED").map((p) => [
                 p.name,
                 p.platform,
                 <StatusPill key="s" tone={PRODUCT_STATUS_TONE[p.status] ?? "muted"}>{p.status}</StatusPill>,
@@ -339,14 +344,11 @@ export default function AdminMarketplacePage() {
                       Publish
                     </GhostButton>
                   ) : (
-                    <GhostButton
-                      type="button"
-                      onClick={() => publishMutation.mutate({ id: p.id, status: "ARCHIVED" })}
-                      disabled={publishMutation.isPending}
-                    >
-                      Archive
-                    </GhostButton>
+                    null
                   )}
+                  {p.status !== "ARCHIVED" ? <GhostButton type="button" aria-label={`Remove ${p.name} from the marketplace`} onClick={() => {
+                    if (window.confirm(`Remove ${p.name} from the marketplace? Existing customer access will be kept.`)) publishMutation.mutate({ id: p.id, status: "ARCHIVED" });
+                  }} disabled={publishMutation.isPending}><Trash2 className="h-3.5 w-3.5" /></GhostButton> : null}
                 </div>,
               ])}
             />
@@ -619,7 +621,7 @@ export default function AdminMarketplacePage() {
                   maxLength={100}
                   value={form.pricingLabel}
                   onChange={(e) => setForm((f) => ({ ...f, pricingLabel: e.target.value }))}
-                  placeholder="e.g. Free, $99/mo, Contact us"
+                  placeholder="e.g. $99 one-time, Free, Contact us"
                   className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
                 />
               </div>

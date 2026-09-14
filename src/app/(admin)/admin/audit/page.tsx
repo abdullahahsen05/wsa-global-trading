@@ -31,11 +31,12 @@ type AuditRecord = {
 };
 
 function toAuditRecord(raw: ApiAuditRecord): AuditRecord {
+  const readable = (value: string) => value.toLowerCase().split("_").map((word) => word ? word[0].toUpperCase() + word.slice(1) : "").join(" ");
   return {
     id: raw.id,
     actor: raw.actor_user_id ?? "System",
-    action: raw.action,
-    entity: raw.entity_type,
+    action: readable(raw.action),
+    entity: readable(raw.entity_type),
     entityId: raw.entity_id ?? "—",
     createdAt: raw.created_at,
   };
@@ -63,7 +64,7 @@ export default function AdminAuditPage() {
     <WorkspacePage
       eyebrow="Admin"
       title="Audit log"
-      description="A quiet audit shell with search and paging moved into an overlay for high-volume review."
+      description="Review who changed platform records and when. Open an event for its record reference."
       action={
         <GhostButton type="button" onClick={() => setSearchOpen(true)}>
           <Search className="mr-2 inline-block h-4 w-4" />
@@ -73,8 +74,8 @@ export default function AdminAuditPage() {
     >
       <InlineStatusStrip
         items={[
-          { label: "Events today", value: isLoading ? "..." : logs.length },
-          { label: "Retention", value: "365 days", helper: "Production policy target" },
+          { label: "Events today", value: isLoading ? "..." : logs.filter((log) => new Date(log.createdAt).toDateString() === new Date().toDateString()).length },
+          { label: "Loaded events", value: isLoading ? "..." : logs.length },
         ]}
       />
 
@@ -86,6 +87,7 @@ export default function AdminAuditPage() {
             <p className="mt-1 text-sm text-muted">
               {selectedLog.actor} - {selectedLog.entity}
             </p>
+            <p className="mt-1 text-xs text-muted">{new Date(selectedLog.createdAt).toLocaleString()}</p>
 
             <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">

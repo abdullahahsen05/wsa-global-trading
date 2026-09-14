@@ -189,7 +189,14 @@ export async function evaluateAndEnforceRiskValues(params: {
   const rules = await loadEnabledRules(params.accountId);
   const balance = Number(params.values.balance || 0);
   const equity = Number(params.values.equity || 0);
-  const drawdownPercent = balance > 0 ? Math.max(0, ((balance - equity) / balance) * 100) : 0;
+  const { data: peakRow, error: peakError } = await supabase
+    .from("trading_accounts")
+    .select("equity_peak")
+    .eq("id", account.id)
+    .maybeSingle();
+  if (peakError) throw new Error(`Account drawdown could not be loaded: ${peakError.message}`);
+  const peakEquity = Math.max(Number(peakRow?.equity_peak ?? equity), equity);
+  const drawdownPercent = peakEquity > 0 ? Math.max(0, ((peakEquity - equity) / peakEquity) * 100) : 0;
   const accountInput = buildAccountInput(
     account.id,
     account.account_name,
@@ -331,7 +338,12 @@ export async function evaluateAndPersistRiskEvents(
   if (snapshotError) throw new Error(`Live risk data could not be loaded: ${snapshotError.message}`);
   if (closedError) throw new Error(`Daily P&L could not be loaded: ${closedError.message}`);
   if (openResult.error) throw new Error(`Open trade count could not be loaded: ${openResult.error.message}`);
-  const snapshot = snapshots?.[0] ?? { balance: 0, equity: 0 };
+  const snapshot = snapshots?.[0];
+  if (!snapshot) {
+    // Missing market data is not a 100% loss. Wait for a real broker value
+    // before changing any risk state or creating an event.
+    return { accountId, blockedNewTrades: false, restricted: false, breachedRuleNames: [], evaluatedAt: new Date().toISOString() };
+  }
   return evaluateAndEnforceRiskValues({
     accountId,
     actorUserId,

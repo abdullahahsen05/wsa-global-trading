@@ -155,7 +155,7 @@ export default function BillingPage() {
                 >
                   <div>
                     <p className="text-sm font-semibold text-foreground">
-                      {e.tier === "PREMIUM" ? "Ultra Fast" : "Normal"} tier
+                      Copy trading access
                     </p>
                     {e.currentPeriodEnd && (
                       <p className="text-xs text-muted">

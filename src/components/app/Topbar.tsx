@@ -38,9 +38,11 @@ function notificationTone(type: string | null): "danger" | "lime" | "accent" {
 
 export function Topbar({
   role,
+  userId,
   onOpenMobileNav,
 }: {
   role: UserRole;
+  userId: string;
   onOpenMobileNav: () => void;
 }) {
   const pathname = usePathname();
@@ -50,14 +52,14 @@ export function Topbar({
   const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
 
   const { data: tradingAccounts = [] } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts", role],
+    queryKey: ["trading-accounts", role, userId],
     queryFn: async () => {
-      const res = await fetch("/api/trading-accounts");
+      const res = await fetch("/api/trading-accounts", { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) return [];
       return json.data;
     },
-    enabled: role === "TRADER",
+    enabled: role === "TRADER" && Boolean(userId),
     staleTime: 15_000,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,

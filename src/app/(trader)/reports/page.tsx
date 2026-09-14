@@ -11,7 +11,6 @@ import {
   WorkspacePage,
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
-import { resolveLiveSelectedAccountId } from "@/lib/accounts/lifecycle";
 import type { AnalyticsSummary, TradeDto, TraderAccountSummary } from "@/lib/domain/types";
 import { formatMoney, formatPrice } from "@/lib/utils/format";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
@@ -69,7 +68,7 @@ export default function ReportsPage() {
 }
 
 function ReportsContent() {
-  const { selectedAccountId } = useTradingAccountSelection();
+  const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
   const { data: accounts = [] } = useQuery<TraderAccountSummary[]>({
     queryKey: ["trading-accounts", "TRADER"],
     queryFn: async () => {
@@ -84,7 +83,10 @@ function ReportsContent() {
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
-  const effectiveAccountId = resolveLiveSelectedAccountId(accounts, selectedAccountId);
+  const effectiveAccountId = accounts.find((account) => account.accountId === selectedAccountId)?.accountId
+    ?? accounts.find((account) => account.status === "CONNECTED")?.accountId
+    ?? accounts[0]?.accountId
+    ?? null;
   const activeAccount = accounts.find((account) => account.accountId === effectiveAccountId);
   const accountCurrency = activeAccount?.equity.currency ?? activeAccount?.balance.currency ?? "USD";
 
@@ -305,6 +307,15 @@ function ReportsContent() {
           { label: "Export format", value: "CSV / PDF", helper: "Branded direct download" },
         ]}
       />
+
+      <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
+        <label htmlFor="report-account" className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-muted">Report account</label>
+        <select id="report-account" value={effectiveAccountId ?? ""} onChange={(event) => setSelectedAccountId(event.target.value)} className="h-10 w-full max-w-sm rounded-[4px] border border-line bg-background px-3 text-sm text-foreground focus:border-accent">
+          {accounts.length === 0 ? <option value="">No accounts yet</option> : null}
+          {accounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName} · {account.brokerName}{account.status !== "CONNECTED" ? ` (${account.status.toLowerCase()})` : ""}</option>)}
+        </select>
+        <p className="mt-2 text-xs text-muted">Reports use the selected account&apos;s latest known equity and closed-trade ledger, including disconnected accounts with history.</p>
+      </div>
 
       <div className="mt-5">
         {reports.length === 0 ? (

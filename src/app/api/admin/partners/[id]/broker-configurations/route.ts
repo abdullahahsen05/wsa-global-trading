@@ -19,12 +19,31 @@ function normalizeBrokerName(value: string | null | undefined): string {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
     const admin = await requireAdmin();
     const { id } = await context.params;
+    if (new URL(request.url).searchParams.has("search")) {
+      const query = new URL(request.url).searchParams.get("search")?.trim().slice(0, 80) ?? "";
+      const discovered = await searchApi2TradeBrokers({
+        query,
+        platform: "MT5",
+        userId: admin.id,
+        role: admin.role,
+      });
+      return jsonOk({
+        brokers: discovered.brokers.map((broker) => ({
+          id: `broker-name:${broker.name}`,
+          name: broker.name,
+          display_name: broker.name,
+          is_active: true,
+          logoUrl: broker.logoUrl,
+        })),
+        configurations: [],
+      });
+    }
     const supabase = createAdminClient();
     const [accountBrokerResult, configurations] = await Promise.all([
       supabase

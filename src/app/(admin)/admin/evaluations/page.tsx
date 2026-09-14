@@ -111,7 +111,7 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
             <Dialog.Close className="rounded-[4px] p-1 text-muted hover:text-foreground"><X className="h-4 w-4" /></Dialog.Close>
           </div>
           <form onSubmit={(e: FormEvent) => { e.preventDefault(); setErr(""); mutation.mutate(); }} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className={labelCls}>Name</label>
                 <input className={fieldCls} value={form.name} onChange={set("name")} placeholder="WSA Global Funded Trader" required />
@@ -132,7 +132,7 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
                 {courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div><label className={labelCls}>Starting Balance (USD)</label><input type="number" className={numCls} value={form.startingBalance} onChange={set("startingBalance")} min="100" required /></div>
               <div><label className={labelCls}>Profit Target (%)</label><input type="number" className={numCls} value={form.profitTargetPercent} onChange={set("profitTargetPercent")} min="0.1" max="100" step="0.1" required /></div>
               <div><label className={labelCls}>Max Daily DD (%)</label><input type="number" className={numCls} value={form.maxDailyDrawdownPercent} onChange={set("maxDailyDrawdownPercent")} min="0.1" max="100" step="0.1" required /></div>
@@ -142,7 +142,7 @@ function CreateProgramDialog({ courses, onCreated }: { courses: AcademyCourseDto
             </div>
             <div className="rounded-2xl border border-line bg-background p-4">
               <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-accent">Demo account requirements</p>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div><label className={labelCls}>Server name</label><input className={fieldCls} value={form.demoServerName} onChange={set("demoServerName")} placeholder="Broker-Demo" /></div>
                 <div><label className={labelCls}>Account type</label><input className={fieldCls} value={form.demoAccountType} onChange={set("demoAccountType")} placeholder="Forex Hedged USD" /></div>
                 <div><label className={labelCls}>Leverage</label><input type="number" className={numCls} value={form.demoLeverage} onChange={set("demoLeverage")} min="1" max="5000" /></div>

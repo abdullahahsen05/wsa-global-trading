@@ -125,16 +125,11 @@ async function openRiskStream(accountRow: RiskAccount): Promise<StreamHandle> {
     const now = Date.now();
     if (now - lastSnapshotAt < snapshotMs) return;
     lastSnapshotAt = now;
-    const drawdown = values.balance > 0
-      ? Math.max(0, ((values.balance - values.equity) / values.balance) * 100)
-      : 0;
     const supabase = createAdminClient();
-    const { error } = await supabase.from("account_snapshots").insert({
-      trading_account_id: accountRow.id,
-      balance: values.balance,
-      equity: values.equity,
-      floating_pnl: values.equity - values.balance,
-      drawdown_percent: drawdown,
+    const { error } = await supabase.rpc("record_account_snapshot", {
+      p_account_id: accountRow.id,
+      p_balance: values.balance,
+      p_equity: values.equity,
     });
     if (error) {
       console.error(`[risk-worker] snapshot failed for ${accountRow.id}: ${error.message}`);
@@ -582,13 +577,12 @@ async function reconcileApi2TradeRiskAccounts() {
     if (hasExecutionPriority(accountRow.id)) continue;
     try {
       const snapshot = await adapter.fetchSnapshot(accountRow.id);
-      await supabase.from("account_snapshots").insert({
-        trading_account_id: accountRow.id,
-        balance: snapshot.balance.amount,
-        equity: snapshot.equity.amount,
-        floating_pnl: snapshot.floatingPnl.amount,
-        drawdown_percent: snapshot.drawdownPercent,
+      const { error: snapshotError } = await supabase.rpc("record_account_snapshot", {
+        p_account_id: accountRow.id,
+        p_balance: snapshot.balance.amount,
+        p_equity: snapshot.equity.amount,
       });
+      if (snapshotError) throw snapshotError;
       await supabase
         .from("trading_accounts")
         .update({ last_synced_at: new Date().toISOString(), sync_error: null })

@@ -148,8 +148,8 @@ export function AiProviderSettingsPanel() {
                         : "No database key saved")}
                     </p>
                   </div>
-                  <StatusPill tone={provider.status === "VALID" ? "lime" : provider.status === "INVALID" ? "danger" : undefined}>
-                    {provider.isActive ? "ACTIVE" : provider.status.replaceAll("_", " ")}
+                  <StatusPill tone={provider.status === "VALID" || provider.environmentFallbackAvailable ? "lime" : provider.status === "INVALID" ? "danger" : undefined}>
+                    {provider.isActive ? "ACTIVE" : provider.environmentFallbackAvailable ? "AVAILABLE VIA ENVIRONMENT" : provider.status.replaceAll("_", " ")}
                   </StatusPill>
                 </div>
 

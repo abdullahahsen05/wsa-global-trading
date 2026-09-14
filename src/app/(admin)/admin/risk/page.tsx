@@ -19,7 +19,7 @@ import type {
   RiskEventDto,
   RiskRuleAction,
   RiskRuleDto,
-  TraderAccountSummary,
+  AdminTradingAccountSummary,
 } from "@/lib/domain/types";
 
 type RuleDraft = {
@@ -50,6 +50,7 @@ export default function AdminRiskPage() {
   const [allEventsOpen, setAllEventsOpen] = useState(false);
   const [acknowledgingEventId, setAcknowledgingEventId] = useState<string | null>(null);
   const [draft, setDraft] = useState<RuleDraft>(EMPTY_DRAFT);
+  const [selectedTraderId, setSelectedTraderId] = useState("");
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -72,16 +73,22 @@ export default function AdminRiskPage() {
       return json.data;
     },
   });
-  const { data: tradingAccounts = [] } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts"],
+  const { data: tradingAccounts = [] } = useQuery<AdminTradingAccountSummary[]>({
+    queryKey: ["admin-accounts"],
     queryFn: async () => {
-      const response = await fetch("/api/trading-accounts");
+      const response = await fetch("/api/admin/accounts");
       const json = await response.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
       return json.data;
     },
   });
   const recentRiskEvents = riskEvents.slice(0, 3);
+  const traders = [...new Map(tradingAccounts.map((account) => [account.traderId, {
+    id: account.traderId,
+    name: account.traderName,
+    email: account.traderEmail,
+  }])).values()].sort((left, right) => left.name.localeCompare(right.name));
+  const selectedTraderAccounts = tradingAccounts.filter((account) => account.traderId === selectedTraderId);
   const accountNames = new Map(
     tradingAccounts.map((account) => [account.accountId, account.accountName]),
   );
@@ -89,6 +96,7 @@ export default function AdminRiskPage() {
   const startCreate = () => {
     setEditingRuleId(null);
     setDraft(EMPTY_DRAFT);
+    setSelectedTraderId("");
     setMessage("");
     setErrorMessage("");
     document.getElementById("risk-rule-form")?.scrollIntoView({ behavior: "smooth" });
@@ -96,6 +104,7 @@ export default function AdminRiskPage() {
 
   const startEdit = (rule: RiskRuleDto) => {
     setEditingRuleId(rule.id);
+    setSelectedTraderId(tradingAccounts.find((account) => account.accountId === rule.accountId)?.traderId ?? "");
     setDraft({
       name: rule.name,
       metric: rule.metric,
@@ -434,20 +443,19 @@ export default function AdminRiskPage() {
                 <option value="ACCOUNT">One account</option>
               </SelectField>
               {draft.scope === "ACCOUNT" ? (
-                <SelectField
-                  label="Trading account"
-                  value={draft.accountId}
-                  disabled={Boolean(editingRuleId)}
-                  onChange={(event) => setDraft((current) => ({ ...current, accountId: event.target.value }))}
-                  required
-                >
-                  <option value="">Select an account</option>
-                  {tradingAccounts.map((account) => (
-                    <option key={account.accountId} value={account.accountId}>
-                      {account.accountName} · {account.brokerName}
-                    </option>
-                  ))}
-                </SelectField>
+                <>
+                  <SelectField label="Trader" value={selectedTraderId} disabled={Boolean(editingRuleId)} onChange={(event) => {
+                    setSelectedTraderId(event.target.value);
+                    setDraft((current) => ({ ...current, accountId: "" }));
+                  }} required>
+                    <option value="">Select a trader</option>
+                    {traders.map((trader) => <option key={trader.id} value={trader.id}>{trader.name} · {trader.email}</option>)}
+                  </SelectField>
+                  <SelectField label="Trading account" value={draft.accountId} disabled={Boolean(editingRuleId) || !selectedTraderId} onChange={(event) => setDraft((current) => ({ ...current, accountId: event.target.value }))} required>
+                    <option value="">Select this trader&apos;s account</option>
+                    {selectedTraderAccounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName} · {account.brokerName}</option>)}
+                  </SelectField>
+                </>
               ) : null}
               {editingRuleId ? (
                 <SelectField

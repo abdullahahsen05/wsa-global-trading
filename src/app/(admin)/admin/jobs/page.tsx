@@ -35,6 +35,22 @@ const STATUS_TONE: Record<JobStatus, "lime" | "accent" | "danger" | "muted"> = {
   SKIPPED: "muted",
 };
 
+const JOB_LABELS: Record<BackgroundJob["type"], string> = {
+  SYNC_ACCOUNT: "Sync trading account",
+  SYNC_ALL_CONNECTED_ACCOUNTS: "Sync all connected accounts",
+  MONITOR_COPY_STRATEGY: "Monitor copy strategy",
+  MONITOR_ALL_ACTIVE_COPY_STRATEGIES: "Monitor active copy strategies",
+  SIMULATE_COPY_EVENT: "Preview copy event",
+  SIMULATE_COPY_STRATEGY: "Preview copy strategy",
+  EXECUTE_COPY_EVENT: "Execute copy event",
+  CLOSE_COPY_STRATEGY: "Close copy strategy trades",
+  RETRY_COPY_LOG: "Retry copy execution",
+  CLEANUP_STALE_JOBS: "Recover stalled jobs",
+  SYNC_EVALUATION_ACCOUNT: "Sync evaluation account",
+  CHECK_EVALUATION_ATTEMPT: "Check evaluation attempt",
+  CHECK_ALL_ACTIVE_EVALUATIONS: "Check all active evaluations",
+};
+
 type StatusFilter = "ALL" | JobStatus;
 type JobAction = "QUEUE_SYNC" | "QUEUE_MONITOR" | "RUN_WORKER" | "RETRY" | "CANCEL";
 
@@ -189,7 +205,7 @@ export default function AdminJobsPage() {
             <DataTable
               headers={["Type", "Status", "Attempts", "Created", "Last error", ""]}
               rows={jobs.map((j) => [
-                <span key="t" className="text-sm font-semibold text-foreground">{j.type}</span>,
+                <span key="t" className="text-sm font-semibold text-foreground">{JOB_LABELS[j.type]}</span>,
                 <StatusPill key="s" tone={STATUS_TONE[j.status]}>{j.status}</StatusPill>,
                 <span key="a">{j.attempts}/{j.maxAttempts}</span>,
                 <span key="c">{new Date(j.createdAt).toLocaleString()}</span>,
@@ -229,7 +245,7 @@ export default function AdminJobsPage() {
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
           <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[90vh] w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 invisible-scrollbar overflow-y-auto rounded-[6px] border border-line bg-panel p-6 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none">
-            <Dialog.Title className="text-xl font-semibold text-foreground">{detail?.type ?? "Job details"}</Dialog.Title>
+            <Dialog.Title className="text-xl font-semibold text-foreground">{detail ? JOB_LABELS[detail.type] : "Job details"}</Dialog.Title>
             <Dialog.Description className="mt-1 text-sm text-muted">Job {detailId}</Dialog.Description>
             {detailQuery.isLoading ? (
               <p className="mt-4 text-sm text-muted">Loading current job state...</p>
@@ -245,14 +261,11 @@ export default function AdminJobsPage() {
                 <Row label="Started" value={detail.startedAt ? new Date(detail.startedAt).toLocaleString() : "—"} />
                 <Row label="Completed" value={detail.completedAt ? new Date(detail.completedAt).toLocaleString() : "—"} />
                 {detail.lastErrorCode ? <Row label="Error" value={`${detail.lastErrorCode}: ${detail.lastErrorMessage ?? ""}`} /> : null}
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Payload</p>
-                  <pre className="mt-1 invisible-scrollbar overflow-x-auto rounded-[4px] border border-line bg-background p-3 text-xs text-foreground/80">{JSON.stringify(detail.payload, null, 2)}</pre>
-                </div>
+                <p className="rounded-[4px] border border-line bg-background px-3 py-2 text-xs text-muted">{Object.keys(detail.payload ?? {}).length === 0 ? "This job checks every eligible record; no additional input is needed." : "This job uses the linked account or strategy reference shown below."}</p>
+                {Object.keys(detail.payload ?? {}).length > 0 ? <details className="text-xs text-muted"><summary className="cursor-pointer">Technical input</summary><pre className="mt-1 overflow-x-auto rounded-[4px] border border-line bg-background p-3">{JSON.stringify(detail.payload, null, 2)}</pre></details> : null}
                 {detail.result ? (
                   <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Result</p>
-                    <pre className="mt-1 invisible-scrollbar overflow-x-auto rounded-[4px] border border-line bg-background p-3 text-xs text-foreground/80">{JSON.stringify(detail.result, null, 2)}</pre>
+                    <details className="text-xs text-muted"><summary className="cursor-pointer">Processing details</summary><pre className="mt-1 overflow-x-auto rounded-[4px] border border-line bg-background p-3 text-foreground/80">{JSON.stringify(detail.result, null, 2)}</pre></details>
                   </div>
                 ) : null}
               </div>

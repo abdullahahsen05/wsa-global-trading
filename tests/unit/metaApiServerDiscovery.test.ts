@@ -51,7 +51,7 @@ describe("MetaApi known server discovery", () => {
     const result = await searchKnownMetaApiServers({ platform: "MT4", query: "broker" });
 
     expect(result.available).toBe(false);
-    expect(result.message).toBe("MetaApi server search is temporarily unavailable.");
+    expect(result.message).toBe("Broker server search is temporarily unavailable.");
     expect(result.message).not.toContain("provider-internal-detail");
   });
 });

@@ -109,6 +109,9 @@ export default function AdminPartnerWithdrawalsPage() {
   const [rebateStatus, setRebateStatus] = useState<"PENDING" | "APPROVED">("PENDING");
   const [rebateDescription, setRebateDescription] = useState("");
   const [configBrokerId, setConfigBrokerId] = useState("");
+  const [brokerSearch, setBrokerSearch] = useState("");
+  const [debouncedBrokerSearch, setDebouncedBrokerSearch] = useState("");
+  const [brokerSearchOpen, setBrokerSearchOpen] = useState(false);
   const [configModel, setConfigModel] = useState<PartnerModelType>("IB");
   const [configCurrency, setConfigCurrency] = useState("USD");
   const [rebateRatePerLot, setRebateRatePerLot] = useState("5");
@@ -193,6 +196,16 @@ export default function AdminPartnerWithdrawalsPage() {
     queryFn: () => api(`/api/admin/partners/${selectedLedgerSummary?.partnerId}/broker-configurations`),
     enabled: Boolean(selectedLedgerSummary?.partnerId),
   });
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedBrokerSearch(brokerSearch.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [brokerSearch]);
+  const brokerDiscovery = useQuery<{ brokers: BrokerOption[]; configurations: PartnerBrokerConfigurationDto[] }>({
+    queryKey: ["admin-partner-broker-discovery", selectedLedgerSummary?.partnerId, debouncedBrokerSearch],
+    queryFn: () => api(`/api/admin/partners/${selectedLedgerSummary?.partnerId}/broker-configurations?search=${encodeURIComponent(debouncedBrokerSearch)}`),
+    enabled: Boolean(selectedLedgerSummary?.partnerId) && brokerSearchOpen,
+    staleTime: 90_000,
+  });
   const partnerTraders = useQuery<PartnerTraderDto[]>({
     queryKey: ["admin-partner-traders", selectedLedgerSummary?.partnerId],
     queryFn: () => api(`/api/admin/partners/${selectedLedgerSummary?.partnerId}/traders`),
@@ -207,8 +220,9 @@ export default function AdminPartnerWithdrawalsPage() {
     [brokerConfig.data?.configurations, configBrokerId],
   );
   const selectedBrokerOption = useMemo(
-    () => brokerConfig.data?.brokers.find((broker) => broker.id === configBrokerId) ?? null,
-    [brokerConfig.data?.brokers, configBrokerId],
+    () => [...(brokerConfig.data?.brokers ?? []), ...(brokerDiscovery.data?.brokers ?? [])]
+      .find((broker) => broker.id === configBrokerId) ?? null,
+    [brokerConfig.data?.brokers, brokerDiscovery.data?.brokers, configBrokerId],
   );
   const selectedBrokerName =
     selectedBrokerOption?.display_name
@@ -626,14 +640,33 @@ export default function AdminPartnerWithdrawalsPage() {
                   </div>
                   <div className="mt-4 grid gap-3 md:grid-cols-3">
                     <div className="grid gap-2">
-                      <SelectField label="Broker" value={configBrokerId} onChange={(event) => setConfigBrokerId(event.target.value)}>
-                        <option value="">All live brokers</option>
-                        {(brokerConfig.data?.brokers ?? []).map((broker) => (
-                          <option key={broker.id} value={broker.id}>
-                            {broker.display_name || broker.name}
-                          </option>
-                        ))}
-                      </SelectField>
+                      <div className="relative">
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.18em] text-muted" htmlFor="partner-broker-search">Broker</label>
+                        <input
+                          id="partner-broker-search"
+                          value={brokerSearchOpen ? brokerSearch : selectedBrokerName}
+                          onFocus={() => setBrokerSearchOpen(true)}
+                          onChange={(event) => { setBrokerSearch(event.target.value); setBrokerSearchOpen(true); }}
+                          onBlur={() => window.setTimeout(() => setBrokerSearchOpen(false), 150)}
+                          placeholder="Search live brokers"
+                          autoComplete="off"
+                          className="h-10 w-full rounded-[4px] border border-line bg-background px-3 text-sm text-foreground outline-none focus:border-accent"
+                        />
+                        {brokerSearchOpen ? (
+                          <div className="sidebar-scrollbar absolute inset-x-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-[4px] border border-line bg-panel shadow-xl">
+                            <button type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-panel-strong" onMouseDown={(event) => event.preventDefault()} onClick={() => { setConfigBrokerId(""); setBrokerSearchOpen(false); }}>All live brokers</button>
+                            {brokerDiscovery.isFetching ? <p className="px-3 py-2 text-xs text-muted">Searching brokers…</p> : null}
+                            {brokerDiscovery.isError ? <p className="px-3 py-2 text-xs text-danger">Broker search is temporarily unavailable.</p> : null}
+                            {(brokerDiscovery.data?.brokers ?? []).map((broker) => (
+                              <button key={broker.id} type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-panel-strong" onMouseDown={(event) => event.preventDefault()} onClick={() => { setConfigBrokerId(broker.id); setBrokerSearchOpen(false); setBrokerSearch(""); }}>
+                                {broker.logoUrl ? <img src={broker.logoUrl} alt="" className="h-6 w-6 rounded-full object-contain" /> : <span className="grid h-6 w-6 place-items-center rounded-full bg-accent/10 text-[10px] text-accent">{broker.name.slice(0, 1)}</span>}
+                                <span>{broker.display_name || broker.name}</span>
+                              </button>
+                            ))}
+                            {!brokerDiscovery.isFetching && !brokerDiscovery.isError && (brokerDiscovery.data?.brokers.length ?? 0) === 0 ? <p className="px-3 py-2 text-xs text-muted">No matching brokers.</p> : null}
+                          </div>
+                        ) : null}
+                      </div>
                       <div className="flex min-h-12 items-center gap-3 rounded-[4px] border border-line bg-panel/55 px-3 py-2">
                         {selectedBrokerOption?.logoUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
@@ -645,7 +678,7 @@ export default function AdminPartnerWithdrawalsPage() {
                         )}
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-foreground">{selectedBrokerName}</p>
-                          <p className="text-[11px] text-muted">Detected from connected accounts</p>
+                          <p className="text-[11px] text-muted">Live broker directory</p>
                         </div>
                       </div>
                     </div>

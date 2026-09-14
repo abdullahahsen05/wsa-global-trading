@@ -61,7 +61,7 @@ export function Sidebar({
 
   return (
     <>
-    <aside className="hidden h-screen w-[240px] self-start overflow-hidden border-r border-line bg-panel px-4 py-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
+    <aside className="hidden h-dvh w-[240px] self-start overflow-hidden border-r border-line bg-panel px-4 py-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
         <div className="mb-7 flex justify-center px-2">
           <BrandLogo className="h-24 w-auto max-w-[190px]" priority />
         </div>
@@ -69,7 +69,7 @@ export function Sidebar({
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
         </div>
         <div className="mt-2 flex min-h-0 flex-1 flex-col">
-          <div className="sidebar-scrollbar flex-1 overflow-y-auto pr-1">
+          <div className="sidebar-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1 touch-pan-y">
             {renderNav()}
           </div>
           <div className="border-t border-line/70 pt-4">
@@ -102,7 +102,7 @@ export function Sidebar({
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
             </div>
             <div className="mt-2 flex min-h-0 flex-1 flex-col">
-              <div className="sidebar-scrollbar flex-1 overflow-y-auto pr-1">
+              <div className="sidebar-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1 touch-pan-y">
                 {renderNav(() => onMobileNavOpenChange(false))}
               </div>
               <div className="border-t border-line/70 pt-4">

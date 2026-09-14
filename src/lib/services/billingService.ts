@@ -623,7 +623,7 @@ export function deriveMentorshipAccess(params: {
     latest.approvedAt
       ? "ACTIVE"
       : latest.status === "PAID"
-        ? "PENDING_APPROVAL"
+        ? "ACTIVE"
         : latest.status === "PENDING"
           ? "PENDING_PAYMENT"
           : mapTerminalState(latest.status);
@@ -1117,6 +1117,18 @@ async function markOrderPaid(orderId: string): Promise<void> {
     .single();
 
   if (!product) return;
+
+  if (product.code === "MENTORSHIP_1_1") {
+    const metadata = order.metadata && typeof order.metadata === "object" && !Array.isArray(order.metadata)
+      ? order.metadata as Record<string, unknown>
+      : {};
+    if (!metadata.approvedAt) {
+      const { error: activationError } = await supabase.from("payment_orders")
+        .update({ metadata: { ...metadata, approvedAt: new Date().toISOString() } })
+        .eq("id", order.id);
+      if (activationError) throw new Error(`Failed to activate mentorship access: ${activationError.message}`);
+    }
+  }
 
   await ensurePaidOrderProvisioned(order as PaidOrderProvisionRow, product as BillingProductProvisionRow);
   await maybeCreatePartnerCommission(order.user_id, order.id, order.amount, order.currency);
@@ -1857,24 +1869,7 @@ export async function getTraderAccessSummary(userId: string): Promise<UserBillin
     orders: normalizedOrders.filter((o) => o.productCode === "MENTORSHIP_1_1"),
   });
 
-  const pendingApprovals = [
-    ...normalizedOrders
-      .filter((o) => (o.productCode === "COPY_NORMAL" || o.productCode === "COPY_ULTRA_FAST") && o.status === "PAID")
-      .map((o) => ({
-        type: "COPY_ENTITLEMENT",
-        orderId: o.id,
-        productName: o.productName ?? `Copy Trading (${o.tier ?? "NORMAL"})`,
-        paidAt: allOrders.find((row) => row.id === o.id)?.paid_at ?? "",
-      })),
-    ...normalizedOrders
-      .filter((o) => o.productCode === "MENTORSHIP_1_1" && o.status === "PAID" && !o.approvedAt)
-      .map((o) => ({
-        type: "MENTORSHIP",
-        orderId: o.id,
-        productName: o.productName ?? "1-to-1 Professional Mentorship",
-        paidAt: allOrders.find((row) => row.id === o.id)?.paid_at ?? "",
-      })),
-  ];
+  const pendingApprovals: UserBillingSummaryDto["pendingApprovals"] = [];
 
   return {
     platformSubscription,
@@ -1960,9 +1955,7 @@ export function deriveBillingReturnState(
   }
 
   if (order.productCode === "MENTORSHIP_1_1") {
-    return summary.mentorshipAccess.status === "ACTIVE"
-      ? { state: "ACTIVE", title: "Mentorship access active", message: "Your mentorship access is active." }
-      : { state: "PENDING_APPROVAL", title: "Payment received — pending admin approval", message: "An admin will review and activate your mentorship access." };
+    return { state: "ACTIVE", title: "Mentorship access active", message: "Your payment is confirmed. You can now use your mentorship access." };
   }
 
   return {

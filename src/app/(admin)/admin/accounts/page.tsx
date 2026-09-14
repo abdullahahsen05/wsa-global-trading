@@ -76,8 +76,7 @@ export default function AdminAccountsPage() {
   const effectiveSelectedId = selectedId || accounts[0]?.accountId || "";
   const selectedAccount =
     filteredAccounts.find((account) => account.accountId === effectiveSelectedId) ??
-    filteredAccounts[0] ??
-    accounts[0];
+    filteredAccounts[0] ?? null;
 
   const handleVerify = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -262,7 +261,7 @@ export default function AdminAccountsPage() {
               active: statusFilter === "CONNECTED",
               onClick: () => {
                 setStatusFilter("CONNECTED");
-                setSelectedId(accounts.find((a) => a.status === "CONNECTED")?.accountId ?? accounts[0]?.accountId ?? "");
+                setSelectedId(accounts.find((a) => a.status === "CONNECTED")?.accountId ?? "");
               },
             },
             {
@@ -270,7 +269,7 @@ export default function AdminAccountsPage() {
               active: statusFilter === "PENDING",
               onClick: () => {
                 setStatusFilter("PENDING");
-                setSelectedId(accounts.find((a) => a.status === "PENDING")?.accountId ?? accounts[0]?.accountId ?? "");
+                setSelectedId(accounts.find((a) => a.status === "PENDING")?.accountId ?? "");
               },
             },
             {
@@ -278,7 +277,7 @@ export default function AdminAccountsPage() {
               active: statusFilter === "DISCONNECTED",
               onClick: () => {
                 setStatusFilter("DISCONNECTED");
-                setSelectedId(accounts.find((a) => a.status === "DISCONNECTED")?.accountId ?? accounts[0]?.accountId ?? "");
+                setSelectedId(accounts.find((a) => a.status === "DISCONNECTED")?.accountId ?? "");
               },
             },
             {
@@ -286,7 +285,7 @@ export default function AdminAccountsPage() {
               active: statusFilter === "RESTRICTED",
               onClick: () => {
                 setStatusFilter("RESTRICTED");
-                setSelectedId(accounts.find((a) => a.status === "RESTRICTED")?.accountId ?? accounts[0]?.accountId ?? "");
+                setSelectedId(accounts.find((a) => a.status === "RESTRICTED")?.accountId ?? "");
               },
             },
             {
@@ -294,7 +293,7 @@ export default function AdminAccountsPage() {
               active: statusFilter === "INACTIVE",
               onClick: () => {
                 setStatusFilter("INACTIVE");
-                setSelectedId(accounts.find((a) => a.status === "INACTIVE")?.accountId ?? accounts[0]?.accountId ?? "");
+                setSelectedId(accounts.find((a) => a.status === "INACTIVE")?.accountId ?? "");
               },
             },
           ]}

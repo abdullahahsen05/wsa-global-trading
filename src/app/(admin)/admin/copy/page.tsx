@@ -95,7 +95,7 @@ export default function AdminCopyPage() {
         description: strategyForm.description,
         ...(!editingStrategyId ? { masterAccountId: strategyForm.masterAccountId } : {}),
         standardMonthlyPrice: Number(strategyForm.standardMonthlyPrice),
-        premiumMonthlyPrice: Number(strategyForm.premiumMonthlyPrice),
+        ...(!editingStrategyId ? { premiumMonthlyPrice: Number(strategyForm.standardMonthlyPrice) } : {}),
         ...(!editingStrategyId ? {
           currency: strategyForm.currency,
           riskMultiplier: 1,
@@ -412,12 +412,8 @@ export default function AdminCopyPage() {
                 {strategy.engineError ? <p className="mt-2 text-xs text-danger">{strategy.engineError}</p> : null}
               </div>
               <div>
-                <p className="font-semibold text-foreground">
-                  {formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} standard
-                  <span className="text-xs font-normal text-muted"> / </span>
-                  {formatMoney({ amount: strategy.premiumMonthlyPrice, currency: strategy.currency })} premium
-                </p>
-                <p className="mt-1 text-xs text-muted">Dispatch targets: {strategy.standardDelayMs / 1000}s standard · {strategy.premiumDelayMs / 1000}s premium</p>
+                <p className="font-semibold text-foreground">{formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} / month</p>
+                <p className="mt-1 text-xs text-muted">Immediate platform dispatch for all followers.</p>
               </div>
               <div className="flex min-w-0 flex-wrap gap-2 lg:justify-end">
                 <GhostButton type="button" onClick={() => openEditStrategy(strategy)}>
@@ -500,14 +496,11 @@ export default function AdminCopyPage() {
             ) : null}
           </select>
         </label>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Standard monthly price" type="number" value={strategyForm.standardMonthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, standardMonthlyPrice: value }))} />
-          <Field label="Premium / fast monthly price" type="number" value={strategyForm.premiumMonthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, premiumMonthlyPrice: value }))} />
-        </div>
+        <Field label="Monthly price" type="number" value={strategyForm.standardMonthlyPrice} onChange={(value) => setStrategyForm((current) => ({ ...current, standardMonthlyPrice: value }))} />
         {!editingStrategyId ? (
           <Field label="Currency" value={strategyForm.currency} onChange={(value) => setStrategyForm((current) => ({ ...current, currency: value.toUpperCase() }))} />
         ) : null}
-        <p className="text-xs leading-5 text-muted">Standard targets 1.5 seconds; Premium/Fast uses immediate dispatch with 0 ms platform delay. Broker and network latency are additional.</p>
+        <p className="text-xs leading-5 text-muted">All followers receive immediate platform dispatch. Broker and network latency can vary.</p>
         <PrimaryButton type="button" disabled={saveStrategy.isPending || !strategyForm.masterAccountId} onClick={() => saveStrategy.mutate()}>
           {saveStrategy.isPending ? "Saving..." : editingStrategyId ? "Save changes" : "Create draft — hidden from traders"}
         </PrimaryButton>

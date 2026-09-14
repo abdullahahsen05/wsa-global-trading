@@ -176,7 +176,7 @@ export default function AdminCrmPage() {
     <WorkspacePage
       eyebrow="Admin console"
       title="Trader CRM"
-      description="Search traders, inspect real account and risk data, and maintain a single communication history."
+      description="Search traders, inspect real account and risk data, and maintain a single communication history. Trading stage describes account status; evaluation shows challenge participation."
     >
       <div className="grid grid-cols-2 border-l border-t border-line bg-panel md:grid-cols-3 2xl:grid-cols-6">
         {[
@@ -328,7 +328,7 @@ export default function AdminCrmPage() {
                 <thead className="bg-panel-strong text-[11px] uppercase tracking-[0.12em] text-muted">
                   <tr>
                     <th className="px-4 py-3">Trader</th>
-                    <th className="px-4 py-3">Segment</th>
+                    <th className="px-4 py-3">Trading stage</th>
                     <th className="px-4 py-3">Accounts</th>
                     <th className="px-4 py-3">Equity</th>
                     <th className="px-4 py-3">Risk</th>
@@ -479,7 +479,7 @@ export default function AdminCrmPage() {
 
               <dl className="mt-5 grid grid-cols-2 overflow-hidden border-l border-t border-line">
                 <div className="border-b border-r border-line bg-background p-3">
-                  <dt className="text-[11px] uppercase tracking-[0.14em] text-muted">Segment</dt>
+                  <dt className="text-[11px] uppercase tracking-[0.14em] text-muted">Trading stage</dt>
                   <dd className="mt-1 font-semibold text-foreground">{selectedTrader.segment}</dd>
                 </div>
                 <div className="border-b border-r border-line bg-background p-3">

@@ -289,7 +289,7 @@ export default function AdminBillingPage() {
     <WorkspacePage
       eyebrow="Admin"
       title="Billing & Payments"
-      description="Review mock or live payments, approve access, and monitor active and expired billing access."
+      description="Paid access activates automatically. Review payments, investigate exceptions, and monitor active or expired access."
     >
       {successMessage ? (
         <div className="mb-5 flex items-center gap-2 rounded-[4px] border border-lime/20 bg-lime/10 px-4 py-3 text-sm font-medium text-lime">
@@ -301,7 +301,7 @@ export default function AdminBillingPage() {
       <InlineStatusStrip
         items={[
           { label: "Orders", value: counts.ALL },
-          { label: "Pending approvals", value: pendingApprovals.length, tone: pendingApprovals.length > 0 ? "accent" : undefined },
+          { label: "Activation exceptions", value: pendingApprovals.length, tone: pendingApprovals.length > 0 ? "danger" : undefined },
           { label: "Active access", value: activeAccess.length, tone: activeAccess.length > 0 ? "lime" : undefined },
           { label: "Expired access", value: expiredAccess.length, tone: expiredAccess.length > 0 ? "danger" : undefined },
         ]}
@@ -309,7 +309,7 @@ export default function AdminBillingPage() {
 
       <Panel className="mt-5">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-foreground">Pending approvals</h2>
+          <h2 className="text-lg font-semibold text-foreground">Activation exceptions</h2>
           <GhostButton type="button" onClick={() => refetch()}>
             Refresh
           </GhostButton>
@@ -317,7 +317,7 @@ export default function AdminBillingPage() {
         {isLoading ? (
           <p className="text-sm text-muted">Loading...</p>
         ) : pendingApprovals.length === 0 ? (
-          <EmptyState title="No pending approvals" description="Paid orders waiting for manual approval will appear here." />
+          <EmptyState title="No activation exceptions" description="Successful payments activate access automatically; any legacy exceptions appear here." />
         ) : (
           <div className="invisible-scrollbar min-w-0 overflow-x-auto">
             <DataTable
@@ -338,7 +338,7 @@ export default function AdminBillingPage() {
                   {row.paidAt ? new Date(row.paidAt).toLocaleString() : "-"}
                 </span>,
                 <GhostButton key="action" type="button" onClick={() => setApproveTarget(row)}>
-                  Approve access
+                  Restore access
                 </GhostButton>,
               ])}
             />
@@ -376,7 +376,7 @@ export default function AdminBillingPage() {
             <AccessTable
               rows={visibleActiveAccess}
               emptyTitle="No active access"
-              emptyDescription="Active subscriptions, auto-activated copy entitlements, bot access, and mentorship approvals show here."
+              emptyDescription="Active subscriptions, copy entitlements, bot access, and paid mentorship show here."
             />
           )}
           {!isLoading && activeAccess.length > ACCESS_PAGE_SIZE ? (

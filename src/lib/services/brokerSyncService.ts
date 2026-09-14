@@ -318,13 +318,12 @@ async function persistBrokerSnapshotAndTrades(params: {
   const currency = snapshot.equity.currency || snapshot.balance.currency || 'USD';
   const balance = snapshot.balance.amount;
   const equity = snapshot.equity.amount;
-  await supabase.from('account_snapshots').insert({
-    trading_account_id: accountId,
-    balance,
-    equity,
-    floating_pnl: snapshot.floatingPnl.amount,
-    drawdown_percent: snapshot.drawdownPercent,
+  const { error: snapshotError } = await supabase.rpc('record_account_snapshot', {
+    p_account_id: accountId,
+    p_balance: balance,
+    p_equity: equity,
   });
+  if (snapshotError) throw new Error(`Failed to record account snapshot: ${snapshotError.message}`);
 
   const rows = [
     ...openTrades.map((trade) => tradeDtoToRow(trade, currency)),
@@ -573,13 +572,12 @@ async function runMetaApiSync(params: {
     const equity: number = info?.equity ?? 0;
 
     // ── 6. Insert account snapshot ─────────────────────────────────────────
-    await supabase.from('account_snapshots').insert({
-      trading_account_id: accountId,
-      balance,
-      equity,
-      floating_pnl: equity - balance,
-      drawdown_percent: balance > 0 ? Math.max(0, ((balance - equity) / balance) * 100) : 0,
+    const { error: snapshotError } = await supabase.rpc('record_account_snapshot', {
+      p_account_id: accountId,
+      p_balance: balance,
+      p_equity: equity,
     });
+    if (snapshotError) throw new Error(`Failed to record account snapshot: ${snapshotError.message}`);
 
     // ── 7. Sync trades ─────────────────────────────────────────────────────
     // Use an explicit insert/update split so open positions can transition to
@@ -1422,13 +1420,12 @@ export async function refreshAccountTrades(
       const equity: number = info?.equity ?? 0;
 
       // Insert snapshot
-      await supabase.from('account_snapshots').insert({
-        trading_account_id: accountId,
-        balance,
-        equity,
-        floating_pnl: equity - balance,
-        drawdown_percent: balance > 0 ? Math.max(0, ((balance - equity) / balance) * 100) : 0,
+      const { error: snapshotError } = await supabase.rpc('record_account_snapshot', {
+        p_account_id: accountId,
+        p_balance: balance,
+        p_equity: equity,
       });
+      if (snapshotError) throw new Error(`Failed to record account snapshot: ${snapshotError.message}`);
 
       // Build trade rows
       const openRows = positions.map((p) => ({

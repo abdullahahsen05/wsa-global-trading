@@ -72,6 +72,7 @@ function makeQuery(resolveValue: unknown) {
     then: (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
       Promise.resolve(resolveValue).then(resolve, reject),
     single: vi.fn().mockResolvedValue(resolveValue),
+    maybeSingle: vi.fn().mockResolvedValue(resolveValue),
   };
   const chainMethods = ["select", "eq", "is", "not", "order", "limit", "gte", "lte", "neq", "in", "update", "upsert"];
   for (const method of chainMethods) {
@@ -123,6 +124,7 @@ function setupMockClient(overrides: {
       makeQuery({ data: overrides.platformRules ?? [mockDrawdownRule], error: null }),
     )
     .mockReturnValueOnce(makeQuery({ data: overrides.accountRules ?? [], error: null }))
+    .mockReturnValueOnce(makeQuery({ data: { equity_peak: 10000 }, error: null }))
     .mockReturnValueOnce(makeQuery({ data: [], error: null }))
     .mockReturnValueOnce(makeQuery({ data: null, error: null }));
   vi.mocked(createAdminClient).mockReturnValue(

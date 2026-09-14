@@ -91,11 +91,6 @@ const accountRulesRuntimeCache = new Map<string, RuntimeCacheEntry<Map<string, A
 const accountStatusRuntimeCache = new Map<string, RuntimeCacheEntry<Map<string, string>>>();
 const accountRiskRuntimeCache = new Map<string, RuntimeCacheEntry<AccountRiskRuntime>>();
 const generalRiskRuntimeCache = new Map<string, RuntimeCacheEntry<Awaited<ReturnType<typeof getRiskEnforcementState>>>>();
-const inFlightUltraCopyKeys = new Set<string>();
-
-function ultraPremiumCopyEnabled(): boolean {
-  return getBrokerProviderId() === "api2trade" && process.env.WSA_COPY_PREMIUM_ULTRA_FAST !== "false";
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Copy Trading Service (server-only). All access is via the service-role admin
@@ -502,7 +497,7 @@ export async function updateCopyStrategy(
       supabase
         .from("billing_products")
         .update({
-          name: `${updatedStrategy.name} Standard Copy Strategy`,
+          name: `${updatedStrategy.name} Copy Strategy`,
           amount: Number(updatedStrategy.standard_monthly_price),
         })
         .eq("id", updatedStrategy.standard_billing_product_id),
@@ -513,7 +508,7 @@ export async function updateCopyStrategy(
       supabase
         .from("billing_products")
         .update({
-          name: `${updatedStrategy.name} Premium Fast Copy Strategy`,
+          name: `${updatedStrategy.name} Copy Strategy (legacy plan)`,
           amount: Number(updatedStrategy.premium_monthly_price),
         })
         .eq("id", updatedStrategy.premium_billing_product_id),
@@ -787,9 +782,7 @@ async function loadActiveFollowers(strategyId: string): Promise<FollowerRow[]> {
     .eq("strategy_id", strategyId)
     .eq("status", "ACTIVE")
     .limit(2000);
-  // PREMIUM followers are processed before NORMAL — ordering guarantee, not broker latency.
-  const rows = (data ?? []) as FollowerRow[];
-  return rows.sort((a, b) => (a.tier === b.tier ? 0 : a.tier === "PREMIUM" ? -1 : 1));
+  return (data ?? []) as FollowerRow[];
 }
 
 function getStrategyHotRuntime(strategyId: string): StrategyHotRuntime | null {
@@ -1793,17 +1786,7 @@ export async function executeCopyForEvent(
     //    failure does not abort the others. ──
     summary.attempted++;
     try {
-      const ultraFast = ultraPremiumCopyEnabled() && f.tier === "PREMIUM" && actorUserId === null;
-      const ultraKey = `${ev.id}:${f.follower_account_id}:OPEN`;
-      if (ultraFast) {
-        if (inFlightUltraCopyKeys.has(ultraKey)) {
-          summary.skipped++;
-          return;
-        }
-        inFlightUltraCopyKeys.add(ultraKey);
-      }
-
-      const { data: reserved, error: reserveError } = ultraFast ? { data: null, error: null } : await supabase.from("copy_trade_links").insert({
+      const { data: reserved, error: reserveError } = await supabase.from("copy_trade_links").insert({
         strategy_id: strategy.id,
         follower_id: f.id,
         follower_account_id: f.follower_account_id,
@@ -1817,7 +1800,7 @@ export async function executeCopyForEvent(
       }).select("id").single();
 
       let linkId = reserved?.id as string | undefined;
-      if (!ultraFast && (reserveError || !linkId)) {
+      if (reserveError || !linkId) {
         if ((reserveError as { code?: string } | null)?.code !== "23505") {
           throw new Error(`Trade reservation failed: ${reserveError?.message}`);
         }
@@ -1840,7 +1823,7 @@ export async function executeCopyForEvent(
         symbol: followerSymbol,
         lot: lot.lot,
         followerPrepMs: Date.now() - followerStartedAt,
-        ultraFast,
+        ultraFast: false,
       });
       markExecutionPriority([strategy.master_account_id, f.follower_account_id]);
       const brokerStartedAt = Date.now();
@@ -1860,8 +1843,7 @@ export async function executeCopyForEvent(
         brokerMs: Date.now() - brokerStartedAt,
       });
       markExecutionPriority([strategy.master_account_id, f.follower_account_id]);
-      const linkWrite = linkId
-        ? supabase.from("copy_trade_links").update({
+      const linkWrite = supabase.from("copy_trade_links").update({
           status: "OPEN",
           follower_position_id: result.brokerPositionId ?? result.brokerOrderId ?? null,
           follower_order_id: result.brokerOrderId ?? null,
@@ -1869,25 +1851,9 @@ export async function executeCopyForEvent(
           opened_at: new Date().toISOString(),
           error_code: null,
           error_message: null,
-        }).eq("id", linkId)
-        : supabase.from("copy_trade_links").upsert({
-          strategy_id: strategy.id,
-          follower_id: f.id,
-          follower_account_id: f.follower_account_id,
-          trader_id: f.trader_id,
-          master_trade_id: ev.master_trade_id,
-          source_event_id: ev.id,
-          symbol: followerSymbol,
-          side: followerSide === "SELL" ? "SELL" : "BUY",
-          copied_volume: result.executedVolume ?? lot.lot,
-          status: "OPEN",
-          follower_position_id: result.brokerPositionId ?? result.brokerOrderId ?? null,
-          follower_order_id: result.brokerOrderId ?? null,
-          opened_at: new Date().toISOString(),
-          error_code: null,
-          error_message: null,
-        }, { onConflict: "source_event_id,follower_account_id" });
-      await linkWrite;
+        }).eq("id", linkId);
+      const { error: linkError } = await linkWrite;
+      if (linkError) throw new Error(`Copied trade could not be linked: ${linkError.message}`);
       void Promise.allSettled([
         supabase.from("copy_execution_logs").insert({
           ...baseLog,
@@ -1911,10 +1877,7 @@ export async function executeCopyForEvent(
         followerAccountId: f.follower_account_id,
         totalFollowerMs: Date.now() - followerStartedAt,
       });
-      if (ultraFast) inFlightUltraCopyKeys.delete(ultraKey);
     } catch (err) {
-      const ultraKey = `${ev.id}:${f.follower_account_id}:OPEN`;
-      inFlightUltraCopyKeys.delete(ultraKey);
       const code = err instanceof BrokerExecutionError ? err.code : COPY_ERROR.COPY_PROVIDER_ERROR;
       const message = (err instanceof Error ? err.message : "Broker execution failed").slice(0, 400);
       await supabase.from("copy_trade_links").update({ status: "FAILED", error_code: code, error_message: message }).eq("source_event_id", ev.id).eq("follower_account_id", f.follower_account_id);
@@ -1946,31 +1909,13 @@ export async function executeCopyForEvent(
     }
   };
 
-  const premiumFollowers = followers.filter((f) => f.tier === "PREMIUM");
-  const standardFollowers = followers.filter((f) => f.tier !== "PREMIUM");
-  const premiumDelay = getBrokerProviderId() === "api2trade" ? 0 : Math.max(0, strategy.premium_delay_ms);
-  const standardDelay = Math.max(premiumDelay, strategy.standard_delay_ms);
+  // Every paid follower receives the same immediate platform dispatch.
+  // Historical tier values remain on records for billing compatibility.
   logCopyTiming(ev.id, "dispatching followers", startedAt, {
-    premiumFollowers: premiumFollowers.length,
-    standardFollowers: standardFollowers.length,
-    premiumDelay,
-    standardDelay,
+    followers: followers.length,
+    platformDelayMs: 0,
   });
-
-  await Promise.all([
-    premiumFollowers.length
-      ? (async () => {
-          if (premiumDelay > 0) await new Promise((resolve) => setTimeout(resolve, premiumDelay));
-          await inParallelBatches(premiumFollowers, 12, executeFollower);
-        })()
-      : Promise.resolve(),
-    standardFollowers.length
-      ? (async () => {
-          if (standardDelay > 0) await new Promise((resolve) => setTimeout(resolve, standardDelay));
-          await inParallelBatches(standardFollowers, 12, executeFollower);
-        })()
-      : Promise.resolve(),
-  ]);
+  await inParallelBatches(followers, 12, executeFollower);
 
   logCopyTiming(ev.id, "copy event complete", startedAt, summary);
   return summary;

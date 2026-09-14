@@ -72,8 +72,8 @@ function userDetailsMap(rows: ProfileRow[]) {
   );
 }
 
-function copyTierLabel(tier: string | null) {
-  return tier === "PREMIUM" ? "Ultra Fast" : "Normal";
+function copyTierLabel(_tier: string | null) {
+  return "Copy trading";
 }
 
 export async function GET(req: NextRequest) {
@@ -211,7 +211,7 @@ export async function GET(req: NextRequest) {
           return pendingCopyOrderIds.has(row.id);
         }
         if (row.productCode === "BOT_EA") return false;
-        if (row.productCode === "MENTORSHIP_1_1") return !row.approvedAt;
+        if (row.productCode === "MENTORSHIP_1_1") return false;
         return true;
       })
       .map((row) => ({
@@ -283,7 +283,7 @@ export async function GET(req: NextRequest) {
           };
         }),
       ...purchases
-        .filter((row) => row.productCode === "MENTORSHIP_1_1" && Boolean(row.approvedAt))
+        .filter((row) => row.productCode === "MENTORSHIP_1_1" && row.status === "PAID")
         .map((row) => ({
           id: row.id,
           userId: row.userId,
@@ -294,7 +294,7 @@ export async function GET(req: NextRequest) {
           status: "ACTIVE",
           scopeLabel: "One-time mentorship access",
           currentPeriodEnd: null,
-          approvedAt: row.approvedAt,
+          approvedAt: row.approvedAt ?? row.paidAt,
           createdAt: row.createdAt,
         })),
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

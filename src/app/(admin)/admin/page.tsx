@@ -96,7 +96,7 @@ const toneClasses: Record<
 function PlatformMetricRail({ items }: { items: PlatformMetric[] }) {
   return (
     <section className="overflow-hidden rounded-[4px] border border-line bg-panel/45">
-      <div className="grid sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         {items.map((item, index) => {
           const Icon = item.icon;
           const tone = toneClasses[item.tone];
@@ -105,7 +105,7 @@ function PlatformMetricRail({ items }: { items: PlatformMetric[] }) {
             <article
               key={item.label}
               className={[
-                "relative min-h-[150px] px-5 py-5",
+                "relative min-w-0 min-h-[150px] px-5 py-5",
                 index > 0 ? "border-t border-line sm:border-t-0" : "",
                 index % 2 !== 0 ? "sm:border-l sm:border-line" : "",
                 index >= 2 ? "sm:border-t sm:border-line xl:border-t-0" : "",
@@ -122,7 +122,7 @@ function PlatformMetricRail({ items }: { items: PlatformMetric[] }) {
                     {item.label}
                   </p>
 
-                  <p className="mt-3 text-[28px] font-semibold leading-none tracking-[-0.03em] text-foreground tabular-nums">
+                  <p className="mt-3 break-words text-[clamp(1.25rem,1.7vw,1.75rem)] font-semibold leading-tight tracking-[-0.03em] text-foreground tabular-nums" title={item.value}>
                     {item.value}
                   </p>
 
@@ -837,7 +837,7 @@ export default function AdminOverviewPage() {
         <DataTable
           paginated={false}
           maxBodyHeight="560px"
-          headers={["Trader", "Status", "Segment", "Accounts", "Equity", "Floating P&L", "Last activity"]}
+          headers={["Trader", "Status", "Registration affiliate", "Accounts", "Equity", "Floating P&L", "Last activity"]}
           rows={traders.map((trader) => {
             const movement = trader.floatingPnl?.amount ?? null;
             return [
@@ -848,9 +848,9 @@ export default function AdminOverviewPage() {
               <StatusPill key="status" tone={trader.profileStatus === "ACTIVE" ? "lime" : trader.profileStatus === "SUSPENDED" ? "danger" : "accent"}>
                 {trader.profileStatus}
               </StatusPill>,
-              <StatusPill key="segment" tone={trader.segment === "AT_RISK" ? "danger" : "muted"}>
-                {trader.segment.replaceAll("_", " ")}
-              </StatusPill>,
+              <span key="affiliate" className="whitespace-nowrap text-sm text-foreground">
+                {trader.partner?.name ?? "WSA PLATFORM"}
+              </span>,
               <span key="accounts" className="whitespace-nowrap tabular-nums">
                 {trader.connectedAccountCount} / {trader.accounts.length} connected
               </span>,

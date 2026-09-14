@@ -101,9 +101,8 @@ export default function PlatformPreviewPage() {
               <p className="mt-1 text-xs text-muted">Renews monthly from your subscription start date.</p>
             </div>
             <div className="border-b border-line bg-background p-4">
-              <p className="text-sm font-semibold text-foreground">Copy account tiers</p>
-              <p className="mt-1 text-xs text-muted">Normal: $10/month per account</p>
-              <p className="text-xs text-muted">Ultra Fast: $15/month per account</p>
+              <p className="text-sm font-semibold text-foreground">Copy account access</p>
+              <p className="mt-1 text-xs text-muted">One monthly plan per connected account, with immediate copy dispatch.</p>
             </div>
             <div className="bg-background p-4">
               <p className="text-sm font-semibold text-foreground">Independent purchases</p>
@@ -154,7 +153,7 @@ export default function PlatformPreviewPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Copy strategy example</p>
-                  <p className="text-xs text-muted">Momentum FX · Ultra Fast tier ready</p>
+                  <p className="text-xs text-muted">Momentum FX · live copy access</p>
                 </div>
                 <StatusPill tone="accent">Locked until active</StatusPill>
               </div>

@@ -25,25 +25,19 @@ export class WsaCopyEngineConfigurationError extends Error {
   }
 }
 
-function strategyProductCode(strategyId: string, tier: "STANDARD" | "PREMIUM") {
-  return `COPY_STRATEGY_${strategyId.replaceAll("-", "").toUpperCase()}_${tier}`;
+function strategyProductCode(strategyId: string) {
+  return `COPY_STRATEGY_${strategyId.replaceAll("-", "").toUpperCase()}_STANDARD`;
 }
 
-async function ensureStrategyBillingProduct(
-  strategy: StrategyRecord,
-  tier: "STANDARD" | "PREMIUM",
-): Promise<string> {
+async function ensureStrategyBillingProduct(strategy: StrategyRecord): Promise<string> {
   const supabase = createAdminClient();
-  const amount = tier === "PREMIUM"
-    ? Number(strategy.premium_monthly_price)
-    : Number(strategy.standard_monthly_price);
   const { data, error } = await supabase
     .from("billing_products")
     .upsert({
-      code: strategyProductCode(strategy.id, tier),
-      name: `${strategy.name} ${tier === "PREMIUM" ? "Premium Fast" : "Standard"} Copy Strategy`,
+      code: strategyProductCode(strategy.id),
+      name: `${strategy.name} Copy Strategy`,
       type: "COPY_ACCOUNT",
-      amount,
+      amount: Number(strategy.standard_monthly_price),
       currency: strategy.currency,
       billing_interval: "MONTHLY",
       active: true,
@@ -92,15 +86,13 @@ export async function publishWsaStrategy(strategyId: string, actorUserId: string
     );
   }
 
-  const [standardBillingProductId, premiumBillingProductId] = await Promise.all([
-    ensureStrategyBillingProduct(strategy, "STANDARD"),
-    ensureStrategyBillingProduct(strategy, "PREMIUM"),
-  ]);
+  const standardBillingProductId = await ensureStrategyBillingProduct(strategy);
   const publishedAt = new Date().toISOString();
   const { error } = await supabase.from("copy_strategies").update({
     billing_product_id: standardBillingProductId,
     standard_billing_product_id: standardBillingProductId,
-    premium_billing_product_id: premiumBillingProductId,
+    // Preserve any historical premium product for existing renewals, but do
+    // not create another speed/price tier for a newly published strategy.
     status: "ACTIVE",
     mode: "LIVE",
     live_enabled: true,
