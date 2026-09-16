@@ -2284,38 +2284,57 @@ export async function followStrategy(
     throw new CopyError(COPY_ERROR.FOLLOWER_NOT_ELIGIBLE, "Connect and synchronize this trading account before following live strategies.", 409);
   }
 
-  const requestedScalingMode = input.fixedLot !== undefined
-    ? "FIXED_LOT"
-    : input.scalingMode ?? null;
-  const requestedCopyMode = scalingModeToCopyMode(requestedScalingMode);
-
-  const { data, error } = await supabase
+  const followerColumns = "id, strategy_id, follower_account_id, trader_id, status, tier, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, risk_percent, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at";
+  const { data: existingFollower, error: existingFollowerError } = await supabase
     .from("copy_strategy_followers")
-    .upsert(
-      {
+    .select("id")
+    .eq("strategy_id", strategyId)
+    .eq("follower_account_id", input.followerAccountId)
+    .maybeSingle();
+  if (existingFollowerError) throw new Error(`Failed to check follower settings: ${existingFollowerError.message}`);
+
+  const followerQuery = existingFollower
+    ? supabase
+        .from("copy_strategy_followers")
+        .update({
+          trader_id: traderUserId,
+          tier: input.tier,
+          status: "ACTIVE",
+          paused_at: null,
+          engine_status: "LIVE",
+          engine_error: null,
+          engine_synced_at: new Date().toISOString(),
+        })
+        .eq("id", existingFollower.id)
+    : supabase
+        .from("copy_strategy_followers")
+        .insert({
         strategy_id: strategyId,
         follower_account_id: input.followerAccountId,
         trader_id: traderUserId,
         tier: input.tier,
         status: "ACTIVE",
-        scaling_mode: requestedScalingMode,
-        risk_multiplier: input.riskMultiplier ?? null,
-        fixed_lot: input.fixedLot ?? null,
+        scaling_mode: null,
+        risk_multiplier: null,
+        fixed_lot: null,
         max_lot: input.maxLot ?? null,
-        copy_mode: requestedCopyMode,
-        lot_multiplier: requestedCopyMode === "FIXED_LOT" ? null : input.riskMultiplier ?? null,
+        copy_enabled: false,
+        copy_mode: null,
+        lot_multiplier: null,
         risk_percent: null,
         consent_accepted_at: new Date().toISOString(),
         paused_at: null,
-        engine_status: "LIVE",
-        engine_error: null,
+        copy_new_trades_only: true,
+        copy_existing_trades: false,
+        pause_on_disconnect: true,
+        emergency_stop: false,
+        engine_status: "PAUSED",
+        engine_error: "Copy settings must be saved before live copying starts.",
         engine_synced_at: new Date().toISOString(),
-      },
-      { onConflict: "strategy_id,follower_account_id" },
-    )
-    .select(
-      "id, strategy_id, follower_account_id, trader_id, status, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, risk_percent, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at",
-    )
+        });
+
+  const { data, error } = await followerQuery
+    .select(followerColumns)
     .single();
   if (error || !data) throw new Error(`Failed to follow strategy: ${error?.message}`);
 
@@ -2354,12 +2373,12 @@ export async function followStrategy(
     reverseCopy: data.reverse_copy ?? false,
     pauseOnDisconnect: data.pause_on_disconnect ?? true,
     emergencyStop: data.emergency_stop ?? false,
-    engineStatus: "LIVE",
-    engineError: null,
-    engineSyncedAt: new Date().toISOString(),
+    engineStatus: data.engine_status ?? "DRAFT",
+    engineError: data.engine_error ?? null,
+    engineSyncedAt: data.engine_synced_at ?? null,
     consentAcceptedAt: data.consent_accepted_at,
     createdAt: data.created_at,
-    tier: "NORMAL" as const,
+    tier: data.tier ?? "NORMAL",
   };
 }
 

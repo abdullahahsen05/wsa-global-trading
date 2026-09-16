@@ -1045,32 +1045,56 @@ async function ensureActiveCopyFollowerForPaidOrder(order: PaidOrderProvisionRow
     return;
   }
 
-  const { error } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("copy_strategy_followers")
-    .upsert(
-      {
-        strategy_id: order.copy_strategy_id,
-        follower_account_id: order.trading_account_id,
+    .select("id")
+    .eq("strategy_id", order.copy_strategy_id)
+    .eq("follower_account_id", order.trading_account_id)
+    .maybeSingle();
+  if (existingError) throw new Error(`Failed to check copy follower: ${existingError.message}`);
+
+  if (existing) {
+    const { error } = await supabase
+      .from("copy_strategy_followers")
+      .update({
         trader_id: order.user_id,
         tier: order.tier ?? "NORMAL",
         status: "ACTIVE",
-        scaling_mode: "EQUITY_PROPORTIONAL",
-        copy_enabled: true,
-        copy_mode: "LOT_MULTIPLIER",
-        lot_multiplier: 1,
-        risk_multiplier: 1,
-        copy_new_trades_only: true,
-        copy_existing_trades: false,
-        pause_on_disconnect: true,
-        emergency_stop: false,
         engine_status: "LIVE",
         engine_error: null,
         engine_synced_at: now,
-        consent_accepted_at: now,
         paused_at: null,
-      },
-      { onConflict: "strategy_id,follower_account_id" },
-    );
+      })
+      .eq("id", existing.id);
+    if (error) throw new Error(`Failed to reactivate copy follower: ${error.message}`);
+    return;
+  }
+
+  const { error } = await supabase
+    .from("copy_strategy_followers")
+    .insert({
+      strategy_id: order.copy_strategy_id,
+      follower_account_id: order.trading_account_id,
+      trader_id: order.user_id,
+      tier: order.tier ?? "NORMAL",
+      status: "ACTIVE",
+      scaling_mode: null,
+      risk_multiplier: null,
+      fixed_lot: null,
+      lot_multiplier: null,
+      risk_percent: null,
+      copy_enabled: false,
+      copy_mode: null,
+      copy_new_trades_only: true,
+      copy_existing_trades: false,
+      pause_on_disconnect: true,
+      emergency_stop: false,
+      engine_status: "PAUSED",
+      engine_error: "Copy settings must be saved before live copying starts.",
+      engine_synced_at: now,
+      consent_accepted_at: now,
+      paused_at: null,
+    });
   if (error) throw new Error(`Failed to activate copy follower: ${error.message}`);
 }
 
