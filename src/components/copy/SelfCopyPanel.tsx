@@ -176,7 +176,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
       copyEnabled: true,
       copyMode,
       fixedLot: copyMode === "FIXED_LOT" ? numberOrNull(fixedLot) : null,
-      lotMultiplier: copyMode === "FIXED_LOT" ? null : numberOrNull(lotMultiplier),
+      lotMultiplier: copyMode === "LOT_MULTIPLIER" || copyMode === "RISK_PERCENT" ? numberOrNull(lotMultiplier) : null,
       riskPercent: copyMode === "RISK_PERCENT" ? numberOrNull(riskPercent) : null,
       minLot: numberOrNull(minLot),
       maxLot: numberOrNull(maxLot),
@@ -312,8 +312,12 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
             </SelectField>
             {copyMode === "FIXED_LOT" ? (
               <TextField label="Fixed lot" type="number" min="0.01" step="0.01" required value={fixedLot} onChange={(event) => setFixedLot(event.target.value)} />
+            ) : copyMode === "BALANCE_RATIO" ? (
+              <div className="rounded-[4px] border border-line bg-background px-3 py-2 text-xs leading-5 text-muted">
+                Uses master lot × (master balance ÷ follower balance). No multiplier is applied.
+              </div>
             ) : (
-              <TextField label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"} type="number" min="0.01" max="100" step="any" required value={lotMultiplier} onChange={(event) => setLotMultiplier(event.target.value)} />
+              <TextField label={copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"} type="number" min="0.01" max="100" step="any" required value={lotMultiplier} onChange={(event) => setLotMultiplier(event.target.value)} />
             )}
             {copyMode === "RISK_PERCENT" ? (
               <TextField label="Risk percent" type="number" min="0.01" max="100" step="0.01" required value={riskPercent} onChange={(event) => setRiskPercent(event.target.value)} />

@@ -34,7 +34,7 @@ function parseMapping(value: string): Record<string, string> {
 
 function defaultMultiplierValue(copyMode: FollowerCopyMode | undefined, multiplier: number | null | undefined): string {
   if (multiplier !== null && multiplier !== undefined) return multiplier.toString();
-  return copyMode === "BALANCE_RATIO" ? "1" : "";
+  return copyMode === "RISK_PERCENT" ? "1" : "";
 }
 
 export function FollowerSettingsDialog(props: {
@@ -97,7 +97,7 @@ export function FollowerSettingsDialog(props: {
           copyEnabled,
           copyMode,
           fixedLot: copyMode === "FIXED_LOT" ? optionalNumber(fixedLot) : null,
-          lotMultiplier: copyMode === "BALANCE_RATIO" || copyMode === "LOT_MULTIPLIER" || copyMode === "RISK_PERCENT" ? optionalNumber(lotMultiplier) : null,
+          lotMultiplier: copyMode === "LOT_MULTIPLIER" || copyMode === "RISK_PERCENT" ? optionalNumber(lotMultiplier) : null,
           riskPercent: copyMode === "RISK_PERCENT" ? optionalNumber(riskPercent) : null,
           minLot: optionalNumber(minLot),
           maxLot: optionalNumber(maxLot),
@@ -163,11 +163,11 @@ export function FollowerSettingsDialog(props: {
                   onChange={(event) => setFixedLot(event.target.value)}
                 />
                 <TextField
-                  label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"}
+                  label={copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"}
                   type="number"
                   min="0.01"
                   step="any"
-                  disabled={copyMode !== "BALANCE_RATIO" && copyMode !== "LOT_MULTIPLIER" && copyMode !== "RISK_PERCENT"}
+                  disabled={copyMode !== "LOT_MULTIPLIER" && copyMode !== "RISK_PERCENT"}
                   value={lotMultiplier}
                   onChange={(event) => setLotMultiplier(event.target.value)}
                 />
@@ -189,7 +189,7 @@ export function FollowerSettingsDialog(props: {
                 </p>
               ) : copyMode === "BALANCE_RATIO" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
-                  Balance ratio uses master lot × (master balance ÷ follower balance) × balance multiplier. Example: master 1.00 lot, master balance $10,000, follower balance $5,000, multiplier 1 = follower 2.00 lots.
+                  Balance ratio uses master lot × (master balance ÷ follower balance). Example: master 1.00 lot, master balance $10,000, follower balance $5,000 = follower 2.00 lots.
                 </p>
               ) : copyMode === "LOT_MULTIPLIER" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">

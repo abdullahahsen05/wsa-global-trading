@@ -834,10 +834,6 @@ function followerRiskMultiplier(follower: FollowerRow, strategy: StrategyRow): n
   return Number(strategy.risk_multiplier);
 }
 
-function followerProportionalMultiplier(follower: FollowerRow, strategy: StrategyRow): number {
-  return followerLotMultiplier(follower, strategy);
-}
-
 async function loadRiskSymbolSpecifications(
   adapter: BrokerAdapter,
   accountId: string,
@@ -1229,9 +1225,7 @@ async function simulateOneEvent(eventRow: {
       followerBalance: followerSnap?.balance ?? null,
       scalingMode,
       lotMultiplier: followerLotMultiplier(f, strategy),
-      riskMultiplier: scalingMode === "BALANCE_PROPORTIONAL"
-        ? followerProportionalMultiplier(f, strategy)
-        : followerRiskMultiplier(f, strategy),
+      riskMultiplier: followerRiskMultiplier(f, strategy),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
@@ -1926,9 +1920,7 @@ export async function executeCopyForEvent(
       followerBalance: followerSnap?.balance ?? null,
       scalingMode,
       lotMultiplier: followerLotMultiplier(f, strategy),
-      riskMultiplier: scalingMode === "BALANCE_PROPORTIONAL"
-        ? followerProportionalMultiplier(f, strategy)
-        : followerRiskMultiplier(f, strategy),
+      riskMultiplier: followerRiskMultiplier(f, strategy),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
@@ -2449,7 +2441,7 @@ export async function updateMyFollowerSettings(
   }
   const scalingMode = copyModeToScalingMode(settings.copyMode);
   const fixedLot = settings.copyMode === "FIXED_LOT" ? settings.fixedLot : null;
-  const lotMultiplier = settings.copyMode === "BALANCE_RATIO" || settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT"
+  const lotMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT"
     ? settings.lotMultiplier
     : null;
   const riskPercent = settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null;

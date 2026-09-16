@@ -383,9 +383,6 @@ export const copyFollowerSettingsSchema = z
     if (value.copyMode === "LOT_MULTIPLIER" && value.lotMultiplier === null) {
       context.addIssue({ code: "custom", path: ["lotMultiplier"], message: "Lot multiplier is required." });
     }
-    if (value.copyMode === "BALANCE_RATIO" && value.lotMultiplier === null) {
-      context.addIssue({ code: "custom", path: ["lotMultiplier"], message: "Balance multiplier is required." });
-    }
     if (value.copyMode === "RISK_PERCENT" && value.riskPercent === null) {
       context.addIssue({ code: "custom", path: ["riskPercent"], message: "Risk percent is required." });
     }

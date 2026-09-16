@@ -44,6 +44,15 @@ describe("advanced follower copy settings", () => {
     }).success).toBe(true);
   });
 
+  it("accepts balance-ratio mode without a multiplier", () => {
+    expect(copyFollowerSettingsSchema.safeParse({
+      ...validSettings,
+      copyMode: "BALANCE_RATIO",
+      lotMultiplier: null,
+      riskPercent: null,
+    }).success).toBe(true);
+  });
+
   it("rejects risk-percent mode when the follower risk value is missing", () => {
     expect(copyFollowerSettingsSchema.safeParse({
       ...validSettings,

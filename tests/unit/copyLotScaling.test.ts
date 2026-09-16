@@ -31,7 +31,7 @@ describe("calculateFollowerLot", () => {
     expect(r.lot).toBe(0.5);
   });
 
-  test("BALANCE_PROPORTIONAL scales by balance ratio with risk multiplier", () => {
+  test("BALANCE_PROPORTIONAL scales only by master balance over follower balance", () => {
     const r = calculateFollowerLot({
       masterLot: 2,
       masterBalance: 100000,
@@ -39,17 +39,16 @@ describe("calculateFollowerLot", () => {
       scalingMode: "BALANCE_PROPORTIONAL",
       riskMultiplier: 2,
     });
-    // 2 * (100000/25000) * 2 = 16.0
-    expect(r.lot).toBe(16);
+    // 2 * (100000/25000) = 8.0; multiplier is intentionally ignored.
+    expect(r.lot).toBe(8);
   });
 
-  test("BALANCE_PROPORTIONAL follows the spec balance multiplier formula", () => {
+  test("BALANCE_PROPORTIONAL follows the balance-ratio formula", () => {
     expect(calculateFollowerLot({
       masterLot: 1,
       masterBalance: 10000,
       followerBalance: 5000,
       scalingMode: "BALANCE_PROPORTIONAL",
-      riskMultiplier: 1,
     }).lot).toBe(2);
 
     expect(calculateFollowerLot({
@@ -57,18 +56,18 @@ describe("calculateFollowerLot", () => {
       masterBalance: 10000,
       followerBalance: 20000,
       scalingMode: "BALANCE_PROPORTIONAL",
-      riskMultiplier: 1,
     }).lot).toBe(0.5);
   });
 
-  test("BALANCE_PROPORTIONAL applies follower multiplier after the balance ratio", () => {
+  test("BALANCE_PROPORTIONAL ignores lot and risk multipliers", () => {
     expect(calculateFollowerLot({
       masterLot: 0.2,
       masterBalance: 10000,
       followerBalance: 10000,
       scalingMode: "BALANCE_PROPORTIONAL",
+      lotMultiplier: 10,
       riskMultiplier: 2,
-    }).lot).toBe(0.4);
+    }).lot).toBe(0.2);
   });
 
   test("FIXED_MULTIPLIER multiplies master lot", () => {
