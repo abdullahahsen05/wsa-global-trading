@@ -77,10 +77,10 @@ describe("advanced follower copy settings", () => {
     expect(mapFollowerSymbol("GOLD", { GOLD: "XAUUSD+" })).toBe("XAUUSD+");
   });
 
-  it("tries exact master symbols before broker aliases", () => {
+  it("tries explicit broker mappings before master symbols and aliases", () => {
     expect(followerSymbolCandidates("GOLD", {})).toEqual(["GOLD", "XAUUSD"]);
-    expect(followerSymbolCandidates("GOLD", { GOLD: "XAUUSD+" })).toEqual(["GOLD", "XAUUSD+", "XAUUSD"]);
+    expect(followerSymbolCandidates("GOLD", { GOLD: "XAUUSD+" })).toEqual(["XAUUSD+", "GOLD", "XAUUSD"]);
     expect(followerSymbolCandidates("XAUUSD", null)).toEqual(["XAUUSD", "GOLD"]);
-    expect(followerSymbolCandidates("EURUSD", { EURUSD: "EURUSD+" })).toEqual(["EURUSD", "EURUSD+"]);
+    expect(followerSymbolCandidates("EURUSD", { EURUSD: "EURUSD+" })).toEqual(["EURUSD+", "EURUSD"]);
   });
 });

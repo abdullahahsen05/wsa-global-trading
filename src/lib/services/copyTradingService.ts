@@ -1576,15 +1576,13 @@ export async function executeCopyForEvent(
     : await Promise.all([
         getStrategyRowCached(ev.strategy_id),
         getCopyGlobalSettingsCached(),
-        loadActiveFollowersCached(ev.strategy_id),
+        loadActiveFollowers(ev.strategy_id),
       ]);
   let followers = loadedFollowers;
-  if (hotRuntime && followers.length === 0) {
+  if (hotRuntime) {
     const freshFollowers = await loadActiveFollowers(ev.strategy_id);
-    if (freshFollowers.length > 0) {
-      followers = freshFollowers;
-      usingHotRuntime = false;
-    }
+    followers = freshFollowers;
+    usingHotRuntime = false;
   }
   logCopyTiming(ev.id, "strategy/settings loaded", startedAt, {
     strategyId: strategy.id,

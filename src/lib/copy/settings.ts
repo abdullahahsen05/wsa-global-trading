@@ -52,11 +52,12 @@ export function followerSymbolCandidates(
   const source = sourceSymbol.trim().toUpperCase();
   const candidates: string[] = [];
 
-  // Always try the exact master symbol first. Most brokers accept the same
-  // contract name, and this keeps copy trading automatic instead of depending
-  // on per-account manual mappings.
-  pushUniqueSymbol(candidates, source);
+  // If the follower has an explicit mapping, treat it as the broker-specific
+  // symbol and try it first. Some brokers reject the master symbol entirely
+  // (for example EURUSD vs EURUSD+), so falling back only after the master
+  // symbol can leave valid follower accounts uncopied.
   pushUniqueSymbol(candidates, mapping?.[source]);
+  pushUniqueSymbol(candidates, source);
 
   // Fallback aliases only run after the exact master symbol fails.
   // They cover common broker naming differences without forcing every follower
