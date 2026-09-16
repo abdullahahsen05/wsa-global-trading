@@ -787,6 +787,20 @@ async function loadActiveFollowers(strategyId: string): Promise<FollowerRow[]> {
   return (data ?? []) as FollowerRow[];
 }
 
+function followerScalingMode(follower: FollowerRow, strategy: StrategyRow): ScalingMode {
+  return (
+    (follower.copy_mode ? copyModeToScalingMode(follower.copy_mode) : null)
+    ?? follower.scaling_mode
+    ?? strategy.default_scaling_mode
+  ) as ScalingMode;
+}
+
+function followerMaxLot(follower: FollowerRow, strategy: StrategyRow, scalingMode: ScalingMode): number | null {
+  if (follower.max_lot !== null) return Number(follower.max_lot);
+  if (scalingMode === "FIXED_LOT") return null;
+  return strategy.max_follower_lot === null ? null : Number(strategy.max_follower_lot);
+}
+
 function getStrategyHotRuntime(strategyId: string): StrategyHotRuntime | null {
   const cached = strategyHotRuntimeCache.get(strategyId);
   if (!cached || cached.expiresAt <= Date.now()) return null;
@@ -1101,6 +1115,7 @@ async function simulateOneEvent(eventRow: {
       continue;
     }
 
+    const scalingMode = followerScalingMode(f, strategy);
     const lot = calculateFollowerLot({
       masterLot,
       entryPrice: eventRow.open_price === null ? null : Number(eventRow.open_price),
@@ -1109,18 +1124,14 @@ async function simulateOneEvent(eventRow: {
       masterBalance: masterSnap?.balance ?? null,
       followerEquity: followerSnap?.equity ?? null,
       followerBalance: followerSnap?.balance ?? null,
-      scalingMode: (
-        (f.copy_mode ? copyModeToScalingMode(f.copy_mode) : null)
-        ?? f.scaling_mode
-        ?? strategy.default_scaling_mode
-      ) as ScalingMode,
+      scalingMode,
       riskMultiplier: f.lot_multiplier === null
         ? (f.risk_multiplier === null ? Number(strategy.risk_multiplier) : Number(f.risk_multiplier))
         : Number(f.lot_multiplier),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
-      maxLot: f.max_lot === null ? (strategy.max_follower_lot === null ? null : Number(strategy.max_follower_lot)) : Number(f.max_lot),
+      maxLot: followerMaxLot(f, strategy, scalingMode),
     });
 
     if (lot.lot <= 0) {
@@ -1744,6 +1755,7 @@ export async function executeCopyForEvent(
       return;
     }
 
+    const scalingMode = followerScalingMode(f, strategy);
     const lot = calculateFollowerLot({
       masterLot,
       entryPrice: ev.open_price === null ? null : Number(ev.open_price),
@@ -1752,18 +1764,14 @@ export async function executeCopyForEvent(
       masterBalance: masterSnap?.balance ?? null,
       followerEquity: followerSnap?.equity ?? null,
       followerBalance: followerSnap?.balance ?? null,
-      scalingMode: (
-        (f.copy_mode ? copyModeToScalingMode(f.copy_mode) : null)
-        ?? f.scaling_mode
-        ?? strategy.default_scaling_mode
-      ) as ScalingMode,
+      scalingMode,
       riskMultiplier: f.lot_multiplier === null
         ? (f.risk_multiplier === null ? Number(strategy.risk_multiplier) : Number(f.risk_multiplier))
         : Number(f.lot_multiplier),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
-      maxLot: f.max_lot === null ? (strategy.max_follower_lot === null ? null : Number(strategy.max_follower_lot)) : Number(f.max_lot),
+      maxLot: followerMaxLot(f, strategy, scalingMode),
     });
     if (lot.lot <= 0) {
       await supabase.from("copy_execution_logs").insert({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.COPY_INVALID_LOT, error_message: lot.reason, calculated_lot: 0 });
@@ -2118,6 +2126,11 @@ export async function followStrategy(
     throw new CopyError(COPY_ERROR.FOLLOWER_NOT_ELIGIBLE, "Connect and synchronize this trading account before following live strategies.", 409);
   }
 
+  const requestedScalingMode = input.fixedLot !== undefined
+    ? "FIXED_LOT"
+    : input.scalingMode ?? null;
+  const requestedCopyMode = scalingModeToCopyMode(requestedScalingMode);
+
   const { data, error } = await supabase
     .from("copy_strategy_followers")
     .upsert(
@@ -2127,12 +2140,12 @@ export async function followStrategy(
         trader_id: traderUserId,
         tier: input.tier,
         status: "ACTIVE",
-        scaling_mode: input.scalingMode ?? null,
+        scaling_mode: requestedScalingMode,
         risk_multiplier: input.riskMultiplier ?? null,
         fixed_lot: input.fixedLot ?? null,
         max_lot: input.maxLot ?? null,
-        copy_mode: scalingModeToCopyMode(input.scalingMode ?? null),
-        lot_multiplier: input.riskMultiplier ?? null,
+        copy_mode: requestedCopyMode,
+        lot_multiplier: requestedCopyMode === "FIXED_LOT" ? null : input.riskMultiplier ?? null,
         risk_percent: null,
         consent_accepted_at: new Date().toISOString(),
         paused_at: null,

@@ -51,6 +51,10 @@ describe("calculateFollowerLot", () => {
     expect(calculateFollowerLot({ masterLot: 99, scalingMode: "FIXED_LOT", fixedLot: 0.2 }).lot).toBe(0.2);
   });
 
+  test("FIXED_LOT follows the follower lot instead of mirroring the tiny master lot", () => {
+    expect(calculateFollowerLot({ masterLot: 0.01, scalingMode: "FIXED_LOT", fixedLot: 5 }).lot).toBe(5);
+  });
+
   test("clamps to maxLot", () => {
     const r = calculateFollowerLot({
       masterLot: 10,
