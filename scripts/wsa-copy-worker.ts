@@ -26,6 +26,11 @@ type LiveSelfCopySource = {
   source_account_id: string;
   trading_accounts: { provider_account_id: string | null } | null;
 };
+type PositionEvent = {
+  eventType: "OPEN" | "MODIFY" | "CLOSE";
+  position: Position;
+  previous?: Position;
+};
 
 const brokerProviderId = getBrokerProviderId();
 const defaultCopyPollMs = brokerProviderId === "api2trade" ? "100" : "1000";
@@ -42,6 +47,11 @@ const selfCopyStreams = new Map<string, StreamHandle>();
 let stopping = false;
 let nextLifecycleScanAt = 0;
 const retryAfter = new Map<string, number>();
+const defaultEventConcurrency = brokerProviderId === "api2trade" ? "8" : "2";
+const eventConcurrency = Math.max(
+  1,
+  Number.parseInt(process.env.WSA_COPY_EVENT_CONCURRENCY ?? defaultEventConcurrency, 10) || Number(defaultEventConcurrency),
+);
 
 function retryDelayMs(): number {
   return 15_000;
@@ -150,6 +160,29 @@ async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY"
   });
 }
 
+async function runConcurrentBatches<T>(items: T[], limit: number, handler: (item: T) => Promise<void>) {
+  for (let index = 0; index < items.length; index += limit) {
+    await Promise.all(items.slice(index, index + limit).map(handler));
+  }
+}
+
+async function persistEventBatch(strategy: LiveStrategy, events: PositionEvent[]) {
+  if (events.length === 0) return;
+  const eventsByTicket = new Map<string, PositionEvent[]>();
+  for (const event of events) {
+    const ticket = String(event.position.id);
+    const group = eventsByTicket.get(ticket);
+    if (group) group.push(event);
+    else eventsByTicket.set(ticket, [event]);
+  }
+
+  await runConcurrentBatches([...eventsByTicket.values()], eventConcurrency, async (group) => {
+    for (const event of group) {
+      await persistEvent(strategy, event.eventType, event.position, event.previous);
+    }
+  });
+}
+
 async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle> {
   const providerAccountId = strategy.trading_accounts?.provider_account_id;
   if (!providerAccountId) throw new Error("Master account has no broker provider account.");
@@ -186,9 +219,7 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
     const handle: StreamHandle = {
       async reconcile() {
         const events = await source.reconcile({ emitExistingAsOpen: true });
-        for (const event of events) {
-          await persistEvent(strategy, event.eventType, event.position, event.previous);
-        }
+        await persistEventBatch(strategy, events);
         await createAdminClient().from("copy_strategies").update({
           engine_status: "LIVE",
           engine_error: null,
