@@ -42,6 +42,28 @@ function logCopyTiming(eventId: string, stage: string, startedAt: number, extra?
   console.log(`[copy-timing:${timingLabel(eventId)}] ${stage} +${elapsedMs}ms${suffix}`);
 }
 
+const defaultBrokerExecutionConcurrency = getBrokerProviderId() === "api2trade" ? "24" : "8";
+const brokerExecutionConcurrency = Math.max(
+  1,
+  Number.parseInt(process.env.WSA_COPY_BROKER_CONCURRENCY ?? defaultBrokerExecutionConcurrency, 10)
+    || Number(defaultBrokerExecutionConcurrency),
+);
+let activeBrokerExecutions = 0;
+const brokerExecutionQueue: Array<() => void> = [];
+
+async function withBrokerExecutionSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeBrokerExecutions >= brokerExecutionConcurrency) {
+    await new Promise<void>((resolve) => brokerExecutionQueue.push(resolve));
+  }
+  activeBrokerExecutions++;
+  try {
+    return await task();
+  } finally {
+    activeBrokerExecutions = Math.max(0, activeBrokerExecutions - 1);
+    brokerExecutionQueue.shift()?.();
+  }
+}
+
 type RuntimeCacheEntry<T> = {
   value: T;
   expiresAt: number;
@@ -1333,6 +1355,14 @@ async function inParallelBatches<T>(items: T[], size: number, task: (item: T) =>
   }
 }
 
+function followerExecutionBatchSize(): number {
+  const fallback = getBrokerProviderId() === "api2trade" ? "24" : "8";
+  return Math.max(
+    1,
+    Number.parseInt(process.env.WSA_COPY_FOLLOWER_BATCH_SIZE ?? fallback, 10) || Number(fallback),
+  );
+}
+
 async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapter, startedAt = Date.now()): Promise<ExecSummary> {
   const supabase = createAdminClient();
   const { data } = await supabase
@@ -1407,7 +1437,7 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
       group.push(link);
       byFollower.set(link.follower_account_id, group);
     }
-    await inParallelBatches([...byFollower.values()], 12, async (group) => {
+    await inParallelBatches([...byFollower.values()], followerExecutionBatchSize(), async (group) => {
       const first = group[0];
       const additionalVolume = group.reduce((sum, link) => sum + Number(link.copied_volume), 0)
         * ((currentVolume - previousVolume) / previousVolume);
@@ -1432,15 +1462,15 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
         linkId = reservation.id;
       }
       try {
-        const result = await adapter.openTrade({
-          accountId: first.follower_account_id,
-          symbol: first.symbol,
-          side: first.side === "SELL" ? "SELL" : "BUY",
-          volume: additionalVolume,
-          stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
-          takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
-          comment: `wsa:scale:${ev.strategy_id.slice(0, 8)}`,
-        });
+        const result = await withBrokerExecutionSlot(() => adapter.openTrade({
+            accountId: first.follower_account_id,
+            symbol: first.symbol,
+            side: first.side === "SELL" ? "SELL" : "BUY",
+            volume: additionalVolume,
+            stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
+            takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
+            comment: `wsa:scale:${ev.strategy_id.slice(0, 8)}`,
+          }));
         await supabase.from("copy_trade_links").update({
           status: "OPEN",
           follower_position_id: result.brokerPositionId ?? result.brokerOrderId ?? null,
@@ -1456,7 +1486,18 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
     });
   }
 
-  await inParallelBatches(mappedLinks, 12, async (link) => {
+  if (ev.event_type === "CLOSE" && mappedLinks.length > 0) {
+    const { error: closingError } = await supabase
+      .from("copy_trade_links")
+      .update({ status: "CLOSING" })
+      .in("id", mappedLinks.map((link) => link.id))
+      .eq("status", "OPEN");
+    if (closingError) {
+      throw new Error(`Copied trades could not be reserved for close: ${closingError.message}`);
+    }
+  }
+
+  await inParallelBatches(mappedLinks, followerExecutionBatchSize(), async (link) => {
     const baseLog = {
       strategy_id: ev.strategy_id,
       master_event_id: ev.id,
@@ -1468,13 +1509,12 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
     };
     try {
       if (ev.event_type === "CLOSE") {
-        await supabase.from("copy_trade_links").update({ status: "CLOSING" }).eq("id", link.id).eq("status", "OPEN");
         const brokerStartedAt = Date.now();
-        const result = await adapter.closeTrade({
-          accountId: link.follower_account_id,
-          brokerPositionId: link.follower_position_id,
-          comment: `wsa:close:${ev.strategy_id.slice(0, 8)}`,
-        });
+        const result = await withBrokerExecutionSlot(() => adapter.closeTrade({
+            accountId: link.follower_account_id,
+            brokerPositionId: link.follower_position_id,
+            comment: `wsa:close:${ev.strategy_id.slice(0, 8)}`,
+          }));
         logCopyTiming(ev.id, "follower close broker response", startedAt, {
           followerAccountId: link.follower_account_id,
           brokerMs: Date.now() - brokerStartedAt,
@@ -1487,16 +1527,16 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
         if (previousVolume > 0 && currentVolume < previousVolume) {
           const amount = Number(link.copied_volume) * ((previousVolume - currentVolume) / previousVolume);
           if (amount > 0) {
-            await adapter.closeTrade({ accountId: link.follower_account_id, brokerPositionId: link.follower_position_id, volume: amount, comment: `wsa:partial:${ev.strategy_id.slice(0, 8)}` });
+            await withBrokerExecutionSlot(() => adapter.closeTrade({ accountId: link.follower_account_id, brokerPositionId: link.follower_position_id, volume: amount, comment: `wsa:partial:${ev.strategy_id.slice(0, 8)}` }));
             await supabase.from("copy_trade_links").update({ copied_volume: Math.max(0, Number(link.copied_volume) - amount) }).eq("id", link.id);
           }
         }
-        const result = await adapter.modifyTrade({
-          accountId: link.follower_account_id,
-          brokerPositionId: link.follower_position_id,
-          stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
-          takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
-        });
+        const result = await withBrokerExecutionSlot(() => adapter.modifyTrade({
+            accountId: link.follower_account_id,
+            brokerPositionId: link.follower_position_id,
+            stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
+            takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
+          }));
         await supabase.from("copy_execution_logs").insert({ ...baseLog, action: "MODIFY", status: "SUCCESS", broker_order_id: result.brokerOrderId ?? null, raw_response: result.rawResponse ?? null });
       }
       summary.success++;
@@ -1896,16 +1936,16 @@ export async function executeCopyForEvent(
       let lastOpenError: unknown = null;
       for (const candidateSymbol of symbolCandidates) {
         try {
-          result = await adapter.openTrade({
-            accountId: f.follower_account_id,
-            symbol: candidateSymbol,
-            side: followerSide === "SELL" ? "SELL" : "BUY",
-            volume: lot.lot,
-            stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
-            takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
-            slippage: settings.maxSlippagePoints,
-            comment: `wsa:${strategy.id.slice(0, 8)}`,
-          });
+          result = await withBrokerExecutionSlot(() => adapter.openTrade({
+              accountId: f.follower_account_id,
+              symbol: candidateSymbol,
+              side: followerSide === "SELL" ? "SELL" : "BUY",
+              volume: lot.lot,
+              stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
+              takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
+              slippage: settings.maxSlippagePoints,
+              comment: `wsa:${strategy.id.slice(0, 8)}`,
+            }));
           executedSymbol = candidateSymbol;
           break;
         } catch (candidateError) {
@@ -2002,7 +2042,7 @@ export async function executeCopyForEvent(
     followers: followers.length,
     platformDelayMs: 0,
   });
-  await inParallelBatches(followers, 12, executeFollower);
+  await inParallelBatches(followers, followerExecutionBatchSize(), executeFollower);
 
   logCopyTiming(ev.id, "copy event complete", startedAt, summary);
   return summary;
