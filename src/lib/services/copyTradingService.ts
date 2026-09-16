@@ -819,7 +819,7 @@ function followerScalingMode(follower: FollowerRow, strategy: StrategyRow): Scal
 
 function followerMaxLot(follower: FollowerRow, strategy: StrategyRow, scalingMode: ScalingMode): number | null {
   if (follower.max_lot !== null) return Number(follower.max_lot);
-  if (scalingMode === "FIXED_LOT") return null;
+  if (scalingMode === "FIXED_LOT" || scalingMode === "FIXED_MULTIPLIER") return null;
   return strategy.max_follower_lot === null ? null : Number(strategy.max_follower_lot);
 }
 
