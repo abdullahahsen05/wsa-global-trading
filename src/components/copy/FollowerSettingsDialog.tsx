@@ -40,7 +40,7 @@ function defaultMultiplierValue(copyMode: FollowerCopyMode | undefined, multipli
 export function FollowerSettingsDialog(props: {
   subscription: CopyFollowerDto | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => void | Promise<void>;
 }) {
   const sub = props.subscription;
   const [copyEnabled, setCopyEnabled] = useState(sub?.copyEnabled ?? true);
@@ -115,7 +115,7 @@ export function FollowerSettingsDialog(props: {
       });
       const payload = await response.json();
       if (!payload.ok) throw new Error(payload.error?.message ?? "Settings could not be saved.");
-      props.onSaved();
+      await props.onSaved();
       props.onClose();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Settings could not be saved.");

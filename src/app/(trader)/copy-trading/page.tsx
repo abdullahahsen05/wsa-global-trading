@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -176,9 +176,20 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
     [connectionFilter, currentSubscriptions, normalizedConnectionSearch],
   );
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["billing-me"] });
-    queryClient.invalidateQueries({ queryKey: ["copy-my-subscriptions"] });
+  useEffect(() => {
+    if (!settingsSubscription) return;
+    const freshSubscription = subscriptions.find((subscription) => subscription.id === settingsSubscription.id);
+    if (freshSubscription && freshSubscription !== settingsSubscription) {
+      setSettingsSubscription(freshSubscription);
+    }
+  }, [settingsSubscription, subscriptions]);
+
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["billing-me"] }),
+      queryClient.invalidateQueries({ queryKey: ["copy-my-subscriptions"] }),
+    ]);
+    await queryClient.refetchQueries({ queryKey: ["copy-my-subscriptions"], type: "active" });
   };
 
   const followMutation = useMutation({
