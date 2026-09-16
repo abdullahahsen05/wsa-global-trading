@@ -2432,7 +2432,7 @@ export async function updateMyFollowerSettings(
   const supabase = createAdminClient();
   const { data: subscription } = await supabase
     .from("copy_strategy_followers")
-    .select("id, trader_id, follower_account_id")
+    .select("id, trader_id, follower_account_id, fixed_lot, lot_multiplier, risk_multiplier, risk_percent")
     .eq("id", subscriptionId)
     .maybeSingle();
   if (!subscription) throw new CopyError(COPY_ERROR.FOLLOWER_NOT_FOUND, "Subscription not found", 404);
@@ -2440,11 +2440,18 @@ export async function updateMyFollowerSettings(
     throw new CopyError(COPY_ERROR.FORBIDDEN, "Not your subscription", 403);
   }
   const scalingMode = copyModeToScalingMode(settings.copyMode);
-  const fixedLot = settings.copyMode === "FIXED_LOT" ? settings.fixedLot : null;
+  const fixedLot = settings.copyMode === "FIXED_LOT"
+    ? settings.fixedLot
+    : subscription.fixed_lot === null ? null : Number(subscription.fixed_lot);
   const lotMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT"
     ? settings.lotMultiplier
-    : null;
-  const riskPercent = settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null;
+    : subscription.lot_multiplier === null ? null : Number(subscription.lot_multiplier);
+  const riskMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT"
+    ? settings.lotMultiplier
+    : subscription.risk_multiplier === null ? null : Number(subscription.risk_multiplier);
+  const riskPercent = settings.copyMode === "RISK_PERCENT"
+    ? settings.riskPercent
+    : subscription.risk_percent === null ? null : Number(subscription.risk_percent);
   const { error } = await supabase
     .from("copy_strategy_followers")
     .update({
@@ -2453,7 +2460,7 @@ export async function updateMyFollowerSettings(
       scaling_mode: scalingMode,
       fixed_lot: fixedLot,
       lot_multiplier: lotMultiplier,
-      risk_multiplier: lotMultiplier,
+      risk_multiplier: riskMultiplier,
       risk_percent: riskPercent,
       min_lot: settings.minLot,
       max_lot: settings.maxLot,

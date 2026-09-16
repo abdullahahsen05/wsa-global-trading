@@ -236,14 +236,29 @@ export async function updateSelfCopyRelationship(params: {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("self_copy_relationships")
-    .select("id")
+    .select("id, copy_settings")
     .eq("id", params.id)
     .eq("trader_id", params.traderId)
     .maybeSingle();
   if (!data) throw new CopyError(COPY_ERROR.FORBIDDEN, "Self-copy setup not found or not yours.", 404);
   const patch: Record<string, unknown> = {};
   if (params.status !== undefined) patch.status = params.status;
-  if (params.copySettings !== undefined) patch.copy_settings = params.copySettings;
+  if (params.copySettings !== undefined) {
+    const existing = (data.copy_settings ?? {}) as Partial<FollowerSettingsPatch>;
+    patch.copy_settings = {
+      ...existing,
+      ...params.copySettings,
+      fixedLot: params.copySettings.copyMode === "FIXED_LOT"
+        ? params.copySettings.fixedLot
+        : existing.fixedLot ?? params.copySettings.fixedLot,
+      lotMultiplier: params.copySettings.copyMode === "LOT_MULTIPLIER" || params.copySettings.copyMode === "RISK_PERCENT"
+        ? params.copySettings.lotMultiplier
+        : existing.lotMultiplier ?? params.copySettings.lotMultiplier,
+      riskPercent: params.copySettings.copyMode === "RISK_PERCENT"
+        ? params.copySettings.riskPercent
+        : existing.riskPercent ?? params.copySettings.riskPercent,
+    };
+  }
   const { error } = await supabase.from("self_copy_relationships").update(patch).eq("id", params.id);
   if (error) throw new Error(`Failed to update self-copy setup: ${error.message}`);
   await writeAuditLog({
