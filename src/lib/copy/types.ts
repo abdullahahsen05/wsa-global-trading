@@ -9,7 +9,8 @@ export type ScalingMode =
   | "FIXED_MULTIPLIER"
   | "BALANCE_PROPORTIONAL"
   | "EQUITY_PROPORTIONAL"
-  | "FIXED_LOT";
+  | "FIXED_LOT"
+  | "RISK_PERCENT";
 export type MasterEventType = "OPEN" | "CLOSE" | "MODIFY";
 export type LogAction = "OPEN" | "CLOSE" | "MODIFY" | "SKIPPED";
 export type LogStatus = "PENDING" | "SUCCESS" | "FAILED" | "SKIPPED" | "RETRYING";
@@ -110,6 +111,7 @@ export interface CopyFollowerDto {
   copyEnabled: boolean;
   copyMode: FollowerCopyMode;
   lotMultiplier: number | null;
+  riskPercent: number | null;
   minLot: number | null;
   maxOpenTrades: number | null;
   maxDailyLossPercent: number | null;

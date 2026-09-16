@@ -108,6 +108,7 @@ async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY"
         side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
         volume: Number(position.volume ?? 0),
         previous_volume: previous ? Number(previous.volume ?? 0) : null,
+        open_price: Number(position.openPrice ?? 0),
         stop_loss: position.stopLoss ?? null,
         take_profit: position.takeProfit ?? null,
         event_time: eventTime,

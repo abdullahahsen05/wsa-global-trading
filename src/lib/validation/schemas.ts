@@ -255,6 +255,7 @@ const scalingModeEnum = z.enum([
   "BALANCE_PROPORTIONAL",
   "EQUITY_PROPORTIONAL",
   "FIXED_LOT",
+  "RISK_PERCENT",
 ]);
 
 const upperStringArray = z
@@ -361,6 +362,7 @@ export const copyFollowerSettingsSchema = z
     copyMode: copyModeEnum,
     fixedLot: optionalCopyNumber,
     lotMultiplier: z.number().positive().max(100).nullable(),
+    riskPercent: z.number().positive().max(100).nullable().optional().default(null),
     minLot: optionalCopyNumber,
     maxLot: optionalCopyNumber,
     maxOpenTrades: z.number().int().positive().max(10000).nullable(),
@@ -375,18 +377,14 @@ export const copyFollowerSettingsSchema = z
     emergencyStop: z.boolean(),
   })
   .superRefine((value, context) => {
-    if (value.copyMode === "RISK_PERCENT") {
-      context.addIssue({
-        code: "custom",
-        path: ["copyMode"],
-        message: "Risk-percent mode is coming soon and cannot be enabled yet.",
-      });
-    }
     if (value.copyMode === "FIXED_LOT" && value.fixedLot === null) {
       context.addIssue({ code: "custom", path: ["fixedLot"], message: "Fixed lot is required." });
     }
     if (value.copyMode === "LOT_MULTIPLIER" && value.lotMultiplier === null) {
       context.addIssue({ code: "custom", path: ["lotMultiplier"], message: "Lot multiplier is required." });
+    }
+    if (value.copyMode === "RISK_PERCENT" && value.riskPercent === null) {
+      context.addIssue({ code: "custom", path: ["riskPercent"], message: "Risk percent is required." });
     }
     if (value.minLot !== null && value.maxLot !== null && value.maxLot < value.minLot) {
       context.addIssue({ code: "custom", path: ["maxLot"], message: "Max lot cannot be below min lot." });

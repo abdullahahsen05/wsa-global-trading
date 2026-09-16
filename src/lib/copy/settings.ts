@@ -11,7 +11,7 @@ export function copyModeToScalingMode(mode: FollowerCopyMode): ScalingMode | nul
     case "BALANCE_RATIO":
       return "BALANCE_PROPORTIONAL";
     case "RISK_PERCENT":
-      return null;
+      return "RISK_PERCENT";
   }
 }
 
@@ -21,6 +21,8 @@ export function scalingModeToCopyMode(mode: ScalingMode | null): FollowerCopyMod
       return "FIXED_LOT";
     case "FIXED_MULTIPLIER":
       return "LOT_MULTIPLIER";
+    case "RISK_PERCENT":
+      return "RISK_PERCENT";
     case "BALANCE_PROPORTIONAL":
     case "EQUITY_PROPORTIONAL":
     default:

@@ -24,6 +24,7 @@ interface SelfCopySettings {
   copyMode: SelfCopyMode;
   fixedLot: number | null;
   lotMultiplier: number | null;
+  riskPercent: number | null;
   minLot: number | null;
   maxLot: number | null;
   maxOpenTrades: number | null;
@@ -173,6 +174,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
       copyMode,
       fixedLot: copyMode === "FIXED_LOT" ? numberOrNull(fixedLot) : null,
       lotMultiplier: copyMode === "FIXED_LOT" ? null : numberOrNull(lotMultiplier),
+      riskPercent: null,
       minLot: numberOrNull(minLot),
       maxLot: numberOrNull(maxLot),
       maxOpenTrades: numberOrNull(maxOpenTrades),

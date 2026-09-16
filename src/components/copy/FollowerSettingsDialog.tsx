@@ -42,6 +42,7 @@ export function FollowerSettingsDialog(props: {
   const [copyMode, setCopyMode] = useState<FollowerCopyMode>(sub?.copyMode ?? "BALANCE_RATIO");
   const [fixedLot, setFixedLot] = useState(sub?.fixedLot?.toString() ?? "");
   const [lotMultiplier, setLotMultiplier] = useState(sub?.lotMultiplier?.toString() ?? "");
+  const [riskPercent, setRiskPercent] = useState(sub?.riskPercent?.toString() ?? "");
   const [minLot, setMinLot] = useState(sub?.minLot?.toString() ?? "");
   const [maxLot, setMaxLot] = useState(sub?.maxLot?.toString() ?? "");
   const [maxOpenTrades, setMaxOpenTrades] = useState(sub?.maxOpenTrades?.toString() ?? "");
@@ -71,6 +72,7 @@ export function FollowerSettingsDialog(props: {
           copyMode,
           fixedLot: optionalNumber(fixedLot),
           lotMultiplier: optionalNumber(lotMultiplier),
+          riskPercent: optionalNumber(riskPercent),
           minLot: optionalNumber(minLot),
           maxLot: optionalNumber(maxLot),
           maxOpenTrades: optionalNumber(maxOpenTrades),
@@ -123,7 +125,7 @@ export function FollowerSettingsDialog(props: {
                   <option value="BALANCE_RATIO">Balance ratio</option>
                   <option value="LOT_MULTIPLIER">Lot multiplier</option>
                   <option value="FIXED_LOT">Fixed lot</option>
-                  <option value="RISK_PERCENT" disabled>Risk percent · coming soon</option>
+                  <option value="RISK_PERCENT">Risk percent</option>
                 </SelectField>
                 <TextField
                   label="Fixed lot"
@@ -135,15 +137,31 @@ export function FollowerSettingsDialog(props: {
                   onChange={(event) => setFixedLot(event.target.value)}
                 />
                 <TextField
-                  label="Lot multiplier"
+                  label={copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"}
                   type="number"
                   min="0.01"
                   step="0.01"
-                  disabled={copyMode !== "LOT_MULTIPLIER"}
+                  disabled={copyMode !== "LOT_MULTIPLIER" && copyMode !== "RISK_PERCENT"}
                   value={lotMultiplier}
                   onChange={(event) => setLotMultiplier(event.target.value)}
                 />
+                {copyMode === "RISK_PERCENT" ? (
+                  <TextField
+                    label="Risk percent"
+                    type="number"
+                    min="0.01"
+                    max="100"
+                    step="0.01"
+                    value={riskPercent}
+                    onChange={(event) => setRiskPercent(event.target.value)}
+                  />
+                ) : null}
               </div>
+              {copyMode === "RISK_PERCENT" ? (
+                <p className="mt-3 text-xs leading-5 text-muted">
+                  Risk-percent mode uses the follower balance/equity, master entry price, stop loss, and broker symbol specifications. Trades without a stop loss are rejected instead of guessed.
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-4 rounded-[4px] border border-line bg-background p-4 sm:grid-cols-2 lg:grid-cols-3">

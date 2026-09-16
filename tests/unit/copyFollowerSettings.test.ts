@@ -12,6 +12,7 @@ const validSettings = {
   copyMode: "LOT_MULTIPLIER" as const,
   fixedLot: null,
   lotMultiplier: 1.25,
+  riskPercent: null,
   minLot: 0.01,
   maxLot: 2,
   maxOpenTrades: 5,
@@ -31,13 +32,24 @@ describe("advanced follower copy settings", () => {
     expect(copyModeToScalingMode("FIXED_LOT")).toBe("FIXED_LOT");
     expect(copyModeToScalingMode("LOT_MULTIPLIER")).toBe("FIXED_MULTIPLIER");
     expect(copyModeToScalingMode("BALANCE_RATIO")).toBe("BALANCE_PROPORTIONAL");
-    expect(copyModeToScalingMode("RISK_PERCENT")).toBeNull();
+    expect(copyModeToScalingMode("RISK_PERCENT")).toBe("RISK_PERCENT");
   });
 
-  it("rejects unsupported risk-percent mode honestly", () => {
+  it("accepts risk-percent mode when the follower risk value is set", () => {
     expect(copyFollowerSettingsSchema.safeParse({
       ...validSettings,
       copyMode: "RISK_PERCENT",
+      lotMultiplier: null,
+      riskPercent: 1,
+    }).success).toBe(true);
+  });
+
+  it("rejects risk-percent mode when the follower risk value is missing", () => {
+    expect(copyFollowerSettingsSchema.safeParse({
+      ...validSettings,
+      copyMode: "RISK_PERCENT",
+      lotMultiplier: null,
+      riskPercent: null,
     }).success).toBe(false);
   });
 
