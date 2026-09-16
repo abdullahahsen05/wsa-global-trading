@@ -107,7 +107,7 @@ export function calculateFollowerLot(input: LotInputs): LotResult {
       if (!positive(input.masterLot)) return invalid("Master lot missing");
       if (!positive(input.masterBalance)) return invalid("Master balance unavailable");
       if (!positive(input.followerBalance)) return invalid("Follower balance unavailable");
-      raw = input.masterLot * (input.masterBalance! / input.followerBalance!);
+      raw = (input.masterLot / input.masterBalance!) * input.followerBalance!;
       break;
     }
     case "RISK_PERCENT": {

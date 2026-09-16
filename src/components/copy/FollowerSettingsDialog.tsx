@@ -189,7 +189,7 @@ export function FollowerSettingsDialog(props: {
                 </p>
               ) : copyMode === "BALANCE_RATIO" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
-                  Balance ratio uses master lot × (master balance ÷ follower balance). Example: master 1.00 lot, master balance $10,000, follower balance $5,000 = follower 2.00 lots.
+                  Balance ratio uses (master lot ÷ master balance) × follower balance. Example: master 1.00 lot, master balance $10,000, follower balance $5,000 = follower 0.50 lots.
                 </p>
               ) : copyMode === "LOT_MULTIPLIER" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
