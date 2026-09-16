@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown } from "lucide-react";
 import {
   DataTable,
   EmptyState,
@@ -228,17 +228,6 @@ function AnalyticsContent() {
     );
   }
 
-  const kpi = {
-    netProfit: analyticsSummary?.totalProfit.amount ?? 0,
-    winRate: analyticsSummary?.winRatePercent ?? 0,
-    riskUtilization: Math.min(((analyticsSummary?.maxDrawdownPercent ?? 0) / 8) * 100, 100),
-    avgR: analyticsSummary?.riskRewardRatio ?? 0,
-    status: analyticsSummary?.totalProfit.amount && analyticsSummary.totalProfit.amount > 0
-      ? "Positive"
-      : "Review",
-    note: "Metrics are calculated from the selected account scope and period.",
-  };
-
   const performanceRows = [
     ["Profit factor", (analyticsSummary?.profitFactor ?? 0).toFixed(2), "Gross profit / gross loss"],
     ["Win rate", formatPercent(analyticsSummary?.winRatePercent ?? 0), "Closed trades only"],
@@ -331,7 +320,7 @@ function AnalyticsContent() {
         <DrawdownMeter value={analyticsSummary?.maxDrawdownPercent ?? 0} />
       </div>
 
-      <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-2">
+      <div className="mt-5">
         <Panel className="h-full min-w-0 w-full">
           <div className="flex items-center justify-between gap-4">
             <div>
@@ -351,51 +340,6 @@ function AnalyticsContent() {
                 notes,
               ])}
             />
-          </div>
-        </Panel>
-
-        <Panel className="flex h-full min-w-0 w-full flex-col">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold text-foreground">KPI dashboard</h2>
-              <p className="mt-1 text-sm text-muted">Selected period: {period.replace("_", " ")}</p>
-            </div>
-          </div>
-          <div className="mt-5 rounded-[4px] border border-line bg-background p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-muted">Primary KPI</p>
-                <p className="mt-3 text-5xl font-semibold text-accent-2">{formatMoney({ amount: kpi.netProfit, currency: selectedCurrency })}</p>
-                <p className="mt-2 max-w-md text-sm text-muted">Net profit for the selected period</p>
-              </div>
-              <span className="rounded-[4px] border border-line bg-panel px-3 py-1 text-xs font-semibold text-foreground">
-                Performance focused
-              </span>
-            </div>
-          </div>
-
-          <div className="definition-grid mt-4 grid gap-0 sm:grid-cols-2">
-            <div className="p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Win rate</p>
-              <p className="mt-2 text-lg font-semibold text-foreground">{formatPercent(kpi.winRate)}</p>
-            </div>
-            <div className="p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Risk utilization</p>
-              <p className="mt-2 text-lg font-semibold text-accent">{formatPercent(kpi.riskUtilization)}</p>
-            </div>
-            <div className="p-4 sm:col-span-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Average R</p>
-              <p className="mt-2 text-lg font-semibold text-foreground">{kpi.avgR.toFixed(2)}R</p>
-            </div>
-          </div>
-          <div className="mt-4">
-            <div className="flex items-center gap-3 rounded-[4px] border border-line bg-[#050602] p-4">
-              <TrendingUp className="h-5 w-5 text-accent-2" />
-              <div>
-                <p className="text-sm font-semibold text-foreground">{kpi.status} trend</p>
-                <p className="mt-1 text-xs text-muted">{kpi.note}</p>
-              </div>
-            </div>
           </div>
         </Panel>
       </div>
