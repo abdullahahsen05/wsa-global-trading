@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { copyFollowerSettingsSchema } from "@/lib/validation/schemas";
 import {
   copyModeToScalingMode,
+  followerSymbolCandidates,
   mapFollowerSymbol,
   reverseFollowerSide,
 } from "@/lib/copy/settings";
@@ -58,9 +59,16 @@ describe("advanced follower copy settings", () => {
     expect(reverseFollowerSide("SELL", false)).toBe("SELL");
   });
 
-  it("maps broker gold aliases to a standard follower symbol by default", () => {
-    expect(mapFollowerSymbol("GOLD", {})).toBe("XAUUSD");
-    expect(mapFollowerSymbol("gold", null)).toBe("XAUUSD");
+  it("keeps the master symbol as the default follower symbol", () => {
+    expect(mapFollowerSymbol("GOLD", {})).toBe("GOLD");
+    expect(mapFollowerSymbol("gold", null)).toBe("GOLD");
     expect(mapFollowerSymbol("GOLD", { GOLD: "XAUUSD+" })).toBe("XAUUSD+");
+  });
+
+  it("tries exact master symbols before broker aliases", () => {
+    expect(followerSymbolCandidates("GOLD", {})).toEqual(["GOLD", "XAUUSD"]);
+    expect(followerSymbolCandidates("GOLD", { GOLD: "XAUUSD+" })).toEqual(["GOLD", "XAUUSD+", "XAUUSD"]);
+    expect(followerSymbolCandidates("XAUUSD", null)).toEqual(["XAUUSD", "GOLD"]);
+    expect(followerSymbolCandidates("EURUSD", { EURUSD: "EURUSD+" })).toEqual(["EURUSD", "EURUSD+"]);
   });
 });

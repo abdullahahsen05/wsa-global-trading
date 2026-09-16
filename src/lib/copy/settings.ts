@@ -35,8 +35,37 @@ export function mapFollowerSymbol(
   const source = sourceSymbol.trim().toUpperCase();
   const mapped = mapping?.[source]?.trim().toUpperCase();
   if (mapped) return mapped;
-  if (source === "GOLD") return "XAUUSD";
   return source;
+}
+
+function pushUniqueSymbol(target: string[], value: string | null | undefined) {
+  const symbol = value?.trim().toUpperCase();
+  if (symbol && !target.includes(symbol)) target.push(symbol);
+}
+
+export function followerSymbolCandidates(
+  sourceSymbol: string,
+  mapping: Record<string, string> | null | undefined,
+): string[] {
+  const source = sourceSymbol.trim().toUpperCase();
+  const candidates: string[] = [];
+
+  // Always try the exact master symbol first. Most brokers accept the same
+  // contract name, and this keeps copy trading automatic instead of depending
+  // on per-account manual mappings.
+  pushUniqueSymbol(candidates, source);
+  pushUniqueSymbol(candidates, mapping?.[source]);
+
+  // Fallback aliases only run after the exact master symbol fails.
+  // They cover common broker naming differences without forcing every follower
+  // into one global symbol before execution.
+  if (source === "GOLD") {
+    pushUniqueSymbol(candidates, "XAUUSD");
+  } else if (source === "XAUUSD") {
+    pushUniqueSymbol(candidates, "GOLD");
+  }
+
+  return candidates;
 }
 
 export function reverseFollowerSide(side: string | null, reverse: boolean): string | null {

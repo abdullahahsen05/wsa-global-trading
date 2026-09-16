@@ -2,12 +2,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { calculateFollowerLot } from "@/lib/copy/lotScaling";
 import { evaluateFollowerEligibility } from "@/lib/copy/eligibility";
-import { BrokerExecutionError, type BrokerAdapter } from "@/lib/broker/BrokerAdapter";
+import { BROKER_EXEC_ERROR, BrokerExecutionError, type BrokerAdapter } from "@/lib/broker/BrokerAdapter";
 import { createBrokerAdapter, getBrokerProviderId } from "@/lib/broker/provider";
 import { logBrokerOperation } from "@/lib/services/brokerOperationLog";
 import { getRiskEnforcementState } from "@/lib/services/riskService";
 import {
   copyModeToScalingMode,
+  followerSymbolCandidates,
   mapFollowerSymbol,
   reverseFollowerSide,
   scalingModeToCopyMode,
@@ -1618,7 +1619,8 @@ export async function executeCopyForEvent(
     f: Awaited<ReturnType<typeof loadActiveFollowers>>[number],
   ) => {
     const followerStartedAt = Date.now();
-    const followerSymbol = mapFollowerSymbol(ev.symbol, f.symbol_mapping);
+    const symbolCandidates = followerSymbolCandidates(ev.symbol, f.symbol_mapping);
+    const followerSymbol = symbolCandidates[0] ?? mapFollowerSymbol(ev.symbol, f.symbol_mapping);
     const followerSide = reverseFollowerSide(ev.side, f.reverse_copy);
     const baseLog = {
       strategy_id: strategy.id,
@@ -1821,30 +1823,53 @@ export async function executeCopyForEvent(
         followerAccountId: f.follower_account_id,
         tier: f.tier,
         symbol: followerSymbol,
+        symbolCandidates,
         lot: lot.lot,
         followerPrepMs: Date.now() - followerStartedAt,
         ultraFast: false,
       });
       markExecutionPriority([strategy.master_account_id, f.follower_account_id]);
       const brokerStartedAt = Date.now();
-      const result = await adapter.openTrade({
-        accountId: f.follower_account_id,
-        symbol: followerSymbol,
-        side: followerSide === "SELL" ? "SELL" : "BUY",
-        volume: lot.lot,
-        stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
-        takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
-        slippage: settings.maxSlippagePoints,
-        comment: `wsa:${strategy.id.slice(0, 8)}`,
-      });
+      let executedSymbol = followerSymbol;
+      let result = null as Awaited<ReturnType<typeof adapter.openTrade>> | null;
+      let lastOpenError: unknown = null;
+      for (const candidateSymbol of symbolCandidates) {
+        try {
+          result = await adapter.openTrade({
+            accountId: f.follower_account_id,
+            symbol: candidateSymbol,
+            side: followerSide === "SELL" ? "SELL" : "BUY",
+            volume: lot.lot,
+            stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
+            takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
+            slippage: settings.maxSlippagePoints,
+            comment: `wsa:${strategy.id.slice(0, 8)}`,
+          });
+          executedSymbol = candidateSymbol;
+          break;
+        } catch (candidateError) {
+          lastOpenError = candidateError;
+          const retryable = candidateError instanceof BrokerExecutionError
+            && candidateError.code === BROKER_EXEC_ERROR.PROVIDER_ERROR;
+          if (!retryable) throw candidateError;
+          logCopyTiming(ev.id, "follower broker symbol failed", startedAt, {
+            followerAccountId: f.follower_account_id,
+            symbol: candidateSymbol,
+            error: candidateError.message,
+          });
+        }
+      }
+      if (!result) throw lastOpenError ?? new Error("Broker execution failed.");
       logCopyTiming(ev.id, "follower broker response", startedAt, {
         followerAccountId: f.follower_account_id,
         tier: f.tier,
+        symbol: executedSymbol,
         brokerMs: Date.now() - brokerStartedAt,
       });
       markExecutionPriority([strategy.master_account_id, f.follower_account_id]);
       const linkWrite = supabase.from("copy_trade_links").update({
           status: "OPEN",
+          symbol: executedSymbol,
           follower_position_id: result.brokerPositionId ?? result.brokerOrderId ?? null,
           follower_order_id: result.brokerOrderId ?? null,
           copied_volume: result.executedVolume ?? lot.lot,
@@ -1857,6 +1882,7 @@ export async function executeCopyForEvent(
       void Promise.allSettled([
         supabase.from("copy_execution_logs").insert({
           ...baseLog,
+          symbol: executedSymbol,
           action: "OPEN",
           status: "SUCCESS",
           calculated_lot: lot.lot,
@@ -1869,7 +1895,7 @@ export async function executeCopyForEvent(
           userId: f.trader_id,
           operation: "OPEN_TRADE",
           status: "SUCCESS",
-          safeMetadata: { strategyId: strategy.id, symbol: followerSymbol, lot: lot.lot },
+          safeMetadata: { strategyId: strategy.id, symbol: executedSymbol, sourceSymbol: ev.symbol, lot: lot.lot },
         }),
       ]);
       summary.success++;
