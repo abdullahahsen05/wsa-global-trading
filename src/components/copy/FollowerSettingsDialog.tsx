@@ -32,6 +32,11 @@ function parseMapping(value: string): Record<string, string> {
   return result;
 }
 
+function defaultMultiplierValue(copyMode: FollowerCopyMode | undefined, multiplier: number | null | undefined): string {
+  if (multiplier !== null && multiplier !== undefined) return multiplier.toString();
+  return copyMode === "BALANCE_RATIO" ? "1" : "";
+}
+
 export function FollowerSettingsDialog(props: {
   subscription: CopyFollowerDto | null;
   onClose: () => void;
@@ -41,7 +46,7 @@ export function FollowerSettingsDialog(props: {
   const [copyEnabled, setCopyEnabled] = useState(sub?.copyEnabled ?? true);
   const [copyMode, setCopyMode] = useState<FollowerCopyMode>(sub?.copyMode ?? "BALANCE_RATIO");
   const [fixedLot, setFixedLot] = useState(sub?.fixedLot?.toString() ?? "");
-  const [lotMultiplier, setLotMultiplier] = useState(sub?.lotMultiplier?.toString() ?? "");
+  const [lotMultiplier, setLotMultiplier] = useState(defaultMultiplierValue(sub?.copyMode, sub?.lotMultiplier));
   const [riskPercent, setRiskPercent] = useState(sub?.riskPercent?.toString() ?? "");
   const [minLot, setMinLot] = useState(sub?.minLot?.toString() ?? "");
   const [maxLot, setMaxLot] = useState(sub?.maxLot?.toString() ?? "");
@@ -64,7 +69,7 @@ export function FollowerSettingsDialog(props: {
     setCopyEnabled(sub.copyEnabled ?? true);
     setCopyMode(sub.copyMode ?? "BALANCE_RATIO");
     setFixedLot(sub.fixedLot?.toString() ?? "");
-    setLotMultiplier(sub.lotMultiplier?.toString() ?? "");
+    setLotMultiplier(defaultMultiplierValue(sub.copyMode, sub.lotMultiplier));
     setRiskPercent(sub.riskPercent?.toString() ?? "");
     setMinLot(sub.minLot?.toString() ?? "");
     setMaxLot(sub.maxLot?.toString() ?? "");
@@ -92,7 +97,7 @@ export function FollowerSettingsDialog(props: {
           copyEnabled,
           copyMode,
           fixedLot: copyMode === "FIXED_LOT" ? optionalNumber(fixedLot) : null,
-          lotMultiplier: copyMode === "LOT_MULTIPLIER" || copyMode === "RISK_PERCENT" ? optionalNumber(lotMultiplier) : null,
+          lotMultiplier: copyMode === "BALANCE_RATIO" || copyMode === "LOT_MULTIPLIER" || copyMode === "RISK_PERCENT" ? optionalNumber(lotMultiplier) : null,
           riskPercent: copyMode === "RISK_PERCENT" ? optionalNumber(riskPercent) : null,
           minLot: optionalNumber(minLot),
           maxLot: optionalNumber(maxLot),
@@ -158,11 +163,11 @@ export function FollowerSettingsDialog(props: {
                   onChange={(event) => setFixedLot(event.target.value)}
                 />
                 <TextField
-                  label={copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"}
+                  label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"}
                   type="number"
                   min="0.01"
                   step="0.01"
-                  disabled={copyMode !== "LOT_MULTIPLIER" && copyMode !== "RISK_PERCENT"}
+                  disabled={copyMode !== "BALANCE_RATIO" && copyMode !== "LOT_MULTIPLIER" && copyMode !== "RISK_PERCENT"}
                   value={lotMultiplier}
                   onChange={(event) => setLotMultiplier(event.target.value)}
                 />
@@ -181,6 +186,10 @@ export function FollowerSettingsDialog(props: {
               {copyMode === "RISK_PERCENT" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
                   Risk-percent mode uses the follower balance/equity, master entry price, stop loss, and broker symbol specifications. Trades without a stop loss are rejected instead of guessed.
+                </p>
+              ) : copyMode === "BALANCE_RATIO" ? (
+                <p className="mt-3 text-xs leading-5 text-muted">
+                  Balance ratio uses master lot × (follower balance ÷ master balance) × balance multiplier. Example: master 1.00 lot, master balance $10,000, follower balance $5,000, multiplier 1 = follower 0.50 lot.
                 </p>
               ) : copyMode === "LOT_MULTIPLIER" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">

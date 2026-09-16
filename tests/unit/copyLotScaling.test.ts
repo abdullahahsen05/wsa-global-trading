@@ -43,6 +43,34 @@ describe("calculateFollowerLot", () => {
     expect(r.lot).toBe(1);
   });
 
+  test("BALANCE_PROPORTIONAL follows the spec balance multiplier formula", () => {
+    expect(calculateFollowerLot({
+      masterLot: 1,
+      masterBalance: 10000,
+      followerBalance: 5000,
+      scalingMode: "BALANCE_PROPORTIONAL",
+      riskMultiplier: 1,
+    }).lot).toBe(0.5);
+
+    expect(calculateFollowerLot({
+      masterLot: 1,
+      masterBalance: 10000,
+      followerBalance: 20000,
+      scalingMode: "BALANCE_PROPORTIONAL",
+      riskMultiplier: 1,
+    }).lot).toBe(2);
+  });
+
+  test("BALANCE_PROPORTIONAL applies follower multiplier after the balance ratio", () => {
+    expect(calculateFollowerLot({
+      masterLot: 0.2,
+      masterBalance: 10000,
+      followerBalance: 10000,
+      scalingMode: "BALANCE_PROPORTIONAL",
+      riskMultiplier: 2,
+    }).lot).toBe(0.4);
+  });
+
   test("FIXED_MULTIPLIER multiplies master lot", () => {
     expect(calculateFollowerLot({ masterLot: 0.5, scalingMode: "FIXED_MULTIPLIER", riskMultiplier: 3 }).lot).toBe(1.5);
   });
