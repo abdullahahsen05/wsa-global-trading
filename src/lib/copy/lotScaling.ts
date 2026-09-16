@@ -82,7 +82,11 @@ export function calculateFollowerLot(input: LotInputs): LotResult {
   const minLot = positive(input.minLot) ? input.minLot! : positive(specMinLot) ? specMinLot : DEFAULT_MIN_LOT;
   const maxLot = positive(input.maxLot) ? input.maxLot! : positive(specMaxLot) ? specMaxLot : null;
   const risk = positive(input.riskMultiplier) ? input.riskMultiplier! : 1;
-  const lotMultiplier = positive(input.lotMultiplier) ? input.lotMultiplier! : risk;
+  const explicitLotMultiplier = positive(input.lotMultiplier)
+    ? input.lotMultiplier!
+    : positive(input.riskMultiplier)
+      ? input.riskMultiplier!
+      : null;
 
   let raw: number;
   let riskAmount: number | null = null;
@@ -95,7 +99,8 @@ export function calculateFollowerLot(input: LotInputs): LotResult {
     }
     case "FIXED_MULTIPLIER": {
       if (!positive(input.masterLot)) return invalid("Master lot missing");
-      raw = input.masterLot * lotMultiplier;
+      if (!explicitLotMultiplier) return invalid("Lot multiplier not set");
+      raw = input.masterLot * explicitLotMultiplier;
       break;
     }
     case "BALANCE_PROPORTIONAL": {

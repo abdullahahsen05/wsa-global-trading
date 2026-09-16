@@ -86,6 +86,12 @@ describe("calculateFollowerLot", () => {
     expect(calculateFollowerLot({ masterLot: 1, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 0.4 }).lot).toBe(0.4);
   });
 
+  test("FIXED_MULTIPLIER requires an explicit saved multiplier", () => {
+    const result = calculateFollowerLot({ masterLot: 0.09, scalingMode: "FIXED_MULTIPLIER" });
+    expect(result.lot).toBe(0);
+    expect(result.reason).toContain("Lot multiplier");
+  });
+
   test("FIXED_MULTIPLIER prefers lotMultiplier over legacy riskMultiplier", () => {
     expect(calculateFollowerLot({
       masterLot: 0.09,
