@@ -193,7 +193,7 @@ export function FollowerSettingsDialog(props: {
                 </p>
               ) : copyMode === "LOT_MULTIPLIER" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
-                  Lot multiplier copies the master trade size multiplied by this value. Example: master 0.01 lot × multiplier 5 = follower 0.05 lot.
+                  Lot multiplier copies the master trade size multiplied by this value. Decimal point values are supported, for example 1.2, 1.8, or 1.9.
                 </p>
               ) : null}
             </div>
