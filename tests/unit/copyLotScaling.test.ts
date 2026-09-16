@@ -80,6 +80,13 @@ describe("calculateFollowerLot", () => {
     expect(calculateFollowerLot({ masterLot: 0.09, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 2 }).lot).toBe(0.18);
   });
 
+  test("FIXED_MULTIPLIER accepts decimal multipliers", () => {
+    expect(calculateFollowerLot({ masterLot: 1, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 1.1 }).lot).toBe(1.1);
+    expect(calculateFollowerLot({ masterLot: 1, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 1.2 }).lot).toBe(1.2);
+    expect(calculateFollowerLot({ masterLot: 1, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 0.3 }).lot).toBe(0.3);
+    expect(calculateFollowerLot({ masterLot: 1, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 0.4 }).lot).toBe(0.4);
+  });
+
   test("FIXED_MULTIPLIER prefers lotMultiplier over legacy riskMultiplier", () => {
     expect(calculateFollowerLot({
       masterLot: 0.09,

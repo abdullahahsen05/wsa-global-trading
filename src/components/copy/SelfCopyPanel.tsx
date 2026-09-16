@@ -313,7 +313,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
             {copyMode === "FIXED_LOT" ? (
               <TextField label="Fixed lot" type="number" min="0.01" step="0.01" required value={fixedLot} onChange={(event) => setFixedLot(event.target.value)} />
             ) : (
-              <TextField label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"} type="number" min="0.01" max="100" step="0.01" required value={lotMultiplier} onChange={(event) => setLotMultiplier(event.target.value)} />
+              <TextField label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"} type="number" min="0.01" max="100" step="any" required value={lotMultiplier} onChange={(event) => setLotMultiplier(event.target.value)} />
             )}
             {copyMode === "RISK_PERCENT" ? (
               <TextField label="Risk percent" type="number" min="0.01" max="100" step="0.01" required value={riskPercent} onChange={(event) => setRiskPercent(event.target.value)} />

@@ -166,7 +166,7 @@ export function FollowerSettingsDialog(props: {
                   label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"}
                   type="number"
                   min="0.01"
-                  step="0.01"
+                  step="any"
                   disabled={copyMode !== "BALANCE_RATIO" && copyMode !== "LOT_MULTIPLIER" && copyMode !== "RISK_PERCENT"}
                   value={lotMultiplier}
                   onChange={(event) => setLotMultiplier(event.target.value)}
