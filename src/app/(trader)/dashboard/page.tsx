@@ -108,6 +108,11 @@ function TraderPerformanceChart({
   drawdown: number;
   accountName: string;
 }) {
+  const [visibleSeries, setVisibleSeries] = useState({
+    equity: true,
+    pnl: true,
+    volume: true,
+  });
   const width = 1120;
   const height = 360;
   const padding = 34;
@@ -118,12 +123,43 @@ function TraderPerformanceChart({
   const volumeValues = buildDashboardVolumeSeries(trades);
   const latestEquity = equityCurve.at(-1)?.equity ?? currentEquity;
   const latestPnl = pnlValues.at(-1) ?? periodProfit;
+  const startingEquity = equityValues[0] || currentEquity || latestEquity;
+  const growthPercent = startingEquity > 0 ? ((latestEquity - startingEquity) / startingEquity) * 100 : 0;
   const equityPoints = normalizeSeriesPoints(equityValues, width, height, padding);
   const pnlPoints = normalizeSeriesPoints(pnlValues, width, height, padding);
   const equityPath = toSmoothPath(equityPoints);
   const equityArea = toSmoothAreaPath(equityPoints, height - padding);
   const pnlPath = toSmoothPath(pnlPoints);
   const maxVolume = Math.max(...volumeValues, 1);
+  const toggleSeries = (series: keyof typeof visibleSeries) => {
+    setVisibleSeries((current) => {
+      const next = { ...current, [series]: !current[series] };
+      return next.equity || next.pnl || next.volume ? next : current;
+    });
+  };
+  const legendItems = [
+    {
+      key: "equity" as const,
+      label: "Equity curve",
+      helper: "Live account balance/equity points",
+      tone: "bg-accent-2",
+      active: visibleSeries.equity,
+    },
+    {
+      key: "pnl" as const,
+      label: "Closed P&L curve",
+      helper: "Cumulative closed-trade profit",
+      tone: "bg-accent",
+      active: visibleSeries.pnl,
+    },
+    {
+      key: "volume" as const,
+      label: "Volume bars",
+      helper: "Recent traded lot volume",
+      tone: "bg-accent/50",
+      active: visibleSeries.volume,
+    },
+  ];
 
   return (
     <Panel className="mt-4 overflow-hidden p-0">
@@ -135,10 +171,11 @@ function TraderPerformanceChart({
             Curved equity, closed P&L, and traded volume from {accountName}. This replaces the dashboard TradingView widget with account analytics.
           </p>
         </div>
-        <div className="grid grid-cols-3 overflow-hidden rounded-[4px] border border-line bg-background text-right">
+        <div className="grid grid-cols-2 overflow-hidden rounded-[4px] border border-line bg-background text-right sm:grid-cols-4">
           {[
             ["Equity", formatMoney({ amount: latestEquity, currency }), "text-accent"],
             ["Closed P&L", formatMoney({ amount: latestPnl, currency }), latestPnl >= 0 ? "text-accent-2" : "text-danger"],
+            ["% Growth", formatPercent(growthPercent), growthPercent >= 0 ? "text-accent-2" : "text-danger"],
             ["Win rate", formatPercent(winRate), "text-foreground"],
           ].map(([label, value, tone]) => (
             <div key={label} className="min-w-28 border-r border-line px-4 py-3 last:border-r-0">
@@ -179,7 +216,7 @@ function TraderPerformanceChart({
                 strokeDasharray="7 10"
               />
             ))}
-            {volumeValues.map((volume, index) => {
+            {visibleSeries.volume ? volumeValues.map((volume, index) => {
               const barWidth = Math.max(8, (width - padding * 2) / Math.max(volumeValues.length, 1) - 10);
               const x = padding + (index / Math.max(volumeValues.length - 1, 1)) * (width - padding * 2) - barWidth / 2;
               const barHeight = Math.max(8, (volume / maxVolume) * 84);
@@ -194,26 +231,30 @@ function TraderPerformanceChart({
                   fill="rgba(255,207,0,0.18)"
                 />
               );
-            })}
-            <path d={equityArea} fill="url(#dashboardEquityFill)" />
-            <path
-              d={equityPath}
-              fill="none"
-              stroke="#21d19f"
-              strokeWidth="4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <path
-              d={pnlPath}
-              fill="none"
-              stroke="url(#dashboardPnlStroke)"
-              strokeWidth="3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeDasharray="9 9"
-            />
-            {equityPoints.at(-1) ? (
+            }) : null}
+            {visibleSeries.equity ? <path d={equityArea} fill="url(#dashboardEquityFill)" /> : null}
+            {visibleSeries.equity ? (
+              <path
+                d={equityPath}
+                fill="none"
+                stroke="#21d19f"
+                strokeWidth="4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : null}
+            {visibleSeries.pnl ? (
+              <path
+                d={pnlPath}
+                fill="none"
+                stroke="url(#dashboardPnlStroke)"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeDasharray="9 9"
+              />
+            ) : null}
+            {visibleSeries.equity && equityPoints.at(-1) ? (
               <circle
                 cx={equityPoints.at(-1)!.x}
                 cy={equityPoints.at(-1)!.y}
@@ -226,20 +267,37 @@ function TraderPerformanceChart({
           </svg>
         </div>
         <div className="mt-4 grid gap-3 text-xs text-muted sm:grid-cols-4">
-          {[
-            ["Equity curve", "Live account balance/equity points", "bg-accent-2"],
-            ["Closed P&L curve", "Cumulative closed-trade profit", "bg-accent"],
-            ["Volume bars", "Recent traded lot volume", "bg-accent/50"],
-            ["Drawdown", formatPercent(drawdown), drawdown > 0 ? "bg-danger" : "bg-muted"],
-          ].map(([label, helper, tone]) => (
-            <div key={label} className="rounded-[4px] border border-line bg-panel px-3 py-3">
-              <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${tone}`} />
-                <span className="font-semibold text-foreground">{label}</span>
+          {legendItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => toggleSeries(item.key)}
+              className={`rounded-[4px] border px-3 py-3 text-left transition ${
+                item.active
+                  ? "border-line bg-panel text-muted"
+                  : "border-line/60 bg-background text-muted/60 opacity-70"
+              }`}
+              aria-pressed={item.active}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <span className={`h-2 w-2 rounded-full ${item.active ? item.tone : "bg-muted/40"}`} />
+                  <span className="font-semibold text-foreground">{item.label}</span>
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
+                  {item.active ? "Shown" : "Hidden"}
+                </span>
               </div>
-              <p className="mt-1">{helper}</p>
-            </div>
+              <p className="mt-1">{item.helper}</p>
+            </button>
           ))}
+          <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${drawdown > 0 ? "bg-danger" : "bg-muted"}`} />
+              <span className="font-semibold text-foreground">Drawdown</span>
+            </div>
+            <p className="mt-1">{formatPercent(drawdown)}</p>
+          </div>
         </div>
       </div>
     </Panel>
