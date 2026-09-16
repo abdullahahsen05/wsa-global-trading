@@ -83,7 +83,7 @@ export function FollowerSettingsDialog(props: {
     setPauseOnDisconnect(sub.pauseOnDisconnect ?? true);
     setEmergencyStop(sub.emergencyStop ?? false);
     setError("");
-  }, [sub]);
+  }, [sub?.id]);
 
   async function save() {
     if (!sub || saving) return;
