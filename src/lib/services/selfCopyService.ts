@@ -517,6 +517,7 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       fixedLot: settings.fixedLot,
       lotMultiplier: settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
       riskMultiplier: settings.copyMode === "BALANCE_RATIO" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null,
+      riskPercent: settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null,
       minLot: settings.minLot,
       maxLot: settings.maxLot,
       symbolSpecifications,

@@ -16,7 +16,7 @@ import {
 } from "@/components/app/WorkspaceUI";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 
-type SelfCopyMode = "BALANCE_RATIO" | "LOT_MULTIPLIER" | "FIXED_LOT";
+type SelfCopyMode = "BALANCE_RATIO" | "LOT_MULTIPLIER" | "FIXED_LOT" | "RISK_PERCENT";
 type SelfCopyFilter = "ALL" | "LIVE" | "PAUSED";
 
 interface SelfCopySettings {
@@ -78,6 +78,7 @@ function symbolList(value: string) {
 function modeLabel(mode: SelfCopyMode) {
   if (mode === "FIXED_LOT") return "Fixed lot";
   if (mode === "LOT_MULTIPLIER") return "Lot multiplier";
+  if (mode === "RISK_PERCENT") return "Risk percent";
   return "Balance ratio";
 }
 
@@ -92,6 +93,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
   const [copyMode, setCopyMode] = useState<SelfCopyMode>("BALANCE_RATIO");
   const [fixedLot, setFixedLot] = useState("");
   const [lotMultiplier, setLotMultiplier] = useState("1");
+  const [riskPercent, setRiskPercent] = useState("");
   const [minLot, setMinLot] = useState("0.01");
   const [maxLot, setMaxLot] = useState("");
   const [maxOpenTrades, setMaxOpenTrades] = useState("10");
@@ -157,6 +159,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
     setCopyMode("BALANCE_RATIO");
     setFixedLot("");
     setLotMultiplier("1");
+    setRiskPercent("");
     setMinLot("0.01");
     setMaxLot("");
     setMaxOpenTrades("10");
@@ -174,7 +177,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
       copyMode,
       fixedLot: copyMode === "FIXED_LOT" ? numberOrNull(fixedLot) : null,
       lotMultiplier: copyMode === "FIXED_LOT" ? null : numberOrNull(lotMultiplier),
-      riskPercent: null,
+      riskPercent: copyMode === "RISK_PERCENT" ? numberOrNull(riskPercent) : null,
       minLot: numberOrNull(minLot),
       maxLot: numberOrNull(maxLot),
       maxOpenTrades: numberOrNull(maxOpenTrades),
@@ -218,6 +221,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
     setCopyMode(settings.copyMode);
     setFixedLot(settings.fixedLot?.toString() ?? "");
     setLotMultiplier(settings.lotMultiplier?.toString() ?? "1");
+    setRiskPercent(settings.riskPercent?.toString() ?? "");
     setMinLot(settings.minLot?.toString() ?? "0.01");
     setMaxLot(settings.maxLot?.toString() ?? "");
     setMaxOpenTrades(settings.maxOpenTrades?.toString() ?? "10");
@@ -304,12 +308,16 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
               <option value="BALANCE_RATIO">Balance ratio</option>
               <option value="LOT_MULTIPLIER">Lot multiplier</option>
               <option value="FIXED_LOT">Fixed lot</option>
+              <option value="RISK_PERCENT">Risk percent</option>
             </SelectField>
             {copyMode === "FIXED_LOT" ? (
               <TextField label="Fixed lot" type="number" min="0.01" step="0.01" required value={fixedLot} onChange={(event) => setFixedLot(event.target.value)} />
             ) : (
-              <TextField label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : "Lot multiplier"} type="number" min="0.01" max="100" step="0.01" required value={lotMultiplier} onChange={(event) => setLotMultiplier(event.target.value)} />
+              <TextField label={copyMode === "BALANCE_RATIO" ? "Balance multiplier" : copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"} type="number" min="0.01" max="100" step="0.01" required value={lotMultiplier} onChange={(event) => setLotMultiplier(event.target.value)} />
             )}
+            {copyMode === "RISK_PERCENT" ? (
+              <TextField label="Risk percent" type="number" min="0.01" max="100" step="0.01" required value={riskPercent} onChange={(event) => setRiskPercent(event.target.value)} />
+            ) : null}
             <TextField label="Minimum lot" type="number" min="0.01" step="0.01" value={minLot} onChange={(event) => setMinLot(event.target.value)} />
             <TextField label="Maximum lot" type="number" min="0.01" step="0.01" value={maxLot} onChange={(event) => setMaxLot(event.target.value)} />
             <TextField label="Maximum open trades" type="number" min="1" max="10000" step="1" value={maxOpenTrades} onChange={(event) => setMaxOpenTrades(event.target.value)} />
