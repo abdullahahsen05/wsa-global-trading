@@ -44,14 +44,32 @@ const warmupMs = Math.max(
 const workerId = `wsa-copy-${process.pid}`;
 const streams = new Map<string, StreamHandle>();
 const selfCopyStreams = new Map<string, StreamHandle>();
+const activeStrategies = new Map<string, LiveStrategy>();
+const activeSelfCopySources = new Map<string, LiveSelfCopySource>();
 let stopping = false;
 let nextLifecycleScanAt = 0;
+let nextStreamDiscoveryAt = 0;
 const retryAfter = new Map<string, number>();
 const defaultEventConcurrency = brokerProviderId === "api2trade" ? "8" : "2";
 const eventConcurrency = Math.max(
   1,
   Number.parseInt(process.env.WSA_COPY_EVENT_CONCURRENCY ?? defaultEventConcurrency, 10) || Number(defaultEventConcurrency),
 );
+const backgroundJobPollMs = Math.max(
+  250,
+  Number.parseInt(process.env.WSA_COPY_BACKGROUND_JOB_POLL_MS ?? "1000", 10) || 1_000,
+);
+const streamDiscoveryMs = Math.max(
+  1_000,
+  Number.parseInt(process.env.WSA_COPY_STREAM_DISCOVERY_MS ?? "2000", 10) || 2_000,
+);
+const heartbeatMs = Math.max(
+  2_000,
+  Number.parseInt(process.env.WSA_COPY_HEARTBEAT_MS ?? "5000", 10) || 5_000,
+);
+let nextBackgroundJobRunAt = 0;
+let backgroundJobRun: Promise<void> | null = null;
+const strategyHeartbeatAt = new Map<string, number>();
 
 function retryDelayMs(): number {
   return 15_000;
@@ -183,6 +201,21 @@ async function persistEventBatch(strategy: LiveStrategy, events: PositionEvent[]
   });
 }
 
+function touchStrategyLiveHeartbeat(strategyId: string) {
+  const now = Date.now();
+  if (now - (strategyHeartbeatAt.get(strategyId) ?? 0) < heartbeatMs) return;
+  strategyHeartbeatAt.set(strategyId, now);
+  void createAdminClient().from("copy_strategies").update({
+    engine_status: "LIVE",
+    engine_error: null,
+    engine_heartbeat_at: new Date(now).toISOString(),
+  }).eq("id", strategyId).then(({ error }) => {
+    if (error) {
+      console.error(`[copy-worker] heartbeat update failed for ${strategyId}: ${error.message}`);
+    }
+  });
+}
+
 async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle> {
   const providerAccountId = strategy.trading_accounts?.provider_account_id;
   if (!providerAccountId) throw new Error("Master account has no broker provider account.");
@@ -220,11 +253,7 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
       async reconcile() {
         const events = await source.reconcile({ emitExistingAsOpen: true });
         await persistEventBatch(strategy, events);
-        await createAdminClient().from("copy_strategies").update({
-          engine_status: "LIVE",
-          engine_error: null,
-          engine_heartbeat_at: new Date().toISOString(),
-        }).eq("id", strategy.id);
+        touchStrategyLiveHeartbeat(strategy.id);
       },
       async close() {
         clearInterval(warmTicker);
@@ -506,28 +535,54 @@ async function reconcileStreams() {
     nextLifecycleScanAt = Date.now() + 60 * 60 * 1_000;
   }
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("copy_strategies")
-    .select("id, master_account_id, trading_accounts!master_account_id(provider_account_id)")
-    .eq("status", "ACTIVE").eq("live_enabled", true).in("engine_status", ["LIVE", "STARTING", "ERROR"]).limit(500);
-  if (error) throw new Error(`Live strategies could not be loaded: ${error.message}`);
-  const active = new Map((data ?? []).map((entry) => [entry.id, entry as unknown as LiveStrategy]));
-  for (const [strategyId, handle] of streams) {
-    if (!active.has(strategyId)) {
-      await handle.close();
-      streams.delete(strategyId);
+  if (Date.now() >= nextStreamDiscoveryAt) {
+    const [{ data, error }, { data: relationshipRows, error: relationshipError }] = await Promise.all([
+      supabase
+        .from("copy_strategies")
+        .select("id, master_account_id, trading_accounts!master_account_id(provider_account_id)")
+        .eq("status", "ACTIVE").eq("live_enabled", true).in("engine_status", ["LIVE", "STARTING", "ERROR"]).limit(500),
+      supabase
+        .from("self_copy_relationships")
+        .select("source_account_id, trading_accounts!source_account_id(provider_account_id)")
+        .eq("status", "LIVE")
+        .limit(1000),
+    ]);
+    if (error) throw new Error(`Live strategies could not be loaded: ${error.message}`);
+    if (relationshipError) throw new Error(`Live self-copy sources could not be loaded: ${relationshipError.message}`);
+
+    activeStrategies.clear();
+    for (const entry of data ?? []) {
+      const strategy = entry as unknown as LiveStrategy;
+      activeStrategies.set(strategy.id, strategy);
+    }
+    activeSelfCopySources.clear();
+    for (const row of relationshipRows ?? []) {
+      const source = row as unknown as LiveSelfCopySource;
+      activeSelfCopySources.set(source.source_account_id, source);
+    }
+    nextStreamDiscoveryAt = Date.now() + streamDiscoveryMs;
+
+    for (const [strategyId, handle] of streams) {
+      if (!activeStrategies.has(strategyId)) {
+        await handle.close();
+        streams.delete(strategyId);
+        strategyHeartbeatAt.delete(strategyId);
+      }
+    }
+    for (const [sourceAccountId, handle] of selfCopyStreams) {
+      if (!activeSelfCopySources.has(sourceAccountId)) {
+        await handle.close();
+        selfCopyStreams.delete(sourceAccountId);
+      }
     }
   }
-  for (const strategy of active.values()) {
+
+  for (const strategy of activeStrategies.values()) {
     if (streams.has(strategy.id)) {
       try {
         await streams.get(strategy.id)!.reconcile();
         retryAfter.delete(`strategy:${strategy.id}`);
-        await supabase.from("copy_strategies").update({
-          engine_status: "LIVE",
-          engine_error: null,
-          engine_heartbeat_at: new Date().toISOString(),
-        }).eq("id", strategy.id);
+        touchStrategyLiveHeartbeat(strategy.id);
       } catch (error) {
         await streams.get(strategy.id)!.close().catch(() => undefined);
         streams.delete(strategy.id);
@@ -552,24 +607,7 @@ async function reconcileStreams() {
     }
   }
 
-  const { data: relationshipRows, error: relationshipError } = await supabase
-    .from("self_copy_relationships")
-    .select("source_account_id, trading_accounts!source_account_id(provider_account_id)")
-    .eq("status", "LIVE")
-    .limit(1000);
-  if (relationshipError) throw new Error(`Live self-copy sources could not be loaded: ${relationshipError.message}`);
-  const activeSources = new Map<string, LiveSelfCopySource>();
-  for (const row of relationshipRows ?? []) {
-    const source = row as unknown as LiveSelfCopySource;
-    activeSources.set(source.source_account_id, source);
-  }
-  for (const [sourceAccountId, handle] of selfCopyStreams) {
-    if (!activeSources.has(sourceAccountId)) {
-      await handle.close();
-      selfCopyStreams.delete(sourceAccountId);
-    }
-  }
-  for (const source of activeSources.values()) {
+  for (const source of activeSelfCopySources.values()) {
     if (selfCopyStreams.has(source.source_account_id)) {
       try {
         await selfCopyStreams.get(source.source_account_id)!.reconcile();
@@ -599,11 +637,33 @@ async function reconcileStreams() {
 
 async function shutdown() {
   stopping = true;
+  await backgroundJobRun?.catch(() => undefined);
   await Promise.allSettled([...streams.values()].map((stream) => stream.close()));
   await Promise.allSettled([...selfCopyStreams.values()].map((stream) => stream.close()));
   streams.clear();
   selfCopyStreams.clear();
   retryAfter.clear();
+}
+
+function runBackgroundJobsWithoutBlockingRealtime() {
+  if (backgroundJobRun || Date.now() < nextBackgroundJobRunAt) return;
+  nextBackgroundJobRunAt = Date.now() + backgroundJobPollMs;
+  backgroundJobRun = runWorkerOnce({
+    workerId,
+    limit: 25,
+    types: ["EXECUTE_COPY_EVENT", "CLOSE_COPY_STRATEGY", "RETRY_COPY_LOG"],
+  })
+    .then(() => undefined)
+    .catch((error) => {
+      console.error(
+        `[copy-worker] background job cycle failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+    })
+    .finally(() => {
+      backgroundJobRun = null;
+    });
 }
 
 async function main() {
@@ -622,7 +682,7 @@ async function main() {
   while (!stopping) {
     try {
       await reconcileStreams();
-      await runWorkerOnce({ workerId, limit: 25, types: ["EXECUTE_COPY_EVENT", "CLOSE_COPY_STRATEGY", "RETRY_COPY_LOG"] });
+      runBackgroundJobsWithoutBlockingRealtime();
     } catch (error) {
       console.error(
         `[copy-worker] reconcile cycle failed; retrying in ${pollMs}ms: ${
