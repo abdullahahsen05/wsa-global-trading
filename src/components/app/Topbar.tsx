@@ -128,7 +128,7 @@ export function Topbar({
     activeItem?.href === "/dashboard"
       ? "Equity, risk, and performance at a glance."
       : activeItem?.href === "/accounts"
-        ? "Broker-linked accounts and connection health."
+        ? "Accounts and connection health."
         : activeItem?.href === "/analytics"
           ? "Profitability, drawdown, and performance quality."
           : activeItem?.href === "/risk"

@@ -66,7 +66,7 @@ export default function AccountsPage() {
     return (
       <WorkspacePage
         eyebrow="Trading accounts"
-        title="Broker accounts"
+        title="Accounts"
         description="Loading your platform access status."
       >
         <Panel>
@@ -80,12 +80,12 @@ export default function AccountsPage() {
     return (
       <WorkspacePage
         eyebrow="Trading accounts"
-        title="Broker accounts"
+        title="Accounts"
         description="Activate your platform subscription to unlock account connection and supervision."
       >
         <PlatformSubscriptionLocked
           access={access}
-          description="Activate the WSA Global platform subscription to unlock MT5 account connection, account detail views, and core broker-account workflow tools."
+          description="Activate the WSA Global platform subscription to unlock MT5 account connection, account detail views, and core account workflow tools."
         />
       </WorkspacePage>
     );
@@ -337,8 +337,8 @@ function AccountsContent() {
   return (
     <WorkspacePage
       eyebrow="Trading accounts"
-      title="Broker accounts"
-      description="Connect, search, monitor, and reconnect every broker account from one operational directory."
+      title="Accounts"
+      description="Connect, search, monitor, and reconnect every account from one operational directory."
       action={
         <PageActionGroup>
           <Dialog.Root
@@ -388,7 +388,7 @@ function AccountsContent() {
                 {step === "setup" && (
                   <>
                     <Dialog.Title className="text-xl font-semibold text-foreground">
-                      Connect broker account
+                      Connect account
                     </Dialog.Title>
                     <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
                       Name your account, enter your broker name, and then connect the trading
@@ -666,10 +666,10 @@ function AccountsContent() {
         ) : filteredAccounts.length === 0 ? (
           <div className="p-5">
             <EmptyState
-              title={tradingAccounts.length ? "No accounts match your filters" : "No broker accounts yet"}
+              title={tradingAccounts.length ? "No accounts match your filters" : "No accounts yet"}
               description={tradingAccounts.length
                 ? "Try another search term or clear the current status filter."
-                : "Connect a broker account to begin live synchronization."}
+                : "Connect an account to begin live synchronization."}
               action={tradingAccounts.length ? (
                 <GhostButton type="button" onClick={() => { setQuery(""); setStatusFilter("ALL"); }}>
                   Reset filters

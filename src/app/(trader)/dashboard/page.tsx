@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
 import { BillingCheckoutModal } from "@/components/app/BillingCheckoutModal";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
@@ -37,27 +36,6 @@ import { getAccountDisplayIdentity } from "@/lib/domain/accountIdentity";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 type SessionUser = { id: string; name: string; email: string };
-
-const TradingChart = dynamic(
-  () => import("@/components/charts/TradingChart").then((mod) => mod.TradingChart),
-  {
-    ssr: false,
-    loading: () => (
-      <section className="section-surface overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-5 py-4">
-          <div>
-            <div className="h-6 w-44 animate-pulse rounded-full bg-panel-strong" />
-            <div className="mt-3 h-4 w-32 animate-pulse rounded-full bg-panel-strong" />
-          </div>
-          <div className="h-6 w-20 animate-pulse rounded-full bg-panel-strong" />
-        </div>
-        <div className="px-5 py-5">
-          <div className="inner-surface h-[560px] animate-pulse" />
-        </div>
-      </section>
-    ),
-  },
-);
 
 const dashboardTabs: Array<{ id: DashboardView; label: string }> = [
   { id: "CURRENT_EQUITY", label: "Current Equity" },
@@ -626,9 +604,6 @@ function TraderDashboardContent() {
             </div>
             <PerformanceRings items={performanceRings} />
           </Panel>
-          <div className="mt-4">
-            <TradingChart accountId={baseAccount?.accountId} />
-          </div>
           <DashboardModeOverlay
             open={activeOverlay !== null}
             view={activeOverlay}

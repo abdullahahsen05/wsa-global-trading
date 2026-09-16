@@ -30,6 +30,11 @@ const INTERVAL_MAP: Record<Timeframe, string> = {
   "1D": "D",
 };
 
+const SYMBOL_OPTIONS = Object.entries(TRADING_VIEW_SYMBOLS).map(([label, value]) => ({
+  label,
+  value,
+}));
+
 function cropTargetApi(): CropTargetConstructor | undefined {
   return (window as typeof window & { CropTarget?: CropTargetConstructor }).CropTarget;
 }
@@ -59,6 +64,7 @@ async function waitForVideoFrame(video: HTMLVideoElement): Promise<void> {
 }
 
 export function TradingChart({ accountId }: { accountId?: string }) {
+  const [selectedSymbol, setSelectedSymbol] = useState(TRADING_VIEW_SYMBOLS.XAUUSD);
   const [timeframe, setTimeframe] = useState<Timeframe>("15m");
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [question, setQuestion] = useState("");
@@ -74,7 +80,10 @@ export function TradingChart({ accountId }: { accountId?: string }) {
   const streamRef = useRef<MediaStream | null>(null);
   const streamIsRegionCroppedRef = useRef(false);
 
-  const tvSymbol = TRADING_VIEW_SYMBOLS.XAUUSD;
+  const selectedSymbolLabel =
+    SYMBOL_OPTIONS.find((option) => option.value === selectedSymbol)?.label ??
+    selectedSymbol.replace(/^[A-Z]+:/, "");
+  const tvSymbol = selectedSymbol;
   const tvInterval = INTERVAL_MAP[timeframe];
   const captureSupported = typeof window !== "undefined"
     && Boolean(
@@ -234,7 +243,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
 
       const form = new FormData();
       form.set("message", message);
-      form.set("symbol", "XAUUSD");
+      form.set("symbol", selectedSymbolLabel);
       form.set("timeframe", timeframe);
       if (accountId) form.set("accountId", accountId);
       if (streamRef.current) {
@@ -275,7 +284,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
       <div className="flex flex-col items-start justify-between gap-4 border-b border-line px-4 py-4 sm:flex-row sm:flex-wrap sm:px-5 sm:py-5">
         <div>
           <div className="flex items-center gap-2">
-            <span className="status-pill px-3 py-1 text-xs">XAUUSD</span>
+            <span className="status-pill px-3 py-1 text-xs">{selectedSymbolLabel}</span>
             <span className="text-xs font-medium text-muted">TradingView live chart</span>
           </div>
           <div className="mt-3 flex flex-wrap items-end gap-x-3 gap-y-1">
@@ -284,17 +293,34 @@ export function TradingChart({ accountId }: { accountId?: string }) {
           </div>
         </div>
 
-        <div className="invisible-scrollbar flex max-w-full flex-nowrap gap-2 overflow-x-auto sm:flex-wrap">
-          {timeframes.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => setTimeframe(item)}
-              className={`btn-dark h-9 px-4 text-xs ${timeframe === item ? "btn-active" : ""}`}
-            >
-              {item}
-            </button>
-          ))}
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+          <label className="sr-only" htmlFor="trading-chart-symbol">
+            Chart symbol
+          </label>
+          <select
+            id="trading-chart-symbol"
+            value={selectedSymbol}
+            onChange={(event) => setSelectedSymbol(event.target.value)}
+            className="h-9 min-w-36 rounded-[4px] border border-line bg-background px-3 text-xs font-semibold text-foreground outline-none transition focus:border-accent"
+          >
+            {SYMBOL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <div className="invisible-scrollbar flex max-w-full flex-nowrap gap-2 overflow-x-auto sm:flex-wrap">
+            {timeframes.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setTimeframe(item)}
+                className={`btn-dark h-9 px-4 text-xs ${timeframe === item ? "btn-active" : ""}`}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -306,7 +332,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
               interval={tvInterval}
               height="clamp(360px, 62dvh, 560px)"
               theme="dark"
-              allowSymbolChange={false}
+              allowSymbolChange
             />
           </div>
           <button
@@ -327,10 +353,10 @@ export function TradingChart({ accountId }: { accountId?: string }) {
               <h4 className="text-sm font-semibold text-foreground">{ASK_ASSISTANT_LABEL} about this chart</h4>
               <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
                 {chartShared
-                  ? `${AI_ASSISTANT_NAME} will capture the visible XAUUSD ${timeframe} chart when you ask. The frame is processed for this answer and is not stored.`
+                  ? `${AI_ASSISTANT_NAME} will capture the visible ${selectedSymbolLabel} ${timeframe} chart when you ask. The frame is processed for this answer and is not stored.`
                   : captureEnabled
                     ? `When you ask, choose this browser tab. ${AI_ASSISTANT_NAME} will capture the TradingView region and review the visible candles.`
-                    : "Uses XAUUSD, timeframe, selected-account metrics, recent trades, and news. Live chart capture is disabled on this deployment."}
+                    : `Uses ${selectedSymbolLabel}, timeframe, selected-account metrics, recent trades, and news. Live chart capture is disabled on this deployment.`}
               </p>
             </div>
             <span className="rounded-[4px] border border-line bg-background px-3 py-1 text-xs font-semibold text-muted">
@@ -376,7 +402,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
                 onChange={(event) => setQuestion(event.target.value)}
                 maxLength={2000}
                 rows={2}
-                placeholder="Review the visible structure, key zones, and invalidation risk."
+                placeholder={`Review the visible ${selectedSymbolLabel} structure, key zones, and invalidation risk.`}
                 className="min-h-[54px] resize-none rounded-[4px] border border-line bg-background px-4 py-3 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-accent"
               />
             </label>
