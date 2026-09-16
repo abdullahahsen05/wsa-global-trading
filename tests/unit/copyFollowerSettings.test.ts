@@ -57,4 +57,10 @@ describe("advanced follower copy settings", () => {
     expect(reverseFollowerSide("BUY", true)).toBe("SELL");
     expect(reverseFollowerSide("SELL", false)).toBe("SELL");
   });
+
+  it("maps broker gold aliases to a standard follower symbol by default", () => {
+    expect(mapFollowerSymbol("GOLD", {})).toBe("XAUUSD");
+    expect(mapFollowerSymbol("gold", null)).toBe("XAUUSD");
+    expect(mapFollowerSymbol("GOLD", { GOLD: "XAUUSD+" })).toBe("XAUUSD+");
+  });
 });

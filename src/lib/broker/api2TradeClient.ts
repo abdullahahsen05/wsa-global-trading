@@ -318,6 +318,7 @@ export class Api2TradeClient {
     fallbackEndpoint: string,
     params: Record<string, string | number | boolean | null | undefined> = {},
     body?: Record<string, string | number | boolean | null | undefined>,
+    fallbackParams?: Record<string, string | number | boolean | null | undefined>,
   ): Promise<T> {
     try {
       return await this.request<T>(method, primaryEndpoint, params, body ? { body } : undefined);
@@ -325,7 +326,7 @@ export class Api2TradeClient {
       if (!shouldFallbackToSafeExecutionEndpoint(error)) {
         throw error;
       }
-      return this.request<T>(method, fallbackEndpoint, params, body ? { body } : undefined);
+      return this.request<T>("GET", fallbackEndpoint, { ...params, ...(fallbackParams ?? body) });
     }
   }
 
@@ -508,6 +509,15 @@ export class Api2TradeClient {
         comment: params.comment,
         slippage: params.slippage,
       },
+      {
+        symbol: params.symbol,
+        operation: params.operation === "Buy" ? 0 : 1,
+        volume: params.volume,
+        stoploss: params.stopLoss,
+        takeprofit: params.takeProfit,
+        comment: params.comment,
+        slippage: params.slippage,
+      },
     );
     return assertRecord(result, "OrderSend") as Api2TradeExecutionResponse;
   }
@@ -534,6 +544,11 @@ export class Api2TradeClient {
       {
         ticket: params.ticket,
         volume: params.lots,
+        lots: params.lots,
+        comment: params.comment,
+      },
+      {
+        ticket: params.ticket,
         lots: params.lots,
         comment: params.comment,
       },
@@ -564,6 +579,11 @@ export class Api2TradeClient {
         ticket: params.ticket,
         stopLoss: params.stopLoss,
         takeProfit: params.takeProfit,
+        stoploss: params.stopLoss,
+        takeprofit: params.takeProfit,
+      },
+      {
+        ticket: params.ticket,
         stoploss: params.stopLoss,
         takeprofit: params.takeProfit,
       },

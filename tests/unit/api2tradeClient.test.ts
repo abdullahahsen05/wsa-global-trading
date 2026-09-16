@@ -75,4 +75,47 @@ describe("api2trade execution transport", () => {
     expect(options.method).toBe("GET");
     expect(options.body).toBeUndefined();
   });
+
+  it("falls back to GET OrderSendSafe with query params for API-key auth", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        text: async () => "404 unsupported",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => JSON.stringify({ ticket: 67890, orderId: 67890 }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new Api2TradeClient({
+      authMode: "apikey",
+      baseUrl: "https://mt5.mt4api.dev",
+      apiKey: "test-key",
+    });
+
+    const response = await client.orderSend({
+      accountId: "session-token",
+      symbol: "XAUUSD",
+      operation: "Sell",
+      volume: 0.01,
+      stopLoss: 4300,
+      takeProfit: 4200,
+      comment: "test",
+      slippage: 5,
+    });
+
+    expect(response.ticket).toBe(67890);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const [fallbackUrl, fallbackOptions] = fetchMock.mock.calls[1] as [URL, RequestInit];
+    expect(fallbackUrl.toString()).toContain("/OrderSendSafe?");
+    expect(fallbackUrl.toString()).toContain("api_key=test-key");
+    expect(fallbackUrl.toString()).toContain("id=session-token");
+    expect(fallbackUrl.toString()).toContain("operation=1");
+    expect(fallbackUrl.toString()).toContain("stoploss=4300");
+    expect(fallbackUrl.toString()).toContain("takeprofit=4200");
+    expect(fallbackOptions.method).toBe("GET");
+    expect(fallbackOptions.body).toBeUndefined();
+  });
 });

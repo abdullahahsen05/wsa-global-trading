@@ -33,7 +33,10 @@ export function mapFollowerSymbol(
   mapping: Record<string, string> | null | undefined,
 ): string {
   const source = sourceSymbol.trim().toUpperCase();
-  return mapping?.[source]?.trim().toUpperCase() || source;
+  const mapped = mapping?.[source]?.trim().toUpperCase();
+  if (mapped) return mapped;
+  if (source === "GOLD") return "XAUUSD";
+  return source;
 }
 
 export function reverseFollowerSide(side: string | null, reverse: boolean): string | null {
