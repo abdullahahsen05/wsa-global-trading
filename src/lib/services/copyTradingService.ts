@@ -818,7 +818,11 @@ export async function warmCopyStrategyAccounts(
 ): Promise<{ warmed: number; followers: number }> {
   if (!adapter.warmAccounts) return { warmed: 0, followers: 0 };
   const [followers, strategy, settings, masterSnap] = await Promise.all([
-    loadActiveFollowersCached(strategyId),
+    // Warmup owns the hot runtime used by the latency-sensitive copy path, so
+    // refresh follower rows from the DB here instead of reusing a stale
+    // follower cache. The actual trade execution can then stay hot and avoid
+    // per-event follower queries.
+    loadActiveFollowers(strategyId),
     getStrategyRowCached(strategyId),
     getCopyGlobalSettingsCached(),
     getSnapshotCached(masterAccountId).catch(() => null),
@@ -1581,12 +1585,7 @@ export async function executeCopyForEvent(
         getCopyGlobalSettingsCached(),
         loadActiveFollowers(ev.strategy_id),
       ]);
-  let followers = loadedFollowers;
-  if (hotRuntime) {
-    const freshFollowers = await loadActiveFollowers(ev.strategy_id);
-    followers = freshFollowers;
-    usingHotRuntime = false;
-  }
+  const followers = loadedFollowers;
   logCopyTiming(ev.id, "strategy/settings loaded", startedAt, {
     strategyId: strategy.id,
     provider: getBrokerProviderId(),
