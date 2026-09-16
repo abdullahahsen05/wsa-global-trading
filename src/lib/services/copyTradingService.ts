@@ -1063,7 +1063,10 @@ async function simulateOneEvent(eventRow: {
       followerStatus: f.status,
       consentAccepted: Boolean(f.consent_accepted_at),
       accountStatus,
-      symbol: followerSymbol,
+      // Allowed/blocked symbols are configured from the master/source side.
+      // Execution can still use a mapped broker-specific follower symbol
+      // such as EURUSD+ after this eligibility gate passes.
+      symbol: eventRow.symbol,
       symbolAllowlist: accountRule?.symbolAllowlist ?? f.symbol_allowlist ?? strategy.symbol_allowlist,
       symbolBlocklist: accountRule?.symbolBlocklist ?? f.symbol_blocklist ?? strategy.symbol_blocklist,
       openCopiedTrades: risk.openCopiedTrades,
@@ -1748,7 +1751,10 @@ export async function executeCopyForEvent(
       followerStatus: f.status,
       consentAccepted: Boolean(f.consent_accepted_at),
       accountStatus,
-      symbol: followerSymbol,
+      // Allowed/blocked symbols are configured from the master/source side.
+      // Execution can still use a mapped broker-specific follower symbol
+      // such as EURUSD+ after this eligibility gate passes.
+      symbol: ev.symbol,
       symbolAllowlist: accountRule?.symbolAllowlist ?? f.symbol_allowlist ?? strategy.symbol_allowlist,
       symbolBlocklist: accountRule?.symbolBlocklist ?? f.symbol_blocklist ?? strategy.symbol_blocklist,
       openCopiedTrades: risk.openCopiedTrades,
