@@ -2,7 +2,7 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2, ShieldAlert, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
 import { SelectField, TextAreaField, TextField } from "@/components/app/FormFields";
 import type { CopyFollowerDto, FollowerCopyMode } from "@/lib/copy/types";
@@ -59,6 +59,27 @@ export function FollowerSettingsDialog(props: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (!sub) return;
+    setCopyEnabled(sub.copyEnabled ?? true);
+    setCopyMode(sub.copyMode ?? "BALANCE_RATIO");
+    setFixedLot(sub.fixedLot?.toString() ?? "");
+    setLotMultiplier(sub.lotMultiplier?.toString() ?? "");
+    setRiskPercent(sub.riskPercent?.toString() ?? "");
+    setMinLot(sub.minLot?.toString() ?? "");
+    setMaxLot(sub.maxLot?.toString() ?? "");
+    setMaxOpenTrades(sub.maxOpenTrades?.toString() ?? "");
+    setMaxDailyLoss(sub.maxDailyLossPercent?.toString() ?? "");
+    setMaxDrawdown(sub.maxDrawdownPercent?.toString() ?? "");
+    setAllowedSymbols(sub.allowedSymbols?.join(", ") ?? "");
+    setBlockedSymbols(sub.blockedSymbols?.join(", ") ?? "");
+    setMapping(Object.entries(sub.symbolMapping ?? {}).map(([source, target]) => `${source}:${target}`).join("\n"));
+    setReverseCopy(sub.reverseCopy ?? false);
+    setPauseOnDisconnect(sub.pauseOnDisconnect ?? true);
+    setEmergencyStop(sub.emergencyStop ?? false);
+    setError("");
+  }, [sub]);
+
   async function save() {
     if (!sub || saving) return;
     setSaving(true);
@@ -70,9 +91,9 @@ export function FollowerSettingsDialog(props: {
         body: JSON.stringify({
           copyEnabled,
           copyMode,
-          fixedLot: optionalNumber(fixedLot),
-          lotMultiplier: optionalNumber(lotMultiplier),
-          riskPercent: optionalNumber(riskPercent),
+          fixedLot: copyMode === "FIXED_LOT" ? optionalNumber(fixedLot) : null,
+          lotMultiplier: copyMode === "LOT_MULTIPLIER" || copyMode === "RISK_PERCENT" ? optionalNumber(lotMultiplier) : null,
+          riskPercent: copyMode === "RISK_PERCENT" ? optionalNumber(riskPercent) : null,
           minLot: optionalNumber(minLot),
           maxLot: optionalNumber(maxLot),
           maxOpenTrades: optionalNumber(maxOpenTrades),

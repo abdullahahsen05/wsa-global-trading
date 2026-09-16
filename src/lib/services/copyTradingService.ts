@@ -2365,16 +2365,21 @@ export async function updateMyFollowerSettings(
     throw new CopyError(COPY_ERROR.FORBIDDEN, "Not your subscription", 403);
   }
   const scalingMode = copyModeToScalingMode(settings.copyMode);
+  const fixedLot = settings.copyMode === "FIXED_LOT" ? settings.fixedLot : null;
+  const lotMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT"
+    ? settings.lotMultiplier
+    : null;
+  const riskPercent = settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null;
   const { error } = await supabase
     .from("copy_strategy_followers")
     .update({
       copy_enabled: settings.copyEnabled,
       copy_mode: settings.copyMode,
       scaling_mode: scalingMode,
-      fixed_lot: settings.fixedLot,
-      lot_multiplier: settings.lotMultiplier,
-      risk_multiplier: settings.lotMultiplier,
-      risk_percent: settings.riskPercent,
+      fixed_lot: fixedLot,
+      lot_multiplier: lotMultiplier,
+      risk_multiplier: lotMultiplier,
+      risk_percent: riskPercent,
       min_lot: settings.minLot,
       max_lot: settings.maxLot,
       max_open_trades: settings.maxOpenTrades,
