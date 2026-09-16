@@ -92,7 +92,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
   const [followerAccountId, setFollowerAccountId] = useState("");
   const [copyMode, setCopyMode] = useState<SelfCopyMode>("BALANCE_RATIO");
   const [fixedLot, setFixedLot] = useState("");
-  const [lotMultiplier, setLotMultiplier] = useState("1");
+  const [lotMultiplier, setLotMultiplier] = useState("");
   const [riskPercent, setRiskPercent] = useState("");
   const [minLot, setMinLot] = useState("0.01");
   const [maxLot, setMaxLot] = useState("");
@@ -158,7 +158,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
     setFollowerAccountId("");
     setCopyMode("BALANCE_RATIO");
     setFixedLot("");
-    setLotMultiplier("1");
+    setLotMultiplier("");
     setRiskPercent("");
     setMinLot("0.01");
     setMaxLot("");
@@ -220,7 +220,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
     setFollowerAccountId(relationship.followerAccountId);
     setCopyMode(settings.copyMode);
     setFixedLot(settings.fixedLot?.toString() ?? "");
-    setLotMultiplier(settings.lotMultiplier?.toString() ?? "1");
+    setLotMultiplier(settings.lotMultiplier?.toString() ?? "");
     setRiskPercent(settings.riskPercent?.toString() ?? "");
     setMinLot(settings.minLot?.toString() ?? "0.01");
     setMaxLot(settings.maxLot?.toString() ?? "");

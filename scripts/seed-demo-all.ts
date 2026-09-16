@@ -255,8 +255,6 @@ async function run() {
       status: "ACTIVE",
       mode: "SIMULATION",
       live_enabled: false,
-      risk_multiplier: 1,
-      default_scaling_mode: "EQUITY_PROPORTIONAL",
       created_by: adminId,
     })
     .select("id")
@@ -268,6 +266,15 @@ async function run() {
     follower_account_id: a3.accountId,
     trader_id: t3,
     status: "ACTIVE",
+    copy_enabled: false,
+    copy_mode: null,
+    scaling_mode: null,
+    fixed_lot: null,
+    lot_multiplier: null,
+    risk_multiplier: null,
+    risk_percent: null,
+    engine_status: "PAUSED",
+    engine_error: "Copy settings must be saved before demo copying starts.",
     consent_accepted_at: daysAgo(5),
   });
 

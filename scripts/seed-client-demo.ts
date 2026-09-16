@@ -287,10 +287,26 @@ async function run() {
   await supabase.from("copy_strategies").delete().eq("master_account_id", apexId);
   const { data: strategy } = await supabase
     .from("copy_strategies")
-    .insert({ name: "Apex Momentum Strategy", description: "EURUSD/XAUUSD momentum strategy on the 100K funded account. Simulation mode.", master_account_id: apexId, status: "ACTIVE", mode: "SIMULATION", live_enabled: false, risk_multiplier: 1.0, default_scaling_mode: "EQUITY_PROPORTIONAL", max_follower_lot: 2.0, symbol_allowlist: ["EURUSD", "XAUUSD", "NAS100"], created_by: adminId })
+    .insert({ name: "Apex Momentum Strategy", description: "EURUSD/XAUUSD momentum strategy on the 100K funded account. Simulation mode.", master_account_id: apexId, status: "ACTIVE", mode: "SIMULATION", live_enabled: false, max_follower_lot: 2.0, symbol_allowlist: ["EURUSD", "XAUUSD", "NAS100"], created_by: adminId })
     .select("id").single();
   const strategyId = strategy!.id as string;
-  await supabase.from("copy_strategy_followers").upsert({ strategy_id: strategyId, follower_account_id: evalAcctId, trader_id: traderId, status: "ACTIVE", scaling_mode: "EQUITY_PROPORTIONAL", risk_multiplier: 0.5, max_daily_loss_percent: 3, consent_accepted_at: daysAgo(7) }, { onConflict: "strategy_id,follower_account_id" });
+  await supabase.from("copy_strategy_followers").upsert({
+    strategy_id: strategyId,
+    follower_account_id: evalAcctId,
+    trader_id: traderId,
+    status: "ACTIVE",
+    copy_enabled: false,
+    copy_mode: null,
+    scaling_mode: null,
+    fixed_lot: null,
+    lot_multiplier: null,
+    risk_multiplier: null,
+    risk_percent: null,
+    max_daily_loss_percent: 3,
+    engine_status: "PAUSED",
+    engine_error: "Copy settings must be saved before demo copying starts.",
+    consent_accepted_at: daysAgo(7),
+  }, { onConflict: "strategy_id,follower_account_id" });
   console.log(`  Strategy: ${strategyId}`);
 
   // ── 10. Bot Marketplace ─────────────────────────────────────────────────────

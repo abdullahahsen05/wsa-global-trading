@@ -809,12 +809,12 @@ async function loadActiveFollowers(strategyId: string): Promise<FollowerRow[]> {
   return (data ?? []) as FollowerRow[];
 }
 
-function followerScalingMode(follower: FollowerRow, strategy: StrategyRow): ScalingMode {
+function followerScalingMode(follower: FollowerRow): ScalingMode | null {
   return (
     (follower.copy_mode ? copyModeToScalingMode(follower.copy_mode) : null)
     ?? follower.scaling_mode
-    ?? strategy.default_scaling_mode
-  ) as ScalingMode;
+    ?? null
+  ) as ScalingMode | null;
 }
 
 function followerMaxLot(follower: FollowerRow, strategy: StrategyRow, scalingMode: ScalingMode): number | null {
@@ -823,15 +823,15 @@ function followerMaxLot(follower: FollowerRow, strategy: StrategyRow, scalingMod
   return strategy.max_follower_lot === null ? null : Number(strategy.max_follower_lot);
 }
 
-function followerLotMultiplier(follower: FollowerRow, strategy: StrategyRow): number {
+function followerLotMultiplier(follower: FollowerRow): number | null {
   if (follower.lot_multiplier !== null) return Number(follower.lot_multiplier);
   if (follower.risk_multiplier !== null) return Number(follower.risk_multiplier);
-  return Number(strategy.risk_multiplier);
+  return null;
 }
 
-function followerRiskMultiplier(follower: FollowerRow, strategy: StrategyRow): number {
+function followerRiskMultiplier(follower: FollowerRow): number | null {
   if (follower.risk_multiplier !== null) return Number(follower.risk_multiplier);
-  return Number(strategy.risk_multiplier);
+  return null;
 }
 
 async function loadRiskSymbolSpecifications(
@@ -863,7 +863,7 @@ function addWarmSymbol(target: Set<string>, symbol: string | null | undefined) {
 }
 
 function riskSpecificationWarmSymbols(follower: FollowerRow, strategy: StrategyRow): string[] {
-  if (followerScalingMode(follower, strategy) !== "RISK_PERCENT") return [];
+  if (followerScalingMode(follower) !== "RISK_PERCENT") return [];
   const symbols = new Set<string>();
   for (const symbol of strategy.symbol_allowlist ?? []) {
     addWarmSymbol(symbols, mapFollowerSymbol(symbol, follower.symbol_mapping));
@@ -1213,7 +1213,19 @@ async function simulateOneEvent(eventRow: {
       continue;
     }
 
-    const scalingMode = followerScalingMode(f, strategy);
+    const scalingMode = followerScalingMode(f);
+    if (!scalingMode) {
+      logs.push({
+        ...baseLog,
+        action: "SKIPPED",
+        status: "SKIPPED",
+        error_code: COPY_ERROR.COPY_INVALID_LOT,
+        error_message: "Copy sizing mode not configured. Save follower copy settings before live copying.",
+        calculated_lot: 0,
+      });
+      result.skipped++;
+      continue;
+    }
     const symbolSpecifications = await loadRiskSymbolSpecifications(adapter, f.follower_account_id, followerSymbol, scalingMode);
     const lot = calculateFollowerLot({
       masterLot,
@@ -1224,8 +1236,8 @@ async function simulateOneEvent(eventRow: {
       followerEquity: followerSnap?.equity ?? null,
       followerBalance: followerSnap?.balance ?? null,
       scalingMode,
-      lotMultiplier: followerLotMultiplier(f, strategy),
-      riskMultiplier: followerRiskMultiplier(f, strategy),
+      lotMultiplier: followerLotMultiplier(f),
+      riskMultiplier: followerRiskMultiplier(f),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
@@ -1908,7 +1920,19 @@ export async function executeCopyForEvent(
       return;
     }
 
-    const scalingMode = followerScalingMode(f, strategy);
+    const scalingMode = followerScalingMode(f);
+    if (!scalingMode) {
+      await supabase.from("copy_execution_logs").insert({
+        ...baseLog,
+        action: "SKIPPED",
+        status: "SKIPPED",
+        error_code: COPY_ERROR.COPY_INVALID_LOT,
+        error_message: "Copy sizing mode not configured. Save follower copy settings before live copying.",
+        calculated_lot: 0,
+      });
+      summary.skipped++;
+      return;
+    }
     const symbolSpecifications = await loadRiskSymbolSpecifications(adapter, f.follower_account_id, followerSymbol, scalingMode);
     const lot = calculateFollowerLot({
       masterLot,
@@ -1919,8 +1943,8 @@ export async function executeCopyForEvent(
       followerEquity: followerSnap?.equity ?? null,
       followerBalance: followerSnap?.balance ?? null,
       scalingMode,
-      lotMultiplier: followerLotMultiplier(f, strategy),
-      riskMultiplier: followerRiskMultiplier(f, strategy),
+      lotMultiplier: followerLotMultiplier(f),
+      riskMultiplier: followerRiskMultiplier(f),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
@@ -1999,7 +2023,7 @@ export async function executeCopyForEvent(
         lot: lot.lot,
         copyMode: f.copy_mode,
         scalingMode,
-        lotMultiplier: followerLotMultiplier(f, strategy),
+        lotMultiplier: followerLotMultiplier(f),
         fixedLot: f.fixed_lot,
         followerPrepMs: Date.now() - followerStartedAt,
         ultraFast: false,
