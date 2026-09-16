@@ -20,7 +20,7 @@ const TradingChart = dynamic(
           <div className="h-9 w-52 animate-pulse rounded-[4px] bg-panel-strong" />
         </div>
         <div className="px-5 py-5">
-          <div className="inner-surface h-[560px] animate-pulse" />
+          <div className="inner-surface h-[760px] animate-pulse" />
         </div>
       </section>
     ),

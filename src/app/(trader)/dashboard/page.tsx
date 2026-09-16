@@ -10,6 +10,7 @@ import { DashboardModeOverlay } from "@/components/dashboard/DashboardModeOverla
 import { DashboardKpiStrip, MarketSentimentStrip } from "@/components/dashboard/DashboardKpiStrip";
 import { PerformanceRings, type PerformanceRingItem } from "@/components/dashboard/PerformanceRings";
 import { Panel, PageActionGroup, WorkspacePage } from "@/components/app/WorkspaceUI";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import { formatMoney, formatPercent, normalizeMoneyAmount } from "@/lib/utils/format";
 import {
   calculateAverageWinLossRatio,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/domain/dashboard";
 import type {
   AnalyticsSummary,
+  EquityPoint,
   TraderAccountSummary,
   TradeDto,
   RiskRuleDto,
@@ -43,6 +45,206 @@ const dashboardTabs: Array<{ id: DashboardView; label: string }> = [
   { id: "PROFIT_SUMMARY", label: "Profit Summary" },
   { id: "CALENDAR_TRACKER", label: "Calendar Tracker" },
 ];
+
+type ChartMetricPoint = {
+  x: number;
+  y: number;
+};
+
+function normalizeSeriesPoints(values: number[], width: number, height: number, padding: number): ChartMetricPoint[] {
+  if (values.length === 0) return [];
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const range = maxValue - minValue || Math.max(Math.abs(maxValue), 1);
+  return values.map((value, index) => {
+    const x = padding + (index / Math.max(values.length - 1, 1)) * (width - padding * 2);
+    const y = height - padding - ((value - minValue) / range) * (height - padding * 2);
+    return { x, y };
+  });
+}
+
+function buildDashboardPnlSeries(trades: TradeDto[], fallbackValue: number): number[] {
+  const closed = [...trades]
+    .filter((trade) => trade.status === "CLOSED")
+    .sort((a, b) => {
+      const aTime = new Date(a.closedAt ?? a.openedAt).getTime();
+      const bTime = new Date(b.closedAt ?? b.openedAt).getTime();
+      return aTime - bTime;
+    })
+    .slice(-24);
+
+  if (closed.length === 0) return [0, fallbackValue];
+
+  let running = 0;
+  return [0, ...closed.map((trade) => {
+    running += normalizeMoneyAmount(trade.profit.amount);
+    return running;
+  })];
+}
+
+function buildDashboardVolumeSeries(trades: TradeDto[]): number[] {
+  const recent = [...trades]
+    .sort((a, b) => new Date(a.openedAt).getTime() - new Date(b.openedAt).getTime())
+    .slice(-18);
+  return recent.map((trade) => Math.max(0, Number(trade.volume) || 0));
+}
+
+function TraderPerformanceChart({
+  equityCurve,
+  trades,
+  currency,
+  periodProfit,
+  currentEquity,
+  winRate,
+  drawdown,
+  accountName,
+}: {
+  equityCurve: EquityPoint[];
+  trades: TradeDto[];
+  currency: string;
+  periodProfit: number;
+  currentEquity: number;
+  winRate: number;
+  drawdown: number;
+  accountName: string;
+}) {
+  const width = 1120;
+  const height = 360;
+  const padding = 34;
+  const equityValues = equityCurve.length > 0
+    ? equityCurve.map((point) => point.equity)
+    : [currentEquity * 0.997, currentEquity];
+  const pnlValues = buildDashboardPnlSeries(trades, periodProfit);
+  const volumeValues = buildDashboardVolumeSeries(trades);
+  const latestEquity = equityCurve.at(-1)?.equity ?? currentEquity;
+  const latestPnl = pnlValues.at(-1) ?? periodProfit;
+  const equityPoints = normalizeSeriesPoints(equityValues, width, height, padding);
+  const pnlPoints = normalizeSeriesPoints(pnlValues, width, height, padding);
+  const equityPath = toSmoothPath(equityPoints);
+  const equityArea = toSmoothAreaPath(equityPoints, height - padding);
+  const pnlPath = toSmoothPath(pnlPoints);
+  const maxVolume = Math.max(...volumeValues, 1);
+
+  return (
+    <Panel className="mt-4 overflow-hidden p-0">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-5">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Performance analytics</p>
+          <h2 className="mt-2 text-lg font-semibold text-foreground">Account performance curve</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
+            Curved equity, closed P&L, and traded volume from {accountName}. This replaces the dashboard TradingView widget with account analytics.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 overflow-hidden rounded-[4px] border border-line bg-background text-right">
+          {[
+            ["Equity", formatMoney({ amount: latestEquity, currency }), "text-accent"],
+            ["Closed P&L", formatMoney({ amount: latestPnl, currency }), latestPnl >= 0 ? "text-accent-2" : "text-danger"],
+            ["Win rate", formatPercent(winRate), "text-foreground"],
+          ].map(([label, value, tone]) => (
+            <div key={label} className="min-w-28 border-r border-line px-4 py-3 last:border-r-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">{label}</p>
+              <p className={`mt-1 text-sm font-semibold tabular-nums ${tone}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-4 pb-5 pt-4 sm:px-5">
+        <div className="relative overflow-hidden rounded-[4px] border border-line bg-background">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,207,0,0.12),transparent_34%),radial-gradient(circle_at_75%_70%,rgba(33,209,159,0.12),transparent_30%)]" />
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="relative h-[360px] w-full"
+            role="img"
+            aria-label="Trader dashboard performance chart"
+          >
+            <defs>
+              <linearGradient id="dashboardEquityFill" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#21d19f" stopOpacity="0.28" />
+                <stop offset="100%" stopColor="#21d19f" stopOpacity="0" />
+              </linearGradient>
+              <linearGradient id="dashboardPnlStroke" x1="0" x2="1" y1="0" y2="0">
+                <stop offset="0%" stopColor="#ffcf00" />
+                <stop offset="100%" stopColor="#ffef8a" />
+              </linearGradient>
+            </defs>
+            {[0.2, 0.4, 0.6, 0.8].map((ratio) => (
+              <line
+                key={ratio}
+                x1={padding}
+                x2={width - padding}
+                y1={height * ratio}
+                y2={height * ratio}
+                stroke="rgba(255,255,255,0.08)"
+                strokeDasharray="7 10"
+              />
+            ))}
+            {volumeValues.map((volume, index) => {
+              const barWidth = Math.max(8, (width - padding * 2) / Math.max(volumeValues.length, 1) - 10);
+              const x = padding + (index / Math.max(volumeValues.length - 1, 1)) * (width - padding * 2) - barWidth / 2;
+              const barHeight = Math.max(8, (volume / maxVolume) * 84);
+              return (
+                <rect
+                  key={`${volume}-${index}`}
+                  x={x}
+                  y={height - padding - barHeight}
+                  width={barWidth}
+                  height={barHeight}
+                  rx="4"
+                  fill="rgba(255,207,0,0.18)"
+                />
+              );
+            })}
+            <path d={equityArea} fill="url(#dashboardEquityFill)" />
+            <path
+              d={equityPath}
+              fill="none"
+              stroke="#21d19f"
+              strokeWidth="4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d={pnlPath}
+              fill="none"
+              stroke="url(#dashboardPnlStroke)"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeDasharray="9 9"
+            />
+            {equityPoints.at(-1) ? (
+              <circle
+                cx={equityPoints.at(-1)!.x}
+                cy={equityPoints.at(-1)!.y}
+                r="6"
+                fill="#050505"
+                stroke="#21d19f"
+                strokeWidth="3"
+              />
+            ) : null}
+          </svg>
+        </div>
+        <div className="mt-4 grid gap-3 text-xs text-muted sm:grid-cols-4">
+          {[
+            ["Equity curve", "Live account balance/equity points", "bg-accent-2"],
+            ["Closed P&L curve", "Cumulative closed-trade profit", "bg-accent"],
+            ["Volume bars", "Recent traded lot volume", "bg-accent/50"],
+            ["Drawdown", formatPercent(drawdown), drawdown > 0 ? "bg-danger" : "bg-muted"],
+          ].map(([label, helper, tone]) => (
+            <div key={label} className="rounded-[4px] border border-line bg-panel px-3 py-3">
+              <div className="flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${tone}`} />
+                <span className="font-semibold text-foreground">{label}</span>
+              </div>
+              <p className="mt-1">{helper}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
 
 function formatSyncTime(value: string | null | undefined): string {
   if (!value) return "Not synced";
@@ -258,6 +460,28 @@ function TraderDashboardContent() {
       return json.data;
     },
     enabled: Boolean(baseAccount?.accountId) && selectedPeriod !== "DAILY",
+    staleTime: 3_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
+  });
+
+  const { data: equityCurve = [] } = useQuery<EquityPoint[]>({
+    queryKey: ["dashboard-equity-curve", baseAccount?.accountId, selectedPeriod],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        accountId: baseAccount!.accountId,
+        period: selectedPeriod,
+      });
+      const res = await fetch(`/api/analytics/equity-curve?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load equity curve");
+      return json.data;
+    },
+    enabled: Boolean(baseAccount?.accountId),
     staleTime: 3_000,
     refetchInterval: 5_000,
     refetchIntervalInBackground: true,
@@ -604,6 +828,16 @@ function TraderDashboardContent() {
             </div>
             <PerformanceRings items={performanceRings} />
           </Panel>
+          <TraderPerformanceChart
+            equityCurve={equityCurve}
+            trades={periodTrades}
+            currency={accountCurrency}
+            periodProfit={periodStats.totalProfit}
+            currentEquity={live.equity}
+            winRate={periodStats.winRate}
+            drawdown={accountDrawdown}
+            accountName={baseAccount?.accountName ?? "your selected account"}
+          />
           <DashboardModeOverlay
             open={activeOverlay !== null}
             view={activeOverlay}

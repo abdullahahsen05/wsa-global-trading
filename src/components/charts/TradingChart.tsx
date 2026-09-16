@@ -330,7 +330,7 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             <TradingViewAdvancedChart
               symbol={tvSymbol}
               interval={tvInterval}
-              height="clamp(360px, 62dvh, 560px)"
+              height="clamp(520px, 78dvh, 820px)"
               theme="dark"
               allowSymbolChange
             />
