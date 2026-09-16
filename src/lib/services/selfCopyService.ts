@@ -248,15 +248,11 @@ export async function updateSelfCopyRelationship(params: {
     patch.copy_settings = {
       ...existing,
       ...params.copySettings,
-      fixedLot: params.copySettings.copyMode === "FIXED_LOT"
-        ? params.copySettings.fixedLot
-        : existing.fixedLot ?? params.copySettings.fixedLot,
+      fixedLot: params.copySettings.copyMode === "FIXED_LOT" ? params.copySettings.fixedLot : null,
       lotMultiplier: params.copySettings.copyMode === "LOT_MULTIPLIER" || params.copySettings.copyMode === "RISK_PERCENT"
         ? params.copySettings.lotMultiplier
-        : existing.lotMultiplier ?? params.copySettings.lotMultiplier,
-      riskPercent: params.copySettings.copyMode === "RISK_PERCENT"
-        ? params.copySettings.riskPercent
-        : existing.riskPercent ?? params.copySettings.riskPercent,
+        : null,
+      riskPercent: params.copySettings.copyMode === "RISK_PERCENT" ? params.copySettings.riskPercent : null,
     };
   }
   const { error } = await supabase.from("self_copy_relationships").update(patch).eq("id", params.id);

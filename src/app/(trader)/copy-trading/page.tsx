@@ -109,7 +109,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
     queryKey: ["copy-my-subscriptions"],
     queryFn: () => api("/api/copy/my-subscriptions"),
     staleTime: 5_000,
-    refetchInterval: 10_000,
+    refetchInterval: settingsSubscription ? false : 10_000,
     refetchIntervalInBackground: false,
   });
   const { data: selfCopy = { relationships: [] } } = useQuery<SelfCopyResponse>({

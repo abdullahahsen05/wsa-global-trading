@@ -2440,18 +2440,10 @@ export async function updateMyFollowerSettings(
     throw new CopyError(COPY_ERROR.FORBIDDEN, "Not your subscription", 403);
   }
   const scalingMode = copyModeToScalingMode(settings.copyMode);
-  const fixedLot = settings.copyMode === "FIXED_LOT"
-    ? settings.fixedLot
-    : subscription.fixed_lot === null ? null : Number(subscription.fixed_lot);
-  const lotMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT"
-    ? settings.lotMultiplier
-    : subscription.lot_multiplier === null ? null : Number(subscription.lot_multiplier);
-  const riskMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT"
-    ? settings.lotMultiplier
-    : subscription.risk_multiplier === null ? null : Number(subscription.risk_multiplier);
-  const riskPercent = settings.copyMode === "RISK_PERCENT"
-    ? settings.riskPercent
-    : subscription.risk_percent === null ? null : Number(subscription.risk_percent);
+  const fixedLot = settings.copyMode === "FIXED_LOT" ? settings.fixedLot : null;
+  const lotMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null;
+  const riskMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null;
+  const riskPercent = settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null;
   const { error } = await supabase
     .from("copy_strategy_followers")
     .update({
