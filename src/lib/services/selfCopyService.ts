@@ -302,7 +302,8 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
     followerEquity: followerSnapshot?.equity ?? null,
     scalingMode,
     fixedLot: settings.fixedLot,
-    riskMultiplier: settings.lotMultiplier,
+    lotMultiplier: settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
+    riskMultiplier: settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null,
     minLot: settings.minLot,
     maxLot: settings.maxLot,
   });
@@ -486,7 +487,8 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       followerEquity: followerSnapshot?.equity ?? null,
       scalingMode,
       fixedLot: settings.fixedLot,
-      riskMultiplier: settings.lotMultiplier,
+      lotMultiplier: settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
+      riskMultiplier: settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null,
       minLot: settings.minLot,
       maxLot: settings.maxLot,
     });

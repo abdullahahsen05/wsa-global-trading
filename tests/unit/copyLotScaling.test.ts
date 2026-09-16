@@ -47,6 +47,20 @@ describe("calculateFollowerLot", () => {
     expect(calculateFollowerLot({ masterLot: 0.5, scalingMode: "FIXED_MULTIPLIER", riskMultiplier: 3 }).lot).toBe(1.5);
   });
 
+  test("FIXED_MULTIPLIER uses the follower lot multiplier as master lot times multiplier", () => {
+    expect(calculateFollowerLot({ masterLot: 0.01, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 5 }).lot).toBe(0.05);
+    expect(calculateFollowerLot({ masterLot: 0.09, scalingMode: "FIXED_MULTIPLIER", lotMultiplier: 2 }).lot).toBe(0.18);
+  });
+
+  test("FIXED_MULTIPLIER prefers lotMultiplier over legacy riskMultiplier", () => {
+    expect(calculateFollowerLot({
+      masterLot: 0.09,
+      scalingMode: "FIXED_MULTIPLIER",
+      lotMultiplier: 5,
+      riskMultiplier: 1,
+    }).lot).toBe(0.45);
+  });
+
   test("FIXED_LOT returns the fixed lot", () => {
     expect(calculateFollowerLot({ masterLot: 99, scalingMode: "FIXED_LOT", fixedLot: 0.2 }).lot).toBe(0.2);
   });

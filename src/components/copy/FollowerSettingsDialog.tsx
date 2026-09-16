@@ -182,6 +182,10 @@ export function FollowerSettingsDialog(props: {
                 <p className="mt-3 text-xs leading-5 text-muted">
                   Risk-percent mode uses the follower balance/equity, master entry price, stop loss, and broker symbol specifications. Trades without a stop loss are rejected instead of guessed.
                 </p>
+              ) : copyMode === "LOT_MULTIPLIER" ? (
+                <p className="mt-3 text-xs leading-5 text-muted">
+                  Lot multiplier copies the master trade size multiplied by this value. Example: master 0.01 lot × multiplier 5 = follower 0.05 lot.
+                </p>
               ) : null}
             </div>
 

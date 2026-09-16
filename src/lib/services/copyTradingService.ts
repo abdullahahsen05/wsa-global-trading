@@ -823,6 +823,17 @@ function followerMaxLot(follower: FollowerRow, strategy: StrategyRow, scalingMod
   return strategy.max_follower_lot === null ? null : Number(strategy.max_follower_lot);
 }
 
+function followerLotMultiplier(follower: FollowerRow, strategy: StrategyRow): number {
+  if (follower.lot_multiplier !== null) return Number(follower.lot_multiplier);
+  if (follower.risk_multiplier !== null) return Number(follower.risk_multiplier);
+  return Number(strategy.risk_multiplier);
+}
+
+function followerRiskMultiplier(follower: FollowerRow, strategy: StrategyRow): number {
+  if (follower.risk_multiplier !== null) return Number(follower.risk_multiplier);
+  return Number(strategy.risk_multiplier);
+}
+
 function getStrategyHotRuntime(strategyId: string): StrategyHotRuntime | null {
   const cached = strategyHotRuntimeCache.get(strategyId);
   if (!cached || cached.expiresAt <= Date.now()) return null;
@@ -1154,9 +1165,8 @@ async function simulateOneEvent(eventRow: {
       followerEquity: followerSnap?.equity ?? null,
       followerBalance: followerSnap?.balance ?? null,
       scalingMode,
-      riskMultiplier: f.lot_multiplier === null
-        ? (f.risk_multiplier === null ? Number(strategy.risk_multiplier) : Number(f.risk_multiplier))
-        : Number(f.lot_multiplier),
+      lotMultiplier: followerLotMultiplier(f, strategy),
+      riskMultiplier: followerRiskMultiplier(f, strategy),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
@@ -1848,9 +1858,8 @@ export async function executeCopyForEvent(
       followerEquity: followerSnap?.equity ?? null,
       followerBalance: followerSnap?.balance ?? null,
       scalingMode,
-      riskMultiplier: f.lot_multiplier === null
-        ? (f.risk_multiplier === null ? Number(strategy.risk_multiplier) : Number(f.risk_multiplier))
-        : Number(f.lot_multiplier),
+      lotMultiplier: followerLotMultiplier(f, strategy),
+      riskMultiplier: followerRiskMultiplier(f, strategy),
       riskPercent: f.risk_percent === null ? null : Number(f.risk_percent),
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
@@ -1926,6 +1935,10 @@ export async function executeCopyForEvent(
         symbol: followerSymbol,
         symbolCandidates,
         lot: lot.lot,
+        copyMode: f.copy_mode,
+        scalingMode,
+        lotMultiplier: followerLotMultiplier(f, strategy),
+        fixedLot: f.fixed_lot,
         followerPrepMs: Date.now() - followerStartedAt,
         ultraFast: false,
       });

@@ -34,6 +34,7 @@ export interface LotInputs {
   followerEquity?: number | null;
   followerBalance?: number | null;
   scalingMode: ScalingMode;
+  lotMultiplier?: number | null;
   riskMultiplier?: number | null;
   riskPercent?: number | null;
   fixedLot?: number | null;
@@ -72,6 +73,7 @@ export function calculateFollowerLot(input: LotInputs): LotResult {
   const minLot = positive(input.minLot) ? input.minLot! : DEFAULT_MIN_LOT;
   const maxLot = positive(input.maxLot) ? input.maxLot! : null;
   const risk = positive(input.riskMultiplier) ? input.riskMultiplier! : 1;
+  const lotMultiplier = positive(input.lotMultiplier) ? input.lotMultiplier! : risk;
 
   let raw: number;
   let riskAmount: number | null = null;
@@ -84,7 +86,7 @@ export function calculateFollowerLot(input: LotInputs): LotResult {
     }
     case "FIXED_MULTIPLIER": {
       if (!positive(input.masterLot)) return invalid("Master lot missing");
-      raw = input.masterLot * risk;
+      raw = input.masterLot * lotMultiplier;
       break;
     }
     case "BALANCE_PROPORTIONAL": {
