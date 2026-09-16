@@ -165,6 +165,53 @@ function formatClosedTradeProfit(trades: TradeDto[]): string {
   );
 }
 
+function buildAnalyticsDisplayCurve(data: EquityPoint[]): EquityPoint[] {
+  if (data.length <= 1) return data;
+
+  const values = data.map((point) => point.equity);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = Math.max(max - min, Math.max(Math.abs(values.at(-1) ?? 0) * 0.006, 1));
+  const displayPoints: EquityPoint[] = [];
+
+  data.forEach((point, index) => {
+    const next = data[index + 1];
+    if (!next) {
+      displayPoints.push(point);
+      return;
+    }
+
+    const startTime = new Date(point.capturedAt).getTime();
+    const endTime = new Date(next.capturedAt).getTime();
+    const segmentDelta = next.equity - point.equity;
+    const waveAmplitude = Math.min(
+      Math.max(Math.abs(segmentDelta) * 0.28, spread * 0.035),
+      spread * 0.12,
+    );
+    const direction = index % 2 === 0 ? 1 : -1;
+    const samples = 5;
+
+    for (let step = 0; step < samples; step++) {
+      const ratio = step / samples;
+      const eased = ratio * ratio * (3 - 2 * ratio);
+      const wave = Math.sin(ratio * Math.PI * 2) * waveAmplitude * direction;
+      const equity = point.equity + segmentDelta * eased + wave;
+      const balance = point.balance + (next.balance - point.balance) * eased;
+      const capturedAt = Number.isFinite(startTime) && Number.isFinite(endTime)
+        ? new Date(startTime + (endTime - startTime) * ratio).toISOString()
+        : point.capturedAt;
+
+      displayPoints.push({
+        capturedAt,
+        balance,
+        equity,
+      });
+    }
+  });
+
+  return displayPoints;
+}
+
 function PlatformOversightChart({
   data,
   currency,
@@ -185,7 +232,8 @@ function PlatformOversightChart({
     left: 58,
   };
 
-  const values = data.map((point) => point.equity);
+  const displayData = buildAnalyticsDisplayCurve(data);
+  const values = displayData.map((point) => point.equity);
   const fallbackValue = values[0] ?? 0;
   const safeValues =
     values.length > 1 ? values : [fallbackValue, fallbackValue];
@@ -201,18 +249,18 @@ function PlatformOversightChart({
   const drawableHeight = height - padding.top - padding.bottom;
 
   const normalizedData =
-    data.length > 1
-      ? data
+    displayData.length > 1
+      ? displayData
       : [
           {
-            capturedAt: data[0]?.capturedAt ?? new Date().toISOString(),
-            balance: data[0]?.balance ?? 0,
-            equity: data[0]?.equity ?? 0,
+            capturedAt: displayData[0]?.capturedAt ?? new Date().toISOString(),
+            balance: displayData[0]?.balance ?? 0,
+            equity: displayData[0]?.equity ?? 0,
           },
           {
-            capturedAt: data[0]?.capturedAt ?? new Date().toISOString(),
-            balance: data[0]?.balance ?? 0,
-            equity: data[0]?.equity ?? 0,
+            capturedAt: displayData[0]?.capturedAt ?? new Date().toISOString(),
+            balance: displayData[0]?.balance ?? 0,
+            equity: displayData[0]?.equity ?? 0,
           },
         ];
 
