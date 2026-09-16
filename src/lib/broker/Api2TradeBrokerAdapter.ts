@@ -286,6 +286,29 @@ const WARM_SESSION_TTL_MS = Math.max(
   Number.parseInt(process.env.API2TRADE_WARM_SESSION_TTL_MS ?? "300000", 10) || 300_000,
 );
 const warmedSessions = new Map<string, { providerAccountId: string; expiresAt: number }>();
+const SYMBOL_SPEC_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.API2TRADE_SYMBOL_SPEC_CACHE_MS ?? "900000", 10) || 900_000,
+);
+const SYMBOL_SPEC_MISS_TTL_MS = Math.min(60_000, SYMBOL_SPEC_TTL_MS);
+const symbolSpecificationCache = new Map<string, { value: BrokerSymbolSpecifications | null; expiresAt: number }>();
+
+function symbolSpecCacheKey(accountId: string, symbol: string): string {
+  return `${accountId}:${symbol.trim().toUpperCase()}`;
+}
+
+function getCachedSymbolSpecifications(accountId: string, symbol: string): BrokerSymbolSpecifications | null | undefined {
+  const cached = symbolSpecificationCache.get(symbolSpecCacheKey(accountId, symbol));
+  if (!cached || cached.expiresAt <= Date.now()) return undefined;
+  return cached.value;
+}
+
+function setCachedSymbolSpecifications(accountId: string, symbol: string, value: BrokerSymbolSpecifications | null) {
+  symbolSpecificationCache.set(symbolSpecCacheKey(accountId, symbol), {
+    value,
+    expiresAt: Date.now() + (value ? SYMBOL_SPEC_TTL_MS : SYMBOL_SPEC_MISS_TTL_MS),
+  });
+}
 
 export class Api2TradeBrokerAdapter implements BrokerAdapter {
   private readonly config = loadApi2TradeConfig();
@@ -603,14 +626,19 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
   }
 
   async fetchSymbolSpecifications(accountId: string, symbol: string): Promise<BrokerSymbolSpecifications | null> {
+    const cached = getCachedSymbolSpecifications(accountId, symbol);
+    if (cached !== undefined) return cached;
+
     const client = this.assertConfigured();
-    return this.withSessionRetry(accountId, async (providerAccountId) => {
+    const specifications = await this.withSessionRetry(accountId, async (providerAccountId) => {
       const [summary, raw] = await Promise.all([
         client.accountSummary(providerAccountId).catch(() => ({ currency: null })),
         client.symbolSpecifications(providerAccountId, symbol).catch(() => null),
       ]);
       return mapSymbolSpecifications(symbol, raw, summary.currency ?? null);
     });
+    setCachedSymbolSpecifications(accountId, symbol, specifications);
+    return specifications;
   }
 
   async openTrade(req: OpenTradeRequest): Promise<BrokerExecutionResult> {

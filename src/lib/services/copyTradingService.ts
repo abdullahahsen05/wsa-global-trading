@@ -861,6 +861,27 @@ async function loadRiskSymbolSpecifications(
   };
 }
 
+function addWarmSymbol(target: Set<string>, symbol: string | null | undefined) {
+  const normalized = symbol?.trim().toUpperCase();
+  if (normalized) target.add(normalized);
+}
+
+function riskSpecificationWarmSymbols(follower: FollowerRow, strategy: StrategyRow): string[] {
+  if (followerScalingMode(follower, strategy) !== "RISK_PERCENT") return [];
+  const symbols = new Set<string>();
+  for (const symbol of strategy.symbol_allowlist ?? []) {
+    addWarmSymbol(symbols, mapFollowerSymbol(symbol, follower.symbol_mapping));
+  }
+  for (const symbol of follower.symbol_allowlist ?? []) {
+    addWarmSymbol(symbols, mapFollowerSymbol(symbol, follower.symbol_mapping));
+  }
+  for (const [source, mapped] of Object.entries(follower.symbol_mapping ?? {})) {
+    addWarmSymbol(symbols, mapped);
+    addWarmSymbol(symbols, source);
+  }
+  return [...symbols].slice(0, 12);
+}
+
 function getStrategyHotRuntime(strategyId: string): StrategyHotRuntime | null {
   const cached = strategyHotRuntimeCache.get(strategyId);
   if (!cached || cached.expiresAt <= Date.now()) return null;
@@ -916,6 +937,19 @@ export async function warmCopyStrategyAccounts(
     loadAccountRuleMapCached(accountIds).catch(() => null),
     loadAccountStatusMapCached(accountIds).catch(() => null),
   ]);
+  if (adapter.fetchSymbolSpecifications) {
+    const riskSpecWarmups = followers.flatMap((follower) =>
+      riskSpecificationWarmSymbols(follower, strategy).map((symbol) => ({
+        accountId: follower.follower_account_id,
+        symbol,
+      })),
+    );
+    await Promise.all(
+      riskSpecWarmups.slice(0, 100).map(({ accountId, symbol }) =>
+        loadRiskSymbolSpecifications(adapter, accountId, symbol, "RISK_PERCENT").catch(() => null),
+      ),
+    );
+  }
   strategyHotRuntimeCache.set(strategyId, {
     value: {
       strategy,
