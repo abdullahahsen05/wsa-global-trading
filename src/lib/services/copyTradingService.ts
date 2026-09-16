@@ -1336,22 +1336,66 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
     .eq("status", "OPEN")
     .limit(5000);
   const links = data ?? [];
-  const summary: ExecSummary = { attempted: links.length, success: 0, failed: 0, skipped: 0 };
+  const mappedLinks = links.filter((link) => Boolean(link.follower_position_id));
+  const unmappedLinks = links.filter((link) => !link.follower_position_id);
+  const summary: ExecSummary = { attempted: mappedLinks.length, success: 0, failed: 0, skipped: 0 };
+
+  if (links.length === 0) {
+    await supabase.from("copy_execution_logs").insert({
+      strategy_id: ev.strategy_id,
+      master_event_id: ev.id,
+      follower_account_id: null,
+      trader_id: null,
+      mode: "LIVE",
+      action: "SKIPPED",
+      status: "SKIPPED",
+      symbol: ev.symbol,
+      side: ev.side,
+      error_code: COPY_ERROR.COPY_MAPPING_NOT_FOUND,
+      error_message: "No copied trade mapping ticket found for this master trade; close/modify skipped.",
+    });
+    summary.skipped = 1;
+    logCopyTiming(ev.id, "linked event skipped", startedAt, {
+      type: ev.event_type,
+      reason: "no mapping ticket",
+    });
+    return summary;
+  }
+
+  if (unmappedLinks.length > 0) {
+    await supabase.from("copy_execution_logs").insert(unmappedLinks.map((link) => ({
+      strategy_id: ev.strategy_id,
+      master_event_id: ev.id,
+      follower_account_id: link.follower_account_id,
+      trader_id: link.trader_id,
+      mode: "LIVE",
+      action: "SKIPPED",
+      status: "SKIPPED",
+      symbol: link.symbol,
+      side: link.side,
+      error_code: COPY_ERROR.COPY_MAPPING_NOT_FOUND,
+      error_message: "Copied trade mapping exists but has no follower broker ticket; close/modify skipped.",
+    })));
+    summary.skipped += unmappedLinks.length;
+  }
+
   const hotPathWarmup = getBrokerProviderId() !== "api2trade" || process.env.WSA_COPY_HOT_PATH_WARMUP === "true";
   if (hotPathWarmup) {
-    await adapter.warmAccounts?.(links.map((link) => link.follower_account_id));
+    await adapter.warmAccounts?.(mappedLinks.map((link) => link.follower_account_id));
   }
   logCopyTiming(ev.id, "linked positions loaded", startedAt, {
     type: ev.event_type,
     links: links.length,
+    mappedLinks: mappedLinks.length,
+    skippedWithoutTicket: unmappedLinks.length,
     hotPathWarmup,
   });
 
   const previousVolume = Number(ev.previous_volume ?? ev.volume ?? 0);
   const currentVolume = Number(ev.volume ?? previousVolume);
   if (ev.event_type === "MODIFY" && previousVolume > 0 && currentVolume > previousVolume) {
-    const byFollower = new Map<string, typeof links>();
-    for (const link of links) {
+    const byFollower = new Map<string, typeof mappedLinks>();
+    for (const link of mappedLinks) {
       const group = byFollower.get(link.follower_account_id) ?? [];
       group.push(link);
       byFollower.set(link.follower_account_id, group);
@@ -1405,11 +1449,7 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
     });
   }
 
-  await inParallelBatches(links, 12, async (link) => {
-    if (!link.follower_position_id) {
-      summary.skipped++;
-      return;
-    }
+  await inParallelBatches(mappedLinks, 12, async (link) => {
     const baseLog = {
       strategy_id: ev.strategy_id,
       master_event_id: ev.id,
