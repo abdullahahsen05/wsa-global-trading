@@ -2428,7 +2428,7 @@ export async function updateMyFollowerSettings(
   traderUserId: string,
   subscriptionId: string,
   settings: FollowerSettingsPatch,
-): Promise<void> {
+): Promise<CopyFollowerDto> {
   const supabase = createAdminClient();
   const { data: subscription } = await supabase
     .from("copy_strategy_followers")
@@ -2444,7 +2444,7 @@ export async function updateMyFollowerSettings(
   const lotMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null;
   const riskMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null;
   const riskPercent = settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null;
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("copy_strategy_followers")
     .update({
       copy_enabled: settings.copyEnabled,
@@ -2468,7 +2468,11 @@ export async function updateMyFollowerSettings(
       pause_on_disconnect: settings.pauseOnDisconnect,
       emergency_stop: settings.emergencyStop,
     })
-    .eq("id", subscriptionId);
+    .eq("id", subscriptionId)
+    .select(
+      "id, strategy_id, follower_account_id, trader_id, status, tier, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, risk_percent, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at",
+    )
+    .single();
   if (error) throw new Error(`Failed to update follower settings: ${error.message}`);
   await supabase.from("copy_strategy_followers").update({
     engine_error: null,
@@ -2486,6 +2490,40 @@ export async function updateMyFollowerSettings(
       emergencyStop: settings.emergencyStop,
     },
   });
+  return {
+    id: updated.id,
+    strategyId: updated.strategy_id,
+    strategyName: null,
+    followerAccountId: updated.follower_account_id,
+    followerAccountName: null,
+    traderId: updated.trader_id,
+    status: updated.status,
+    scalingMode: updated.scaling_mode,
+    riskMultiplier: updated.risk_multiplier === null ? null : Number(updated.risk_multiplier),
+    fixedLot: updated.fixed_lot === null ? null : Number(updated.fixed_lot),
+    maxLot: updated.max_lot === null ? null : Number(updated.max_lot),
+    copyEnabled: updated.copy_enabled ?? true,
+    copyMode: updated.copy_mode ?? scalingModeToCopyMode(updated.scaling_mode),
+    lotMultiplier: updated.lot_multiplier === null ? null : Number(updated.lot_multiplier),
+    riskPercent: updated.risk_percent === null ? null : Number(updated.risk_percent),
+    minLot: updated.min_lot === null ? null : Number(updated.min_lot),
+    maxOpenTrades: updated.max_open_trades ?? null,
+    maxDailyLossPercent: updated.max_daily_loss_percent === null ? null : Number(updated.max_daily_loss_percent),
+    maxDrawdownPercent: updated.max_drawdown_percent === null ? null : Number(updated.max_drawdown_percent),
+    allowedSymbols: updated.symbol_allowlist ?? null,
+    blockedSymbols: updated.symbol_blocklist ?? null,
+    symbolMapping: (updated.symbol_mapping as Record<string, string> | null) ?? {},
+    copyNewTradesOnly: updated.copy_new_trades_only ?? true,
+    reverseCopy: updated.reverse_copy ?? false,
+    pauseOnDisconnect: updated.pause_on_disconnect ?? true,
+    emergencyStop: updated.emergency_stop ?? false,
+    engineStatus: updated.engine_status ?? "DRAFT",
+    engineError: updated.engine_error ?? null,
+    engineSyncedAt: updated.engine_synced_at ?? null,
+    consentAcceptedAt: updated.consent_accepted_at,
+    createdAt: updated.created_at,
+    tier: updated.tier ?? "NORMAL",
+  };
 }
 
 export async function listTraderCopyLogs(traderUserId: string): Promise<CopyLogDto[]> {

@@ -184,7 +184,27 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
     }
   }, [settingsSubscription, subscriptions]);
 
-  const refresh = async () => {
+  const refresh = async (savedSubscription?: CopyFollowerDto) => {
+    if (savedSubscription) {
+      queryClient.setQueryData<CopyFollowerDto[]>(["copy-my-subscriptions"], (current = []) =>
+        current.map((subscription) => subscription.id === savedSubscription.id
+          ? {
+              ...subscription,
+              ...savedSubscription,
+              strategyName: savedSubscription.strategyName ?? subscription.strategyName,
+              followerAccountName: savedSubscription.followerAccountName ?? subscription.followerAccountName,
+            }
+          : subscription),
+      );
+      setSettingsSubscription((current) => current?.id === savedSubscription.id
+        ? {
+            ...current,
+            ...savedSubscription,
+            strategyName: savedSubscription.strategyName ?? current.strategyName,
+            followerAccountName: savedSubscription.followerAccountName ?? current.followerAccountName,
+          }
+        : current);
+    }
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["billing-me"] }),
       queryClient.invalidateQueries({ queryKey: ["copy-my-subscriptions"] }),

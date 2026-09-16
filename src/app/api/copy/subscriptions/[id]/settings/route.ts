@@ -19,8 +19,8 @@ export async function PATCH(
         400,
       );
     }
-    await updateMyFollowerSettings(trader.id, id, parsed.data);
-    return jsonOk({ id, updated: true });
+    const subscription = await updateMyFollowerSettings(trader.id, id, parsed.data);
+    return jsonOk({ id, updated: true, subscription });
   } catch (error) {
     if (error instanceof AuthError) return jsonFail(error.code, error.message, error.statusCode);
     if (error instanceof CopyError) return jsonFail(error.code, error.message, error.statusCode);
