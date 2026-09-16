@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -52,6 +52,7 @@ import {
   demoMarketPlaceFilters,
   demoTerminalWidgets,
 } from "@/lib/demo/demoData";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 
 function DemoPrimaryActions() {
   return (
@@ -90,9 +91,72 @@ function DemoOnlyHint({ text = "Demo mode uses sample data. Create an account to
   return <p className="mt-2 text-xs text-muted">{text}</p>;
 }
 
+function DemoCurveChart({
+  values,
+  heightClass = "h-full",
+}: {
+  values: number[];
+  heightClass?: string;
+}) {
+  const chartId = useId().replace(/:/g, "");
+  const gradientId = `demo-curve-fill-${chartId}`;
+  const glowId = `demo-curve-glow-${chartId}`;
+  const width = 640;
+  const height = 320;
+  const padding = 26;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(1, max - min);
+  const points = values.map((value, index) => ({
+    x: padding + (index / Math.max(1, values.length - 1)) * (width - padding * 2),
+    y: height - padding - ((value - min) / range) * (height - padding * 2),
+  }));
+  const linePath = toSmoothPath(points);
+  const areaPath = toSmoothAreaPath(points, height - padding);
+  const latest = points.at(-1);
+
+  return (
+    <div className={`relative overflow-hidden rounded-[4px] border border-line bg-panel-strong ${heightClass}`}>
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,204,0,0.04),transparent_42%),radial-gradient(circle_at_78%_18%,rgba(255,204,0,0.12),transparent_34%)]" />
+      <svg viewBox={`0 0 ${width} ${height}`} className="relative h-full w-full" role="img" aria-label="Smooth demo market curve">
+        <defs>
+          <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgba(255,204,0,0.34)" />
+            <stop offset="58%" stopColor="rgba(255,204,0,0.11)" />
+            <stop offset="100%" stopColor="rgba(255,204,0,0)" />
+          </linearGradient>
+          <filter id={glowId} x="-20%" y="-40%" width="140%" height="180%">
+            <feGaussianBlur stdDeviation="5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        {[0.25, 0.5, 0.75].map((ratio) => (
+          <line
+            key={ratio}
+            x1={padding}
+            x2={width - padding}
+            y1={padding + ratio * (height - padding * 2)}
+            y2={padding + ratio * (height - padding * 2)}
+            stroke="rgba(255,255,255,0.07)"
+          />
+        ))}
+        <path d={areaPath} fill={`url(#${gradientId})`} />
+        <path d={linePath} fill="none" stroke="rgba(255,204,0,0.24)" strokeWidth="9" strokeLinecap="round" filter={`url(#${glowId})`} />
+        <path d={linePath} fill="none" stroke="#ffcc00" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+        {latest ? (
+          <circle cx={latest.x} cy={latest.y} r="5" fill="#050505" stroke="#ffcc00" strokeWidth="3" />
+        ) : null}
+      </svg>
+    </div>
+  );
+}
+
 function DemoTradingChartSection() {
   const [timeframe, setTimeframe] = useState<"1m" | "5m" | "15m" | "1H" | "4H" | "1D">("15m");
-  const bars = [42, 48, 44, 57, 54, 66, 62, 73, 70, 81, 88, 84];
+  const curve = [42, 48, 44, 57, 54, 66, 62, 73, 70, 81, 88, 84];
 
   return (
     <section className="section-surface overflow-hidden">
@@ -121,16 +185,7 @@ function DemoTradingChartSection() {
         </div>
       </div>
       <div className="grid gap-4 px-5 py-5 lg:grid-cols-[minmax(0,1fr)_240px]">
-        <div className="inner-surface flex h-[520px] items-end gap-2 overflow-hidden p-5">
-          {bars.map((bar, index) => (
-            <div key={index} className="flex flex-1 items-end gap-1">
-              <div
-                className={`w-full rounded-t-[4px] ${index % 3 === 0 ? "bg-danger/70" : "bg-accent/80"}`}
-                style={{ height: `${bar}%` }}
-              />
-            </div>
-          ))}
-        </div>
+        <DemoCurveChart values={curve} heightClass="h-[520px]" />
         <div className="grid gap-3">
           <div className="inner-surface p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Data source</p>
@@ -693,18 +748,7 @@ function DemoTerminalPage() {
             <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_220px]">
               <div className="border-b border-line bg-background p-4 lg:border-b-0 lg:border-r">
                 <div className="grid h-full gap-3">
-                  <div className="grid h-full items-end gap-2 rounded-[4px] border border-line bg-panel-strong p-4">
-                    <div className="flex h-full items-end gap-2">
-                      {[40, 52, 46, 61, 58, 70, 63, 76, 72, 84, 79, 91].map((bar, index) => (
-                        <div key={index} className="flex flex-1 items-end">
-                          <div
-                            className={`w-full rounded-t-[4px] ${index % 4 === 0 ? "bg-danger/70" : "bg-accent/80"}`}
-                            style={{ height: `${bar}%` }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <DemoCurveChart values={[40, 52, 46, 61, 58, 70, 63, 76, 72, 84, 79, 91]} />
                   <div className="grid gap-3 sm:grid-cols-3">
                     {demoTerminalWidgets.slice(0, 3).map((widget) => (
                       <div key={widget.label} className="rounded-[4px] border border-line bg-panel p-4">

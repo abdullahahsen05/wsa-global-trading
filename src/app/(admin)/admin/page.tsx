@@ -36,6 +36,7 @@ import {
   calculateConsistencyScore,
   calculateMaxDrawdown,
 } from "@/lib/domain/metrics";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 
 type SessionUser = {
@@ -231,12 +232,9 @@ function PlatformOversightChart({
     };
   });
 
-  const linePoints = points.map(({ x, y }) => `${x},${y}`).join(" ");
-  const areaPoints = [
-    `${points[0]?.x ?? padding.left},${height - padding.bottom}`,
-    linePoints,
-    `${points.at(-1)?.x ?? width - padding.right},${height - padding.bottom}`,
-  ].join(" ");
+  const curvePoints = points.map(({ x, y }) => ({ x, y }));
+  const linePath = toSmoothPath(curvePoints);
+  const areaPath = toSmoothAreaPath(curvePoints, height - padding.bottom);
   const firstEquity = data[0]?.equity ?? 0;
   const latestEquity = data.at(-1)?.equity ?? firstEquity;
   const equityChange = latestEquity - firstEquity;
@@ -357,58 +355,16 @@ function PlatformOversightChart({
             </g>
           ))}
 
-          <polygon
-            points={areaPoints}
-            fill="url(#admin-platform-equity-fill)"
-          />
+          <path d={areaPath} fill="url(#admin-platform-equity-fill)" />
 
-          <polyline
-            points={linePoints}
+          <path
+            d={linePath}
             fill="none"
             stroke="#21d19f"
-            strokeWidth="2.25"
+            strokeWidth="3"
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-
-          {points.map(({ x, y, point }, index) => (
-            <circle
-              key={`${point.capturedAt}-${index}`}
-              cx={x}
-              cy={y}
-              r={index === points.length - 1 ? "3.8" : "2.4"}
-              fill={index === points.length - 1 ? "#21d19f" : "#0b1614"}
-              stroke="#21d19f"
-              strokeWidth={index === points.length - 1 ? "1.75" : "1.25"}
-              opacity={index === 0 && points.length > 2 ? "0.55" : "1"}
-            >
-              <title>
-                {`${new Date(point.capturedAt).toLocaleString()} · ${formatMoney({
-                  amount: point.equity,
-                  currency,
-                })}`}
-              </title>
-            </circle>
-          ))}
-
-          {points.length > 0 ? (
-            <g>
-              <circle
-                cx={points.at(-1)?.x}
-                cy={points.at(-1)?.y}
-                r="5.5"
-                fill="#07100f"
-                stroke="#21d19f"
-                strokeWidth="2.5"
-              />
-              <circle
-                cx={points.at(-1)?.x}
-                cy={points.at(-1)?.y}
-                r="2"
-                fill="#21d19f"
-              />
-            </g>
-          ) : null}
 
           {dateIndexes.map((index) => {
             const point = normalizedData[index];

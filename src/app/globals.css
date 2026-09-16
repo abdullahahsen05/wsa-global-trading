@@ -97,14 +97,14 @@ textarea {
 html {
   background: var(--background);
   min-width: 320px;
-  overflow-x: clip;
+  overflow-x: auto;
   -webkit-text-size-adjust: 100%;
 }
 
 body {
   min-height: 100vh;
   min-width: 320px;
-  overflow-x: clip;
+  overflow-x: auto;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
@@ -191,14 +191,17 @@ body {
   gap: 0.5rem;
   padding: 0.4rem 0.85rem !important;
   min-height: 2.25rem !important;
-  height: 2.25rem !important;
+  height: auto !important;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.035);
   color: var(--foreground);
   border-radius: 5px;
   font-size: 0.75rem;
   font-weight: 600;
-  white-space: nowrap;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
@@ -214,14 +217,17 @@ body {
   gap: 0.5rem;
   padding: 0.4rem 0.85rem !important;
   min-height: 2.25rem !important;
-  height: 2.25rem !important;
+  height: auto !important;
   background: var(--accent);
   color: #050505;
   border-color: var(--accent);
   border-radius: 5px;
   font-size: 0.75rem;
   font-weight: 600;
-  white-space: nowrap;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 :where(
@@ -267,7 +273,7 @@ body {
   .btn-dark,
   .btn-active {
     min-height: 2.75rem !important;
-    height: 2.75rem !important;
+    height: auto !important;
   }
 }
 

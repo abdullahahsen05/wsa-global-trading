@@ -45,14 +45,14 @@ export function Sidebar({
               key={item.href}
               href={item.href}
               onClick={closeDrawer}
-              className={`flex h-10 items-center gap-3 rounded-[4px] border-l-2 px-3 text-sm font-medium transition-colors ${
+              className={`flex min-h-10 items-center gap-3 rounded-[4px] border-l-2 px-3 py-2 text-sm font-medium leading-tight transition-colors ${
                 active
                   ? "border-l-accent bg-panel-strong/90 text-accent"
                   : "border-l-transparent text-foreground/78 hover:border-l-[#4a4730] hover:bg-panel-strong/55 hover:text-foreground"
               }`}
             >
-              {Icon ? <Icon className="h-4 w-4" /> : <span aria-hidden="true" className="w-4" />}
-              {item.label}
+              {Icon ? <Icon className="h-4 w-4 shrink-0" /> : <span aria-hidden="true" className="w-4 shrink-0" />}
+              <span className="min-w-0 break-words">{item.label}</span>
             </Link>
           );
       })}
@@ -61,7 +61,7 @@ export function Sidebar({
 
   return (
     <>
-    <aside className="hidden h-dvh w-[240px] self-start overflow-hidden border-r border-line bg-panel px-4 py-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
+    <aside className="hidden h-dvh w-[clamp(212px,16vw,240px)] self-start overflow-hidden border-r border-line bg-panel px-3 py-4 xl:px-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
         <div className="mb-7 flex justify-center px-2">
           <BrandLogo className="h-24 w-auto max-w-[190px]" priority />
         </div>

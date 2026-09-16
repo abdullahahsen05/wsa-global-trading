@@ -1,4 +1,5 @@
 import type { EquityPoint } from "@/lib/domain/types";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import { formatMoney } from "@/lib/utils/format";
 
 export function EquityCurve({
@@ -52,8 +53,9 @@ function EquityCurvePanel({
     const y = height - padding - ((point.equity - min) / range) * (height - padding * 2);
     return { x, y, point };
   });
-  const line = points.map(({ x, y }) => `${x},${y}`).join(" ");
-  const area = `${padding},${height - padding} ${line} ${width - padding},${height - padding}`;
+  const curvePoints = points.map(({ x, y }) => ({ x, y }));
+  const linePath = toSmoothPath(curvePoints);
+  const areaPath = toSmoothAreaPath(curvePoints, height - padding);
   const latest = data[data.length - 1];
 
   return (
@@ -90,14 +92,15 @@ function EquityCurvePanel({
             strokeWidth="1"
           />
         ))}
-        <polygon points={area} fill="url(#equitySvgGradient)" />
-        <polyline points={line} fill="none" stroke="#21d19f" strokeWidth="2.5" />
-        {points.slice(-1).map(({ x, y }) => (
-          <g key="latest">
-            <circle cx={x} cy={y} r="5" fill="#07100f" stroke="#21d19f" strokeWidth="2" />
-            <circle cx={x} cy={y} r="2" fill="#21d19f" />
-          </g>
-        ))}
+        <path d={areaPath} fill="url(#equitySvgGradient)" />
+        <path
+          d={linePath}
+          fill="none"
+          stroke="#21d19f"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     </div>
   );

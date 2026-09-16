@@ -180,8 +180,8 @@ export function Topbar({
 
   return (
     <header className="sticky top-0 z-20 min-h-16 border-b border-line bg-panel px-3 py-3 sm:px-4 lg:px-7">
-      <div className="flex min-w-0 items-center justify-between gap-2 sm:gap-4">
-        <div className="flex min-w-0 shrink-0 items-center gap-3">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 sm:gap-4">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <button
             onClick={onOpenMobileNav}
             className="inline-flex h-11 w-11 items-center justify-center rounded-[4px] border border-line bg-panel-strong text-muted lg:hidden"
@@ -189,12 +189,12 @@ export function Topbar({
           >
             <Menu className="h-4 w-4" />
           </button>
-          <div className="hidden md:block">
+          <div className="hidden min-w-0 md:block">
             <p className="text-lg font-bold text-foreground">{activeItem?.label ?? "Workspace"}</p>
             <p className="mt-0.5 text-xs font-medium text-muted">{subtitle}</p>
           </div>
         </div>
-        <div className="flex min-w-0 items-center justify-end gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:gap-3">
           <div className="relative" ref={popoverRef}>
             <button
               type="button"
@@ -294,7 +294,7 @@ export function Topbar({
           {role === "TRADER" ? (
             <select
               aria-label="Select one of your trading accounts"
-              className="h-11 min-w-0 w-[min(45vw,180px)] truncate rounded-[5px] border border-line bg-panel-strong px-2 text-base font-semibold text-foreground outline-none focus:border-accent sm:w-auto sm:max-w-[260px] sm:px-3 sm:text-sm"
+              className="h-11 min-w-28 max-w-full flex-1 truncate rounded-[5px] border border-line bg-panel-strong px-2 text-base font-semibold text-foreground outline-none focus:border-accent sm:max-w-[260px] sm:flex-none sm:px-3 sm:text-sm"
               value={effectiveSelectedAccountId ?? ""}
               onChange={(event) => setSelectedAccountId(event.target.value || null)}
               disabled={connectedAccounts.length === 0}

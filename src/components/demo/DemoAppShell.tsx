@@ -30,14 +30,14 @@ function DemoNav({
           key={item.href}
           href={item.href}
           onClick={onNavigate}
-          className={`flex h-10 items-center gap-3 rounded-[4px] border-l-2 px-3 text-sm font-medium transition ${
+          className={`flex min-h-10 items-center gap-3 rounded-[4px] border-l-2 px-3 py-2 text-sm font-medium leading-tight transition ${
             active
               ? "border-l-accent bg-panel-strong/90 text-accent"
               : "border-l-transparent text-foreground/78 hover:border-l-[#4a4730] hover:bg-panel-strong/55 hover:text-foreground"
           }`}
         >
-          {Icon ? <Icon className="h-4 w-4" /> : <span aria-hidden="true" className="w-4" />}
-          {item.navLabel}
+          {Icon ? <Icon className="h-4 w-4 shrink-0" /> : <span aria-hidden="true" className="w-4 shrink-0" />}
+          <span className="min-w-0 break-words">{item.navLabel}</span>
         </Link>
       );
     });
@@ -64,9 +64,9 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
   const mobileItems = sections.slice(0, 6);
 
   return (
-    <div className="min-h-screen min-w-0 overflow-x-hidden bg-background">
+    <div className="min-h-screen min-w-0 overflow-x-auto bg-background">
       <div className="flex min-h-screen min-w-0">
-        <aside className="hidden h-screen w-[240px] self-start overflow-hidden border-r border-line bg-panel px-4 py-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
+        <aside className="hidden h-screen w-[clamp(212px,16vw,240px)] self-start overflow-hidden border-r border-line bg-panel px-3 py-4 xl:px-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
           <div className="mb-7 px-2">
             <BrandLogo priority />
             <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-muted">Demo mode</p>
@@ -129,10 +129,10 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
           </Dialog.Portal>
         </Dialog.Root>
 
-        <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
+        <div className="flex min-w-0 flex-1 flex-col overflow-x-auto">
           <header className="sticky top-0 z-20 border-b border-line bg-panel px-3 py-3 sm:px-4 lg:px-7">
-            <div className="flex min-w-0 items-center justify-between gap-2 sm:gap-4">
-              <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 sm:gap-4">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setMobileNavOpen(true)}
@@ -148,13 +148,13 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
                   </p>
                 </div>
               </div>
-              <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:gap-3">
                 <span className="hidden rounded-[4px] border border-accent/30 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent sm:inline-flex">
                   Demo mode
                 </span>
                 <select
                   aria-label="Demo trading account"
-                  className="hidden h-10 rounded-[5px] border border-[rgba(255,255,255,0.08)] bg-panel-strong px-4 text-sm font-semibold text-foreground outline-none lg:inline-flex"
+                  className="hidden h-10 min-w-28 max-w-full rounded-[5px] border border-[rgba(255,255,255,0.08)] bg-panel-strong px-3 text-sm font-semibold text-foreground outline-none lg:inline-flex"
                   defaultValue={demoAccounts[0]?.id}
                 >
                   {demoAccounts.map((account) => (
@@ -183,7 +183,7 @@ export function DemoAppShell({ children }: { children: React.ReactNode }) {
               ))}
             </nav>
           </header>
-          <main className="relative min-w-0 flex-1 overflow-x-hidden px-3 py-4 sm:px-4 sm:py-5 lg:px-7">{children}</main>
+          <main className="relative min-w-0 flex-1 overflow-x-auto px-3 py-4 sm:px-4 sm:py-5 lg:px-7">{children}</main>
         </div>
       </div>
     </div>

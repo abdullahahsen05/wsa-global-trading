@@ -38,7 +38,7 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-background text-foreground">
+    <main className="min-h-screen overflow-x-auto bg-background text-foreground">
       <div className="grid min-h-screen md:grid-cols-[50%_50%]">
         <aside className="relative hidden min-h-screen overflow-hidden border-r border-line bg-[#060808] md:flex md:flex-col">
           <div className="pointer-events-none absolute inset-0">

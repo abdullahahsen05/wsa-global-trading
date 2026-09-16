@@ -46,7 +46,7 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-background text-foreground">
+    <main className="min-h-screen overflow-x-auto bg-background text-foreground">
       <div className="grid min-h-screen md:grid-cols-2">
         <aside className="relative hidden min-h-screen overflow-hidden border-r border-line bg-[#060808] px-10 py-8 md:flex md:flex-col lg:px-14">
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,rgba(255,255,255,0.038)_1px,transparent_1px),linear-gradient(0deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:112px_112px] opacity-75" />

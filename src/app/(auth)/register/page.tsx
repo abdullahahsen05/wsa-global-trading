@@ -282,7 +282,7 @@ export default function RegisterPage() {
   // ── Step 1: Role selection ────────────────────────────────────────────────
   if (step === 1) {
     return (
-      <main className="min-h-screen overflow-x-hidden bg-background text-foreground">
+      <main className="min-h-screen overflow-x-auto bg-background text-foreground">
         <div className="grid min-h-screen md:grid-cols-[50%_50%]">
           {brandPanel}
 
@@ -363,7 +363,7 @@ export default function RegisterPage() {
   const isPartner = selectedRole === "PARTNER";
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-background text-foreground">
+    <main className="min-h-screen overflow-x-auto bg-background text-foreground">
       <div className="grid min-h-screen md:grid-cols-[50%_50%]">
         {brandPanel}
 

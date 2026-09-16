@@ -13,6 +13,7 @@ import {
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
 import { EquityCurve } from "@/components/dashboard/EquityCurve";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 import type { AnalyticsSummary, EquityPoint, TraderAccountSummary } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
@@ -60,7 +61,8 @@ function GrowthGraph({ points }: { points: EquityPoint[] }) {
     const y = height - padding - ((point.equity - min) / range) * (height - padding * 2);
     return { x, y };
   });
-  const line = coordinates.map((point) => `${point.x},${point.y}`).join(" ");
+  const linePath = toSmoothPath(coordinates);
+  const areaPath = toSmoothAreaPath(coordinates, height - padding);
 
   return (
     <div className="rounded-[4px] border border-line bg-panel p-5">
@@ -90,8 +92,15 @@ function GrowthGraph({ points }: { points: EquityPoint[] }) {
               strokeDasharray="5 8"
             />
           ))}
-          <polygon points={`${padding},${height - padding} ${line} ${width - padding},${height - padding}`} fill="url(#analyticsGrowthGradient)" />
-          <polyline points={line} fill="none" stroke="#ffcf00" strokeWidth="4" />
+          <path d={areaPath} fill="url(#analyticsGrowthGradient)" />
+          <path
+            d={linePath}
+            fill="none"
+            stroke="#ffcf00"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       ) : (
         <div className="mt-4 h-[220px] flex items-center justify-center text-sm text-muted">No data available</div>

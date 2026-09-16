@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { itemMotion } from "@/components/app/WorkspaceUI";
+import { toSmoothPath } from "@/lib/charts/svgCurve";
 
 type KpiTone = "accent" | "lime" | "danger" | "muted";
 
@@ -60,30 +61,30 @@ function MiniSparkline({ points, tone }: { points: number[]; tone: KpiTone }) {
   const min = Math.min(...points);
   const max = Math.max(...points);
   const range = max - min || 1;
-  const linePoints = points
-    .map((point, index) => {
+  const linePath = toSmoothPath(
+    points.map((point, index) => {
       const x = (index / Math.max(points.length - 1, 1)) * width;
       const y = height - ((point - min) / range) * (height - 8) - 4;
-      return `${x},${y}`;
-    })
-    .join(" ");
+      return { x, y };
+    }),
+  );
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="h-[52px] w-[120px]" aria-hidden="true">
-      <polyline
-        points={linePoints}
+      <path
+        d={linePath}
         fill="none"
         stroke={toneColor[tone]}
-        strokeWidth="2.5"
+        strokeWidth="7"
+        strokeOpacity="0.16"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      <polyline
-        points={linePoints}
+      <path
+        d={linePath}
         fill="none"
         stroke={toneColor[tone]}
-        strokeOpacity="0.18"
-        strokeWidth="7"
+        strokeWidth="2.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
