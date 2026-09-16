@@ -45,6 +45,12 @@ export interface LotInputs {
     tickSize?: number | null;
     tickValue?: number | null;
     contractSize?: number | null;
+    volumeStep?: number | null;
+    minVolume?: number | null;
+    maxVolume?: number | null;
+    accountCurrency?: string | null;
+    profitCurrency?: string | null;
+    accountCurrencyConversionRate?: number | null;
   } | null;
 }
 
@@ -69,9 +75,12 @@ function invalid(reason: string, riskAmount: number | null = null): LotResult {
  * lot === 0 with a reason means "do not copy" (caller logs SKIPPED / COPY_INVALID_LOT).
  */
 export function calculateFollowerLot(input: LotInputs): LotResult {
-  const step = positive(input.lotStep) ? input.lotStep! : DEFAULT_LOT_STEP;
-  const minLot = positive(input.minLot) ? input.minLot! : DEFAULT_MIN_LOT;
-  const maxLot = positive(input.maxLot) ? input.maxLot! : null;
+  const specStep = input.symbolSpecifications?.volumeStep ?? null;
+  const specMinLot = input.symbolSpecifications?.minVolume ?? null;
+  const specMaxLot = input.symbolSpecifications?.maxVolume ?? null;
+  const step = positive(input.lotStep) ? input.lotStep! : positive(specStep) ? specStep : DEFAULT_LOT_STEP;
+  const minLot = positive(input.minLot) ? input.minLot! : positive(specMinLot) ? specMinLot : DEFAULT_MIN_LOT;
+  const maxLot = positive(input.maxLot) ? input.maxLot! : positive(specMaxLot) ? specMaxLot : null;
   const risk = positive(input.riskMultiplier) ? input.riskMultiplier! : 1;
   const lotMultiplier = positive(input.lotMultiplier) ? input.lotMultiplier! : risk;
 
@@ -110,12 +119,21 @@ export function calculateFollowerLot(input: LotInputs): LotResult {
       const tickSize = input.symbolSpecifications?.tickSize ?? null;
       const tickValue = input.symbolSpecifications?.tickValue ?? null;
       const contractSize = input.symbolSpecifications?.contractSize ?? null;
+      const accountCurrency = input.symbolSpecifications?.accountCurrency?.trim().toUpperCase() ?? null;
+      const profitCurrency = input.symbolSpecifications?.profitCurrency?.trim().toUpperCase() ?? null;
+      const needsConversion = Boolean(accountCurrency && profitCurrency && accountCurrency !== profitCurrency);
+      if (needsConversion && !positive(input.symbolSpecifications?.accountCurrencyConversionRate)) {
+        return invalid("Account currency conversion rate required for risk-percent sizing");
+      }
+      const conversionRate = positive(input.symbolSpecifications?.accountCurrencyConversionRate)
+        ? input.symbolSpecifications!.accountCurrencyConversionRate!
+        : 1;
       let riskPerLot: number | null = null;
 
       if (positive(tickSize) && positive(tickValue)) {
-        riskPerLot = (stopDistance / tickSize) * tickValue;
+        riskPerLot = (stopDistance / tickSize) * tickValue * conversionRate;
       } else if (positive(contractSize)) {
-        riskPerLot = stopDistance * contractSize;
+        riskPerLot = stopDistance * contractSize * conversionRate;
       }
 
       if (!positive(riskPerLot)) {

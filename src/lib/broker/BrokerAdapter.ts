@@ -42,6 +42,20 @@ export interface BrokerExecutionResult {
   rawResponse?: unknown;
 }
 
+export interface BrokerSymbolSpecifications {
+  symbol: string;
+  tickSize: number | null;
+  tickValue: number | null;
+  contractSize: number | null;
+  volumeStep: number | null;
+  minVolume: number | null;
+  maxVolume: number | null;
+  accountCurrency: string | null;
+  profitCurrency: string | null;
+  accountCurrencyConversionRate: number | null;
+  rawResponse?: unknown;
+}
+
 export interface BrokerAdapter {
   verifyConnection(accountId: string): Promise<BrokerConnectionHealth>;
   fetchSnapshot(accountId: string): Promise<TraderAccountSummary>;
@@ -54,6 +68,7 @@ export interface BrokerAdapter {
    * does not pay a reconnect/status-check penalty on the hot path.
    */
   warmAccounts?(accountIds: string[]): Promise<void>;
+  fetchSymbolSpecifications?(accountId: string, symbol: string): Promise<BrokerSymbolSpecifications | null>;
 
   // Order execution (copy trading). Default-off until an operator enables it.
   /** True only when real order execution is wired AND explicitly enabled by env. */

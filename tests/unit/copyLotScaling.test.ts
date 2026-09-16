@@ -138,6 +138,79 @@ describe("calculateFollowerLot", () => {
     expect(r.lot).toBe(0.03);
   });
 
+  test("RISK_PERCENT uses broker volume step, min and max from symbol specs", () => {
+    const roundedByBrokerStep = calculateFollowerLot({
+      masterLot: 1,
+      followerEquity: 10000,
+      entryPrice: 1.2,
+      stopLoss: 1.19,
+      scalingMode: "RISK_PERCENT",
+      riskPercent: 1,
+      symbolSpecifications: {
+        tickSize: 0.0001,
+        tickValue: 10,
+        volumeStep: 0.1,
+        minVolume: 0.1,
+        maxVolume: 1,
+      },
+    });
+    expect(roundedByBrokerStep.rawLot).toBeCloseTo(0.1, 6);
+    expect(roundedByBrokerStep.lot).toBe(0.1);
+
+    const cappedByBrokerMax = calculateFollowerLot({
+      masterLot: 1,
+      followerEquity: 100000,
+      entryPrice: 1.2,
+      stopLoss: 1.19,
+      scalingMode: "RISK_PERCENT",
+      riskPercent: 5,
+      symbolSpecifications: {
+        tickSize: 0.0001,
+        tickValue: 10,
+        volumeStep: 0.01,
+        maxVolume: 2,
+      },
+    });
+    expect(cappedByBrokerMax.lot).toBe(2);
+  });
+
+  test("RISK_PERCENT applies account currency conversion and rejects missing required conversion", () => {
+    const converted = calculateFollowerLot({
+      masterLot: 1,
+      followerEquity: 10000,
+      entryPrice: 100,
+      stopLoss: 90,
+      scalingMode: "RISK_PERCENT",
+      riskPercent: 1,
+      symbolSpecifications: {
+        tickSize: 1,
+        tickValue: 50,
+        accountCurrency: "USD",
+        profitCurrency: "EUR",
+        accountCurrencyConversionRate: 2,
+      },
+    });
+    // $100 risk / ((10 ticks * €50) * 2 USD/EUR) = 0.10
+    expect(converted.lot).toBe(0.1);
+
+    const missingConversion = calculateFollowerLot({
+      masterLot: 1,
+      followerEquity: 10000,
+      entryPrice: 100,
+      stopLoss: 90,
+      scalingMode: "RISK_PERCENT",
+      riskPercent: 1,
+      symbolSpecifications: {
+        tickSize: 1,
+        tickValue: 50,
+        accountCurrency: "USD",
+        profitCurrency: "EUR",
+      },
+    });
+    expect(missingConversion.lot).toBe(0);
+    expect(missingConversion.reason).toContain("conversion rate");
+  });
+
   test("RISK_PERCENT rejects missing stop loss or symbol specs safely", () => {
     const noStop = calculateFollowerLot({
       masterLot: 1,

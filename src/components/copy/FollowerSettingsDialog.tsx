@@ -260,9 +260,9 @@ export function FollowerSettingsDialog(props: {
                 <h3 className="font-semibold text-foreground">Coming soon</h3>
               </div>
               <p className="mt-2 text-xs leading-5 text-muted">
-                Risk-percent sizing, equity-peak drawdown, live spread/slippage checks, copying historical
-                positions, and copying source stop-loss/take-profit are disabled because the current engine
-                cannot guarantee those behaviors yet.
+                Equity-peak drawdown, live spread/slippage checks, copying historical positions, and copying
+                source stop-loss/take-profit are disabled because the current engine cannot guarantee those
+                behaviors yet.
               </p>
             </div>
 

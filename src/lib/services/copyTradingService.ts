@@ -838,6 +838,29 @@ function followerProportionalMultiplier(follower: FollowerRow, strategy: Strateg
   return followerLotMultiplier(follower, strategy);
 }
 
+async function loadRiskSymbolSpecifications(
+  adapter: BrokerAdapter,
+  accountId: string,
+  symbol: string,
+  scalingMode: ScalingMode,
+): Promise<Parameters<typeof calculateFollowerLot>[0]["symbolSpecifications"]> {
+  if (scalingMode !== "RISK_PERCENT") return null;
+  if (!adapter.fetchSymbolSpecifications) return null;
+  const specs = await adapter.fetchSymbolSpecifications(accountId, symbol).catch(() => null);
+  if (!specs) return null;
+  return {
+    tickSize: specs.tickSize,
+    tickValue: specs.tickValue,
+    contractSize: specs.contractSize,
+    volumeStep: specs.volumeStep,
+    minVolume: specs.minVolume,
+    maxVolume: specs.maxVolume,
+    accountCurrency: specs.accountCurrency,
+    profitCurrency: specs.profitCurrency,
+    accountCurrencyConversionRate: specs.accountCurrencyConversionRate,
+  };
+}
+
 function getStrategyHotRuntime(strategyId: string): StrategyHotRuntime | null {
   const cached = strategyHotRuntimeCache.get(strategyId);
   if (!cached || cached.expiresAt <= Date.now()) return null;
@@ -1069,6 +1092,7 @@ async function simulateOneEvent(eventRow: {
   event_time: string;
 }, strategy: StrategyRow, settings: CopyGlobalSettingsDto): Promise<SimResult> {
   const supabase = createAdminClient();
+  const adapter = createBrokerAdapter();
   const followers = await loadActiveFollowers(strategy.id);
   const result: SimResult = { simulated: 0, success: 0, skipped: 0, failed: 0 };
   if (followers.length === 0) return result;
@@ -1160,6 +1184,7 @@ async function simulateOneEvent(eventRow: {
     }
 
     const scalingMode = followerScalingMode(f, strategy);
+    const symbolSpecifications = await loadRiskSymbolSpecifications(adapter, f.follower_account_id, followerSymbol, scalingMode);
     const lot = calculateFollowerLot({
       masterLot,
       entryPrice: eventRow.open_price === null ? null : Number(eventRow.open_price),
@@ -1177,6 +1202,7 @@ async function simulateOneEvent(eventRow: {
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
       maxLot: followerMaxLot(f, strategy, scalingMode),
+      symbolSpecifications,
     });
 
     if (lot.lot <= 0) {
@@ -1855,6 +1881,7 @@ export async function executeCopyForEvent(
     }
 
     const scalingMode = followerScalingMode(f, strategy);
+    const symbolSpecifications = await loadRiskSymbolSpecifications(adapter, f.follower_account_id, followerSymbol, scalingMode);
     const lot = calculateFollowerLot({
       masterLot,
       entryPrice: ev.open_price === null ? null : Number(ev.open_price),
@@ -1872,6 +1899,7 @@ export async function executeCopyForEvent(
       fixedLot: f.fixed_lot === null ? null : Number(f.fixed_lot),
       minLot: f.min_lot === null ? null : Number(f.min_lot),
       maxLot: followerMaxLot(f, strategy, scalingMode),
+      symbolSpecifications,
     });
     if (lot.lot <= 0) {
       await supabase.from("copy_execution_logs").insert({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.COPY_INVALID_LOT, error_message: lot.reason, calculated_lot: 0 });

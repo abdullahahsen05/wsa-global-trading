@@ -5,7 +5,7 @@ import {
   reverseFollowerSide,
 } from "@/lib/copy/settings";
 import { COPY_ERROR, CopyError } from "@/lib/copy/types";
-import { BrokerExecutionError } from "@/lib/broker/BrokerAdapter";
+import { BrokerExecutionError, type BrokerAdapter } from "@/lib/broker/BrokerAdapter";
 import { createBrokerAdapter } from "@/lib/broker/provider";
 import type { FollowerSettingsPatch } from "@/lib/services/copyTradingService";
 import { getCopyGlobalSettings } from "@/lib/services/copyTradingService";
@@ -76,11 +76,34 @@ function hasPath(
   return false;
 }
 
+async function loadSelfCopyRiskSymbolSpecifications(
+  adapter: BrokerAdapter,
+  accountId: string,
+  symbol: string,
+  scalingMode: NonNullable<ReturnType<typeof copyModeToScalingMode>>,
+): Promise<Parameters<typeof calculateFollowerLot>[0]["symbolSpecifications"]> {
+  if (scalingMode !== "RISK_PERCENT") return null;
+  if (!adapter.fetchSymbolSpecifications) return null;
+  const specs = await adapter.fetchSymbolSpecifications(accountId, symbol).catch(() => null);
+  if (!specs) return null;
+  return {
+    tickSize: specs.tickSize,
+    tickValue: specs.tickValue,
+    contractSize: specs.contractSize,
+    volumeStep: specs.volumeStep,
+    minVolume: specs.minVolume,
+    maxVolume: specs.maxVolume,
+    accountCurrency: specs.accountCurrency,
+    profitCurrency: specs.profitCurrency,
+    accountCurrencyConversionRate: specs.accountCurrencyConversionRate,
+  };
+}
+
 function validateSupportedSettings(settings: FollowerSettingsPatch): void {
   if (!copyModeToScalingMode(settings.copyMode)) {
     throw new CopyError(
       COPY_ERROR.VALIDATION_ERROR,
-      "Risk-percent mode is coming soon and cannot be enabled yet.",
+      "Selected copy mode is not supported.",
       400,
     );
   }
@@ -294,6 +317,9 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
   ]);
   const scalingMode = copyModeToScalingMode(settings.copyMode);
   if (!scalingMode) throw new CopyError(COPY_ERROR.COPY_INVALID_LOT, "Selected mode is not supported.", 400);
+  const followerSymbol = mapFollowerSymbol(trade.symbol, settings.symbolMapping);
+  const adapter = createBrokerAdapter();
+  const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(adapter, data.follower_account_id, followerSymbol, scalingMode);
   const lot = calculateFollowerLot({
     masterLot: Number(trade.volume),
     masterBalance: sourceSnapshot?.balance ?? null,
@@ -306,6 +332,7 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
     riskMultiplier: settings.copyMode === "BALANCE_RATIO" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null,
     minLot: settings.minLot,
     maxLot: settings.maxLot,
+    symbolSpecifications,
   });
   const result = {
     simulated: lot.lot > 0,
@@ -314,7 +341,7 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
       : lot.reason ?? "Simulation could not calculate a safe lot.",
     sourceTradeId: trade.id,
     sourceSymbol: trade.symbol,
-    followerSymbol: mapFollowerSymbol(trade.symbol, settings.symbolMapping),
+    followerSymbol,
     followerSide: reverseFollowerSide(trade.side, settings.reverseCopy),
     calculatedLot: lot.lot,
     liveExecution: false,
@@ -479,6 +506,7 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       result.skipped++;
       continue;
     }
+    const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(adapter, relationship.follower_account_id, followerSymbol, scalingMode);
     const lot = calculateFollowerLot({
       masterLot: event.volume,
       masterBalance: sourceSnapshot?.balance ?? null,
@@ -491,6 +519,7 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       riskMultiplier: settings.copyMode === "BALANCE_RATIO" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null,
       minLot: settings.minLot,
       maxLot: settings.maxLot,
+      symbolSpecifications,
     });
     if (lot.lot <= 0) {
       result.skipped++;

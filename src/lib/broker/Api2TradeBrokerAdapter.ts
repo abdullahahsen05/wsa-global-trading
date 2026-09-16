@@ -10,6 +10,7 @@ import {
   type BrokerAdapter,
   type BrokerConnectionHealth,
   type BrokerExecutionResult,
+  type BrokerSymbolSpecifications,
   type CloseTradeRequest,
   type ModifyTradeRequest,
   type OpenTradeRequest,
@@ -20,6 +21,7 @@ import {
   type Api2TradeConnectionStatus,
   type Api2TradeExecutionResponse,
   type Api2TradeOrder,
+  type Api2TradeSymbolSpecifications,
   loadApi2TradeConfig,
 } from "./api2TradeClient";
 import { publicApi2TradeError, publicBrokerConnectionError } from "./api2TradeErrors";
@@ -154,6 +156,111 @@ function normalizeProviderAccountId(value: unknown): string {
     }
   }
   return token;
+}
+
+function firstFiniteNumber(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key];
+    const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : typeof value === "number" ? value : NaN;
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim().toUpperCase();
+  }
+  return null;
+}
+
+function mapSymbolSpecifications(
+  symbol: string,
+  raw: Api2TradeSymbolSpecifications | null,
+  accountCurrency: string | null,
+): BrokerSymbolSpecifications | null {
+  if (!raw) return null;
+  const record = raw as Record<string, unknown>;
+  const tickSize = firstFiniteNumber(record, [
+    "tickSize",
+    "tick_size",
+    "tradeTickSize",
+    "trade_tick_size",
+    "point",
+    "pointSize",
+    "point_size",
+  ]);
+  const tickValue = firstFiniteNumber(record, [
+    "tickValue",
+    "tick_value",
+    "tradeTickValue",
+    "trade_tick_value",
+    "tickValueProfit",
+    "tick_value_profit",
+  ]);
+  const contractSize = firstFiniteNumber(record, [
+    "contractSize",
+    "contract_size",
+    "tradeContractSize",
+    "trade_contract_size",
+    "lotSize",
+    "lot_size",
+  ]);
+  const volumeStep = firstFiniteNumber(record, [
+    "volumeStep",
+    "volume_step",
+    "lotStep",
+    "lot_step",
+    "volumeMinStep",
+    "volume_min_step",
+  ]);
+  const minVolume = firstFiniteNumber(record, [
+    "minVolume",
+    "min_volume",
+    "volumeMin",
+    "volume_min",
+    "minLot",
+    "min_lot",
+  ]);
+  const maxVolume = firstFiniteNumber(record, [
+    "maxVolume",
+    "max_volume",
+    "volumeMax",
+    "volume_max",
+    "maxLot",
+    "max_lot",
+  ]);
+  const profitCurrency = firstString(record, [
+    "profitCurrency",
+    "profit_currency",
+    "currencyProfit",
+    "currency_profit",
+    "currency",
+  ]);
+  const conversionRate = firstFiniteNumber(record, [
+    "accountCurrencyConversionRate",
+    "account_currency_conversion_rate",
+    "conversionRate",
+    "conversion_rate",
+    "currencyRate",
+    "currency_rate",
+    "rate",
+  ]);
+
+  return {
+    symbol,
+    tickSize,
+    tickValue,
+    contractSize,
+    volumeStep,
+    minVolume,
+    maxVolume,
+    accountCurrency,
+    profitCurrency,
+    accountCurrencyConversionRate: conversionRate ?? (profitCurrency && accountCurrency && profitCurrency !== accountCurrency ? null : 1),
+    rawResponse: raw,
+  };
 }
 
 function isMissingApi2TradeClient(error: unknown): boolean {
@@ -493,6 +600,17 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
       ]),
     );
     return providerOrders.map((order) => mapOrder(accountId, order, "CLOSED", summary.currency ?? "USD"));
+  }
+
+  async fetchSymbolSpecifications(accountId: string, symbol: string): Promise<BrokerSymbolSpecifications | null> {
+    const client = this.assertConfigured();
+    return this.withSessionRetry(accountId, async (providerAccountId) => {
+      const [summary, raw] = await Promise.all([
+        client.accountSummary(providerAccountId).catch(() => ({ currency: null })),
+        client.symbolSpecifications(providerAccountId, symbol).catch(() => null),
+      ]);
+      return mapSymbolSpecifications(symbol, raw, summary.currency ?? null);
+    });
   }
 
   async openTrade(req: OpenTradeRequest): Promise<BrokerExecutionResult> {

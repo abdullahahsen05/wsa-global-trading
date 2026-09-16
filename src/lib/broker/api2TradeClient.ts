@@ -131,6 +131,8 @@ export interface Api2TradeRegisteredAccount {
   accountId?: string;
 }
 
+export type Api2TradeSymbolSpecifications = Record<string, unknown>;
+
 function shouldFallbackToSafeExecutionEndpoint(error: unknown): boolean {
   const message = publicApi2TradeError(error).toLowerCase();
   return message.includes("404")
@@ -432,6 +434,39 @@ export class Api2TradeClient {
   async accountDetails(accountId: string): Promise<Api2TradeAccountDetails> {
     const result = await this.request<unknown>("GET", "AccountDetails", this.accountParams(accountId));
     return assertRecord(result, "AccountDetails") as Api2TradeAccountDetails;
+  }
+
+  async symbolSpecifications(accountId: string, symbol: string): Promise<Api2TradeSymbolSpecifications | null> {
+    const params = {
+      ...this.accountParams(accountId),
+      symbol,
+    };
+    const endpoints = [
+      "SymbolInfo",
+      "SymbolParams",
+      "SymbolSpecification",
+      "GetSymbolInfo",
+      "MarketInfo",
+    ];
+    let lastError: unknown = null;
+    for (const endpoint of endpoints) {
+      try {
+        const result = await this.request<unknown>("GET", endpoint, params);
+        if (Array.isArray(result)) {
+          const match = result.find((item) => {
+            if (typeof item !== "object" || item === null) return false;
+            const value = String((item as Record<string, unknown>).symbol ?? (item as Record<string, unknown>).name ?? "");
+            return value.toUpperCase() === symbol.toUpperCase();
+          });
+          return match && typeof match === "object" ? match as Api2TradeSymbolSpecifications : null;
+        }
+        return typeof result === "object" && result !== null ? result as Api2TradeSymbolSpecifications : null;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    void lastError;
+    return null;
   }
 
   async openedOrders(accountId: string): Promise<Api2TradeOrder[]> {
