@@ -327,15 +327,15 @@ export default function AdminCrmPage() {
               <table className="w-full min-w-[1180px] text-left text-sm">
                 <thead className="bg-panel-strong text-[11px] uppercase tracking-[0.12em] text-muted">
                   <tr>
-                    <th className="px-4 py-3">Trader</th>
-                    <th className="px-4 py-3">Trading stage</th>
-                    <th className="px-4 py-3">Accounts</th>
-                    <th className="px-4 py-3">Equity</th>
-                    <th className="px-4 py-3">Risk</th>
-                    <th className="px-4 py-3">Evaluation</th>
-                    <th className="px-4 py-3">Subscription</th>
-                    <th className="px-4 py-3">Last account update</th>
-                    <th className="w-12 px-4 py-3"><span className="sr-only">Open</span></th>
+                    <th className="whitespace-nowrap px-4 py-3">Trader</th>
+                    <th className="whitespace-nowrap px-4 py-3">Trading stage</th>
+                    <th className="whitespace-nowrap px-4 py-3">Accounts</th>
+                    <th className="whitespace-nowrap px-4 py-3">Equity</th>
+                    <th className="whitespace-nowrap px-4 py-3">Risk</th>
+                    <th className="whitespace-nowrap px-4 py-3">Evaluation</th>
+                    <th className="whitespace-nowrap px-4 py-3">Subscription</th>
+                    <th className="whitespace-nowrap px-4 py-3">Last account update</th>
+                    <th className="w-12 whitespace-nowrap px-4 py-3"><span className="sr-only">Open</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
