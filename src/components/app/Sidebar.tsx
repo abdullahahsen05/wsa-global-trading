@@ -61,18 +61,18 @@ export function Sidebar({
 
   return (
     <>
-    <aside className="fixed inset-y-0 left-0 z-30 hidden h-dvh w-[clamp(212px,16vw,240px)] overflow-hidden border-r border-line bg-panel px-3 py-3 xl:px-4 lg:flex lg:flex-col">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden h-screen max-h-screen min-h-0 w-[clamp(212px,16vw,240px)] overflow-hidden border-r border-line bg-panel px-3 py-3 xl:px-4 lg:flex lg:flex-col">
         <div className="mb-4 flex shrink-0 justify-center px-2 sm:mb-5">
           <BrandLogo className="h-[clamp(4.25rem,11vh,6rem)] w-auto max-w-[190px]" priority />
         </div>
         <div className="mb-2 shrink-0 px-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
         </div>
-        <div className="mt-2 flex min-h-0 flex-1 flex-col">
+        <div className="mt-2 flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="sidebar-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1 touch-pan-y">
             {renderNav()}
           </div>
-          <div className="shrink-0 border-t border-line/70 pt-3">
+          <div className="mt-auto shrink-0 border-t border-line/70 pt-3">
             <button
               type="button"
               onClick={handleLogout}
@@ -101,11 +101,11 @@ export function Sidebar({
             <div className="mb-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
             </div>
-            <div className="mt-2 flex min-h-0 flex-1 flex-col">
+            <div className="mt-2 flex min-h-0 flex-1 flex-col overflow-hidden">
               <div className="sidebar-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1 touch-pan-y">
                 {renderNav(() => onMobileNavOpenChange(false))}
               </div>
-              <div className="shrink-0 border-t border-line/70 pt-3">
+              <div className="mt-auto shrink-0 border-t border-line/70 pt-3">
                 <button
                   type="button"
                   onClick={() => {
