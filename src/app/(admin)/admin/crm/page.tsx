@@ -324,17 +324,17 @@ export default function AdminCrmPage() {
           ) : (
             <>
             <div className="hidden invisible-scrollbar overflow-x-auto md:block">
-              <table className="w-full min-w-[1180px] text-left text-sm">
+              <table className="w-full min-w-[1260px] table-fixed text-left text-sm">
                 <thead className="bg-panel-strong text-[11px] uppercase tracking-[0.12em] text-muted">
                   <tr>
-                    <th className="whitespace-nowrap px-4 py-3">Trader</th>
-                    <th className="whitespace-nowrap px-4 py-3">Trading stage</th>
-                    <th className="whitespace-nowrap px-4 py-3">Accounts</th>
-                    <th className="whitespace-nowrap px-4 py-3">Equity</th>
-                    <th className="whitespace-nowrap px-4 py-3">Risk</th>
-                    <th className="whitespace-nowrap px-4 py-3">Evaluation</th>
-                    <th className="whitespace-nowrap px-4 py-3">Subscription</th>
-                    <th className="whitespace-nowrap px-4 py-3">Last account update</th>
+                    <th className="w-[250px] whitespace-nowrap px-4 py-3">Trader</th>
+                    <th className="w-[140px] whitespace-nowrap px-4 py-3">Trading stage</th>
+                    <th className="w-[130px] whitespace-nowrap px-4 py-3">Accounts</th>
+                    <th className="w-[140px] whitespace-nowrap px-4 py-3">Equity</th>
+                    <th className="w-[120px] whitespace-nowrap px-4 py-3">Risk</th>
+                    <th className="w-[140px] whitespace-nowrap px-4 py-3">Evaluation</th>
+                    <th className="w-[190px] whitespace-nowrap px-4 py-3">Subscription</th>
+                    <th className="w-[180px] whitespace-nowrap px-4 py-3">Last account update</th>
                     <th className="w-12 whitespace-nowrap px-4 py-3"><span className="sr-only">Open</span></th>
                   </tr>
                 </thead>
@@ -356,15 +356,15 @@ export default function AdminCrmPage() {
                             <span className="mt-0.5 block truncate text-xs text-muted">{trader.email}</span>
                           </button>
                         </td>
-                        <td className="px-4 py-3"><StatusPill tone={trader.segment === "AT_RISK" ? "danger" : "muted"}>{trader.segment}</StatusPill></td>
+                        <td className="whitespace-nowrap px-4 py-3"><StatusPill tone={trader.segment === "AT_RISK" ? "danger" : "muted"}>{trader.segment}</StatusPill></td>
                         <td className="whitespace-nowrap px-4 py-3 text-muted">{trader.connectedAccountCount} / {trader.accounts.length} connected</td>
                         <td className="whitespace-nowrap px-4 py-3 font-semibold text-foreground">{equityLabel(trader)}</td>
-                        <td className="px-4 py-3">
+                        <td className="whitespace-nowrap px-4 py-3">
                           <StatusPill tone={riskTone(trader.highestRiskSeverity)}>
                             {trader.openRiskEventCount ? `${trader.openRiskEventCount} open` : "Clear"}
                           </StatusPill>
                         </td>
-                        <td className="px-4 py-3 text-muted">{trader.evaluationStatus ?? "—"}</td>
+                        <td className="whitespace-nowrap px-4 py-3 text-muted">{trader.evaluationStatus ?? "—"}</td>
                         <td className="px-4 py-3">
                           {trader.subscription ? (
                             <div className="max-w-[180px]">

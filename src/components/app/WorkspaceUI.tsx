@@ -213,7 +213,7 @@ export function StatusPill({
           : "status-pill";
 
   return (
-    <span className={toneClass}>{children}</span>
+    <span className={`${toneClass} shrink-0`}>{children}</span>
   );
 }
 
