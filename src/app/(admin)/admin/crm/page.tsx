@@ -324,18 +324,17 @@ export default function AdminCrmPage() {
           ) : (
             <>
             <div className="hidden invisible-scrollbar overflow-x-auto md:block">
-              <table className="w-full min-w-[1320px] table-fixed text-left text-sm">
+              <table className="w-full min-w-[1040px] table-fixed text-left text-sm">
                 <thead className="bg-panel-strong text-[11px] uppercase tracking-[0.12em] text-muted">
                   <tr>
-                    <th className="w-[250px] whitespace-nowrap px-4 py-3">Trader</th>
-                    <th className="w-[140px] whitespace-nowrap px-4 py-3">Trading stage</th>
-                    <th className="w-[130px] whitespace-nowrap px-4 py-3">Accounts</th>
-                    <th className="w-[140px] whitespace-nowrap px-4 py-3">Equity</th>
-                    <th className="w-[120px] whitespace-nowrap px-4 py-3">Risk</th>
-                    <th className="w-[140px] whitespace-nowrap px-4 py-3">Evaluation</th>
-                    <th className="w-[190px] whitespace-nowrap px-4 py-3">Subscription</th>
-                    <th className="w-[190px] whitespace-nowrap px-4 py-3">Last account update</th>
-                    <th className="w-20 whitespace-nowrap px-4 py-3 text-right"><span className="sr-only">Open</span></th>
+                    <th className="w-[220px] whitespace-nowrap px-4 py-3">Trader</th>
+                    <th className="w-[120px] whitespace-nowrap px-4 py-3">Trading stage</th>
+                    <th className="w-[115px] whitespace-nowrap px-4 py-3">Accounts</th>
+                    <th className="w-[125px] whitespace-nowrap px-4 py-3">Equity</th>
+                    <th className="w-[100px] whitespace-nowrap px-4 py-3">Risk</th>
+                    <th className="w-[170px] whitespace-nowrap px-4 py-3">Subscription</th>
+                    <th className="w-[145px] whitespace-nowrap px-4 py-3">Last update</th>
+                    <th className="w-[45px] whitespace-nowrap px-2 py-3 text-right"><span className="sr-only">Open</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -364,7 +363,6 @@ export default function AdminCrmPage() {
                             {trader.openRiskEventCount ? `${trader.openRiskEventCount} open` : "Clear"}
                           </StatusPill>
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-muted">{trader.evaluationStatus ?? "—"}</td>
                         <td className="px-4 py-3">
                           {trader.subscription ? (
                             <div className="max-w-[180px]">
@@ -373,8 +371,8 @@ export default function AdminCrmPage() {
                             </div>
                           ) : "—"}
                         </td>
-                        <td className="whitespace-nowrap px-4 py-3 text-muted">{dateLabel(trader.lastActivityAt, true)}</td>
-                        <td className="px-4 py-3 text-right">
+                        <td className="truncate whitespace-nowrap px-4 py-3 text-muted">{dateLabel(trader.lastActivityAt, true)}</td>
+                        <td className="px-2 py-3 text-right">
                           <button
                             type="button"
                             aria-label={`Open ${trader.name}`}
