@@ -324,7 +324,7 @@ export default function AdminCrmPage() {
           ) : (
             <>
             <div className="hidden invisible-scrollbar overflow-x-auto md:block">
-              <table className="w-full min-w-[1260px] table-fixed text-left text-sm">
+              <table className="w-full min-w-[1320px] table-fixed text-left text-sm">
                 <thead className="bg-panel-strong text-[11px] uppercase tracking-[0.12em] text-muted">
                   <tr>
                     <th className="w-[250px] whitespace-nowrap px-4 py-3">Trader</th>
@@ -334,8 +334,8 @@ export default function AdminCrmPage() {
                     <th className="w-[120px] whitespace-nowrap px-4 py-3">Risk</th>
                     <th className="w-[140px] whitespace-nowrap px-4 py-3">Evaluation</th>
                     <th className="w-[190px] whitespace-nowrap px-4 py-3">Subscription</th>
-                    <th className="w-[180px] whitespace-nowrap px-4 py-3">Last account update</th>
-                    <th className="w-12 whitespace-nowrap px-4 py-3"><span className="sr-only">Open</span></th>
+                    <th className="w-[190px] whitespace-nowrap px-4 py-3">Last account update</th>
+                    <th className="w-20 whitespace-nowrap px-4 py-3 text-right"><span className="sr-only">Open</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -374,12 +374,12 @@ export default function AdminCrmPage() {
                           ) : "—"}
                         </td>
                         <td className="whitespace-nowrap px-4 py-3 text-muted">{dateLabel(trader.lastActivityAt, true)}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3 text-right">
                           <button
                             type="button"
                             aria-label={`Open ${trader.name}`}
                             onClick={() => setSelectedId(trader.traderId)}
-                            className="grid h-8 w-8 place-items-center border border-line text-muted hover:border-accent/40 hover:text-foreground"
+                            className="ml-auto grid h-8 w-8 place-items-center border border-line text-muted hover:border-accent/40 hover:text-foreground"
                           >
                             <ChevronRight className="h-4 w-4" />
                           </button>
