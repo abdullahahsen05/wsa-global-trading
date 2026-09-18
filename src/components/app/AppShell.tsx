@@ -92,7 +92,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 mobileNavOpen={mobileNavOpen}
                 onMobileNavOpenChange={setMobileNavOpen}
               />
-              <div className="flex min-w-0 flex-1 flex-col lg:ml-[clamp(212px,16vw,240px)]">
+              <div className="app-shell-main flex flex-1 flex-col">
                 <Topbar role={role} userId={sessionQuery.data?.id ?? ""} onOpenMobileNav={() => setMobileNavOpen(true)} />
                 <main className="relative min-w-0 flex-1 overflow-x-auto px-3 py-4 sm:px-4 sm:py-5 md:px-5 lg:px-7 lg:py-6">{children}</main>
               </div>

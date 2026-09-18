@@ -22,6 +22,8 @@
   --section-radius: 4px;
   --shadow-soft: none;
   --shadow-card: none;
+  --sidebar-width: clamp(212px, 16vw, 240px);
+  --workspace-min-width: 1040px;
 }
 
 @theme inline {
@@ -108,6 +110,17 @@ html {
   min-width: 320px;
   overflow-x: auto;
   -webkit-text-size-adjust: 100%;
+}
+
+.app-shell-main {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .app-shell-main {
+    margin-left: var(--sidebar-width);
+    min-width: var(--workspace-min-width);
+  }
 }
 
 body {

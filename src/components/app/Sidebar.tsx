@@ -61,7 +61,7 @@ export function Sidebar({
 
   return (
     <>
-    <aside className="fixed inset-y-0 left-0 z-30 hidden h-screen max-h-screen min-h-0 w-[clamp(212px,16vw,240px)] overflow-hidden border-r border-line bg-panel px-3 py-3 xl:px-4 lg:flex lg:flex-col">
+    <aside className="fixed inset-y-0 left-0 z-30 hidden h-screen max-h-screen min-h-0 w-[var(--sidebar-width)] overflow-hidden border-r border-line bg-panel px-3 py-3 xl:px-4 lg:flex lg:flex-col">
         <div className="mb-4 flex shrink-0 justify-center px-2 sm:mb-5">
           <BrandLogo className="h-[clamp(4.25rem,11vh,6rem)] w-auto max-w-[190px]" priority />
         </div>
