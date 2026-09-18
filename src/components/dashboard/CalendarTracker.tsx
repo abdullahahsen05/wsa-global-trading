@@ -289,11 +289,11 @@ export function CalendarTracker({
           })}
         </div>
 
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <button
             type="button"
             onClick={handleShare}
-            className="h-11 rounded-[4px] border border-line bg-panel px-3 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent sm:px-4"
+            className="min-h-11 rounded-[4px] border border-line bg-panel px-3 py-2 text-sm font-semibold text-foreground transition hover:border-accent/40 hover:text-accent sm:px-4"
           >
             Share
           </button>
@@ -311,7 +311,7 @@ export function CalendarTracker({
                   null,
               );
             }}
-            className="h-11 min-w-0 rounded-[4px] border border-line bg-background px-2 text-base font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10 sm:px-4 sm:text-sm"
+            className="min-h-11 min-w-[9rem] max-w-full rounded-[4px] border border-line bg-background px-2 py-2 text-base font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10 sm:px-4 sm:text-sm"
           >
             {monthNames.map((name, index) => (
               <option key={name} value={index}>
@@ -333,7 +333,7 @@ export function CalendarTracker({
                   null,
               );
             }}
-            className="h-11 min-w-0 rounded-[4px] border border-line bg-background px-2 text-base font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10 sm:px-4 sm:text-sm"
+            className="min-h-11 min-w-[7rem] max-w-full rounded-[4px] border border-line bg-background px-2 py-2 text-base font-semibold text-foreground outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/10 sm:px-4 sm:text-sm"
           >
             {availableYears.map((year) => (
               <option key={year} value={year}>

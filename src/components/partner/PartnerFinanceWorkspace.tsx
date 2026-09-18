@@ -570,8 +570,8 @@ function PayoutModePage() {
         </Panel>
       </div>
 
-      <div className="mt-5 grid items-stretch gap-5 xl:h-[620px] xl:grid-cols-[0.8fr_1.2fr]">
-        <Panel className="invisible-scrollbar min-h-0 overflow-y-auto xl:h-full">
+      <div className="mt-5 grid items-stretch gap-5 xl:min-h-[620px] xl:grid-cols-[0.8fr_1.2fr]">
+        <Panel className="invisible-scrollbar min-h-[360px] overflow-y-auto">
           <h2 className="text-lg font-semibold text-foreground">Request WSA payout</h2>
           <p className="mt-1 text-sm leading-6 text-muted">
             Only approved WSA platform subscription commission that is not already locked can be paid out. One active request is allowed at a time.
@@ -601,7 +601,7 @@ function PayoutModePage() {
           </form>
         </Panel>
 
-        <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
+        <Panel className="flex min-h-[360px] flex-col overflow-hidden">
           <h2 className="mb-4 shrink-0 text-lg font-semibold text-foreground">Payout history</h2>
           {isLoading ? (
             <p className="text-sm text-muted">Loading…</p>

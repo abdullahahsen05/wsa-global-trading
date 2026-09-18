@@ -245,8 +245,8 @@ function AiAssistantContent() {
         ]}
       />
 
-      <div className="mt-5 grid items-stretch gap-4 xl:h-[min(720px,calc(100vh-250px))] xl:min-h-[560px] xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.7fr)]">
-        <Panel className="flex min-h-[520px] min-w-0 flex-col xl:h-full xl:min-h-0">
+      <div className="mt-5 grid items-stretch gap-4 xl:min-h-[560px] xl:grid-cols-[minmax(0,1.65fr)_minmax(300px,0.7fr)]">
+        <Panel className="flex min-h-[520px] min-w-0 flex-col">
           <div className="flex items-center justify-between gap-2 border-b border-line pb-4">
             <div className="flex items-center gap-2">
               <span className="grid h-9 w-9 place-items-center rounded-[4px] bg-accent/10 text-accent">
@@ -347,7 +347,7 @@ function AiAssistantContent() {
             Educational analysis only — not financial advice. The assistant never guarantees profits.
           </p>
         </Panel>
-        <Panel className="flex min-h-0 flex-col xl:h-full">
+        <Panel className="flex min-h-[360px] flex-col">
           <div className="shrink-0 border-b border-line pb-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">Analysis context</p>
             <h2 className="mt-2 text-lg font-semibold text-foreground">Grounding and limits</h2>

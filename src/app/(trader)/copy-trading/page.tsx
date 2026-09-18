@@ -337,7 +337,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
                     const expanded = expandedStrategyId === strategy.id;
                     return (
                       <div key={strategy.id} className="px-5 py-4 transition-colors hover:bg-white/[0.015]">
-                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(140px,auto)_minmax(140px,auto)] lg:items-center">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <Repeat className="h-4 w-4 text-lime" />
@@ -346,7 +346,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
                             </div>
                             <p className="mt-1 line-clamp-1 text-sm text-muted">{strategy.description || "Live WSA strategy."}</p>
                           </div>
-                          <div className="flex flex-wrap gap-2 lg:justify-end"><StatusPill tone="accent">{formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} / month</StatusPill></div>
+                          <div className="flex min-w-0 flex-wrap gap-2 lg:justify-end"><StatusPill tone="accent">{formatMoney({ amount: strategy.standardMonthlyPrice, currency: strategy.currency })} / month</StatusPill></div>
                           <GhostButton
                             type="button"
                             aria-expanded={expanded}

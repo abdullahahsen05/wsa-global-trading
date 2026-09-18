@@ -418,7 +418,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
           <div>
             <div className="divide-y divide-line">
               {visibleRelationships.map((relationship) => (
-                <div key={relationship.id} className="grid gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02] xl:grid-cols-[minmax(0,1.3fr)_minmax(220px,0.7fr)_auto] xl:items-center">
+                <div key={relationship.id} className="grid gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02] xl:grid-cols-[minmax(0,1.3fr)_minmax(220px,0.7fr)_minmax(220px,auto)] xl:items-center">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[4px] border border-line bg-background text-accent">
                       <ArrowRight className="h-4 w-4" />
@@ -434,7 +434,7 @@ export function SelfCopyPanel({ accounts }: { accounts: TraderAccountSummary[] }
                       </p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 xl:justify-end">
+                  <div className="flex min-w-0 flex-wrap gap-2 xl:justify-end">
                     <StatusPill tone="muted">{modeLabel(relationship.copySettings.copyMode)}</StatusPill>
                     {relationship.copySettings.maxLot ? <StatusPill tone="muted">Max {relationship.copySettings.maxLot} lots</StatusPill> : null}
                     {relationship.copySettings.reverseCopy ? <StatusPill tone="accent">Reversed</StatusPill> : null}

@@ -180,8 +180,8 @@ export function Topbar({
 
   return (
     <header className="sticky top-0 z-20 min-h-16 border-b border-line bg-panel px-3 py-3 sm:px-4 lg:px-7">
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 sm:gap-4">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 sm:items-center sm:gap-4">
+        <div className="flex min-w-[14rem] flex-1 items-center gap-3 max-sm:min-w-0">
           <button
             onClick={onOpenMobileNav}
             className="inline-flex h-11 w-11 items-center justify-center rounded-[4px] border border-line bg-panel-strong text-muted lg:hidden"
@@ -190,11 +190,11 @@ export function Topbar({
             <Menu className="h-4 w-4" />
           </button>
           <div className="hidden min-w-0 md:block">
-            <p className="text-lg font-bold text-foreground">{activeItem?.label ?? "Workspace"}</p>
-            <p className="mt-0.5 text-xs font-medium text-muted">{subtitle}</p>
+            <p className="break-words text-lg font-bold leading-tight text-foreground">{activeItem?.label ?? "Workspace"}</p>
+            <p className="mt-0.5 max-w-[52ch] text-xs font-medium leading-5 text-muted">{subtitle}</p>
           </div>
         </div>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-start gap-2 sm:justify-end sm:gap-3">
           <div className="relative" ref={popoverRef}>
             <button
               type="button"
@@ -212,18 +212,18 @@ export function Topbar({
             </button>
 
             <div
-              className={`absolute right-0 top-full z-30 mt-3 w-[min(92vw,340px)] rounded-[6px] border border-line bg-panel shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition duration-150 ${
+              className={`fixed left-3 right-3 top-[4.75rem] z-30 max-h-[calc(100dvh-5.5rem)] rounded-[6px] border border-line bg-panel shadow-[0_12px_30px_rgba(0,0,0,0.28)] transition duration-150 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-3 sm:w-[min(92vw,340px)] ${
                 notificationsOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none -translate-y-2 opacity-0"
               }`}
             >
-              <div className="flex items-center justify-between border-b border-line px-4 py-3">
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent">
                     Notifications
                   </p>
                   <p className="mt-1 text-sm font-semibold text-foreground">Recent updates</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   {unreadCount > 0 && (
                     <button
                       type="button"
@@ -243,7 +243,7 @@ export function Topbar({
                   </button>
                 </div>
               </div>
-              <div className="invisible-scrollbar max-h-80 overflow-y-auto">
+              <div className="invisible-scrollbar max-h-[calc(100dvh-11rem)] overflow-y-auto sm:max-h-80">
                 {notifications.length === 0 ? (
                   <p className="px-4 py-6 text-center text-sm text-muted">No notifications yet.</p>
                 ) : (
@@ -271,8 +271,8 @@ export function Topbar({
                           <Icon className="h-4 w-4" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className={`truncate text-sm font-semibold ${isUnread ? "text-foreground" : "text-muted"}`}>
+                          <div className="flex flex-wrap items-start justify-between gap-2">
+                            <p className={`min-w-0 break-words text-sm font-semibold ${isUnread ? "text-foreground" : "text-muted"}`}>
                               {notification.title}
                             </p>
                             <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">

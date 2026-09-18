@@ -165,7 +165,7 @@ export default function PartnerCrmPage() {
             </div>
           </Panel>
 
-          <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-[760px]">
+          <Panel className="flex min-h-0 flex-col overflow-hidden xl:min-h-[760px]">
             <h2 className="mb-4 shrink-0 text-lg font-semibold text-foreground">
               Notes {selectedTrader ? `- ${selectedTrader.name}` : ""}
             </h2>

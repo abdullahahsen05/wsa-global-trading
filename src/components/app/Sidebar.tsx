@@ -61,22 +61,22 @@ export function Sidebar({
 
   return (
     <>
-    <aside className="hidden h-dvh w-[clamp(212px,16vw,240px)] self-start overflow-hidden border-r border-line bg-panel px-3 py-4 xl:px-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
-        <div className="mb-7 flex justify-center px-2">
-          <BrandLogo className="h-24 w-auto max-w-[190px]" priority />
+    <aside className="hidden h-dvh w-[clamp(212px,16vw,240px)] self-start overflow-hidden border-r border-line bg-panel px-3 py-3 xl:px-4 lg:sticky lg:top-0 lg:flex lg:flex-col">
+        <div className="mb-4 flex shrink-0 justify-center px-2 sm:mb-5">
+          <BrandLogo className="h-[clamp(4.25rem,11vh,6rem)] w-auto max-w-[190px]" priority />
         </div>
-        <div className="mb-3 px-2">
+        <div className="mb-2 shrink-0 px-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
         </div>
         <div className="mt-2 flex min-h-0 flex-1 flex-col">
           <div className="sidebar-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1 touch-pan-y">
             {renderNav()}
           </div>
-          <div className="border-t border-line/70 pt-4">
+          <div className="shrink-0 border-t border-line/70 pt-3">
             <button
               type="button"
               onClick={handleLogout}
-              className="flex h-10 w-full items-center gap-3 rounded-[4px] border border-line px-3 text-sm text-muted transition-colors hover:border-accent/40 hover:text-accent"
+              className="flex min-h-10 w-full items-center gap-3 rounded-[4px] border border-line px-3 py-2 text-sm text-muted transition-colors hover:border-accent/40 hover:text-accent"
             >
               <LogOut className="h-4 w-4" />
               Logout
@@ -88,10 +88,10 @@ export function Sidebar({
       <Dialog.Root open={mobileNavOpen} onOpenChange={onMobileNavOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 lg:hidden" />
-        <Dialog.Content className="fixed left-0 top-0 z-50 flex h-[100dvh] w-[min(88vw,340px)] flex-col border-r border-line bg-panel px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] focus:outline-none sm:px-5 lg:hidden">
+          <Dialog.Content className="fixed left-0 top-0 z-50 flex h-[100dvh] w-[min(88vw,340px)] flex-col overflow-hidden border-r border-line bg-panel px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-[max(1.25rem,env(safe-area-inset-top))] focus:outline-none sm:px-5 lg:hidden">
           <Dialog.Title className="sr-only">Navigation menu</Dialog.Title>
           <div className="mb-7 flex items-center justify-between">
-            <BrandLogo className="h-24 w-auto max-w-[190px]" priority />
+            <BrandLogo className="h-[clamp(4.25rem,11vh,6rem)] w-auto max-w-[190px]" priority />
               <Dialog.Close asChild>
                 <button className="grid h-9 w-9 place-items-center rounded-[4px] border border-line bg-panel-strong text-muted">
                   <X className="h-4 w-4" />
@@ -105,7 +105,7 @@ export function Sidebar({
               <div className="sidebar-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto pr-1 touch-pan-y">
                 {renderNav(() => onMobileNavOpenChange(false))}
               </div>
-              <div className="border-t border-line/70 pt-4">
+              <div className="shrink-0 border-t border-line/70 pt-3">
                 <button
                   type="button"
                   onClick={() => {

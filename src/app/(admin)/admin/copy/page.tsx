@@ -398,8 +398,8 @@ export default function AdminCopyPage() {
         </div>
         <div className="mt-4 space-y-3">
           {visibleStrategies.map((strategy) => (
-            <div key={strategy.id} className="grid gap-4 rounded-[4px] border border-line bg-background p-4 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center">
-              <div>
+            <div key={strategy.id} className="grid gap-4 rounded-[4px] border border-line bg-background p-4 lg:grid-cols-[minmax(0,1fr)_minmax(180px,auto)_minmax(240px,auto)] lg:items-center">
+              <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-semibold text-foreground">{strategy.name}</p>
                   <StatusPill tone={strategy.engineStatus === "LIVE" ? "lime" : strategy.engineStatus === "ERROR" ? "danger" : strategy.status === "ARCHIVED" ? "muted" : "accent"}>

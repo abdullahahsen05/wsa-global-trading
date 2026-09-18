@@ -61,7 +61,7 @@ export function WorkspacePage({
           <h1 className="mt-2 break-words text-2xl font-semibold leading-tight text-foreground sm:text-[30px]">{title}</h1>
           <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-muted">{description}</p>
         </div>
-        {action ? <div className="w-full sm:w-auto">{action}</div> : null}
+        {action ? <div className="min-w-0 w-full sm:w-auto">{action}</div> : null}
       </motion.div>
       {children}
     </motion.section>
@@ -70,7 +70,7 @@ export function WorkspacePage({
 
 export function PageActionGroup({ children }: { children: ReactNode }) {
   return (
-    <div className="flex w-full flex-wrap items-center gap-2 [&>*]:min-w-0 [&>*]:basis-[calc(50%-0.25rem)] [&>*]:grow sm:w-auto sm:justify-end sm:gap-3 sm:[&>*]:basis-auto sm:[&>*]:grow-0">
+    <div className="flex w-full min-w-0 flex-wrap items-stretch gap-2 [&>*]:min-w-0 [&>*]:basis-[calc(50%-0.25rem)] [&>*]:grow sm:w-auto sm:items-center sm:justify-end sm:gap-3 sm:[&>*]:basis-auto sm:[&>*]:grow-0">
       {children}
     </div>
   );
@@ -86,7 +86,7 @@ export function FilterChipRow({
   }>;
 }) {
   return (
-    <div className="invisible-scrollbar flex max-w-full flex-nowrap gap-2 overflow-x-auto rounded-[4px] border border-line bg-background p-2 sm:inline-flex sm:flex-wrap">
+    <div className="flex max-w-full flex-wrap gap-2 rounded-[4px] border border-line bg-background p-2">
       {chips.map((chip) => (
         <button
           key={chip.label}
@@ -162,8 +162,8 @@ export function InlineStatusStrip({
   }>;
   }) {
   return (
-    <div className="invisible-scrollbar overflow-x-auto border border-line bg-panel">
-      <div className="flex min-w-max">
+    <div className="overflow-x-auto border border-line bg-panel">
+      <div className="flex min-w-max sm:min-w-0 sm:flex-wrap">
         {items.map((item) => {
           const toneClass =
             item.tone === "accent"
@@ -177,17 +177,17 @@ export function InlineStatusStrip({
           return (
             <div
               key={item.label}
-              className="flex min-w-[170px] flex-1 items-center justify-between gap-3 border-r border-line px-3 py-3 last:border-r-0 sm:min-w-[220px] sm:gap-4 sm:px-4"
+              className="flex min-w-[170px] flex-1 items-start justify-between gap-3 border-r border-line px-3 py-3 last:border-r-0 sm:min-w-[220px] sm:gap-4 sm:px-4"
             >
               <div className="min-w-0">
-                <p className="truncate text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+                <p className="break-words text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
                   {item.label}
                 </p>
                 {item.helper ? (
-                  <p className="mt-1 truncate text-xs font-medium text-muted">{item.helper}</p>
+                  <p className="mt-1 break-words text-xs font-medium text-muted">{item.helper}</p>
                 ) : null}
               </div>
-              <p className={`shrink-0 text-base font-semibold ${toneClass}`}>{item.value}</p>
+              <p className={`shrink-0 text-right text-base font-semibold ${toneClass}`}>{item.value}</p>
             </div>
           );
         })}
@@ -245,8 +245,8 @@ export function DataTable({
   const end = Math.min(rows.length, currentPage * pageSize);
 
   return (
-    <div className="overflow-hidden border border-line bg-panel">
-      <div className="hidden md:block invisible-scrollbar overflow-x-auto" style={maxBodyHeight ? { maxHeight: maxBodyHeight } : undefined}>
+    <div className="min-w-0 overflow-hidden border border-line bg-panel">
+      <div className="hidden overflow-x-auto md:block" style={maxBodyHeight ? { maxHeight: maxBodyHeight } : undefined}>
         <table className="w-full min-w-[780px] text-left text-sm">
           <thead className="sticky top-0 z-10 bg-panel-strong text-[11px] font-semibold uppercase tracking-[0.1em] text-muted">
             <tr>
@@ -308,8 +308,8 @@ export function DataTable({
           <span>
             Showing {start}-{end} of {rows.length}
           </span>
-          <div className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
-            <label className="flex items-center gap-2">
+          <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            <label className="flex min-w-0 items-center gap-2">
               Rows
               <select
                 value={pageSize}
@@ -332,7 +332,7 @@ export function DataTable({
             >
               Previous
             </button>
-            <span className="text-center font-semibold text-foreground sm:min-w-14">{currentPage} / {totalPages}</span>
+            <span className="min-w-12 text-center font-semibold text-foreground sm:min-w-14">{currentPage} / {totalPages}</span>
             <button
               type="button"
               disabled={currentPage >= totalPages}
@@ -373,8 +373,8 @@ export function PaginationControls({
   return (
     <div className="mt-4 flex flex-col gap-3 border-t border-line pt-3 text-xs text-muted sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
       <span>Showing {start}-{end} of {totalItems}</span>
-      <div className="grid w-full grid-cols-[auto_auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
-        <label className="flex items-center gap-2">
+      <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+        <label className="flex min-w-0 items-center gap-2">
           Rows
           <select
             value={pageSize}
@@ -394,7 +394,7 @@ export function PaginationControls({
         >
           Previous
         </button>
-        <span className="text-center font-semibold text-foreground sm:min-w-14">{safePage} / {totalPages}</span>
+        <span className="min-w-12 text-center font-semibold text-foreground sm:min-w-14">{safePage} / {totalPages}</span>
         <button
           type="button"
           disabled={safePage >= totalPages}

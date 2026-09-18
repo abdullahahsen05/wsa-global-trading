@@ -189,7 +189,7 @@ function RiskContent() {
         </div>
 
         <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-          <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+          <Panel className="flex min-h-[420px] min-w-0 flex-col overflow-hidden">
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Rule set</h2>
@@ -228,7 +228,7 @@ function RiskContent() {
             </div>
           </Panel>
 
-          <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+          <Panel className="flex min-h-[420px] min-w-0 flex-col overflow-hidden">
             <div className="flex shrink-0 items-center justify-between gap-4">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Warning notifications</h3>

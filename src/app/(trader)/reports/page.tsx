@@ -372,8 +372,8 @@ function ReportsContent() {
         )}
       </div>
 
-      <div className="mt-5 grid items-stretch gap-4 xl:h-[380px] xl:grid-cols-[0.62fr_0.38fr]">
-        <Panel className="min-h-0 xl:h-full">
+      <div className="mt-5 grid items-stretch gap-4 xl:min-h-[380px] xl:grid-cols-[0.62fr_0.38fr]">
+        <Panel className="min-h-[360px]">
           <h2 className="text-lg font-semibold text-foreground">Report structure</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
             Every row on this page is derived from persisted trade history only. No client-side
@@ -413,7 +413,7 @@ function ReportsContent() {
           </div>
         </Panel>
 
-        <Panel className="flex min-h-0 flex-col overflow-hidden xl:h-full">
+        <Panel className="flex min-h-[360px] flex-col overflow-hidden">
           <h2 className="text-lg font-semibold text-foreground">Export readiness</h2>
           <p className="mt-2 text-sm leading-6 text-muted">
             Reports can be exported directly as CSV or branded PDF from the live trade ledger.

@@ -278,7 +278,7 @@ export default function AdminRiskPage() {
 
       <div className="mt-5 grid gap-5">
         <div className="grid items-stretch gap-5 xl:grid-cols-[minmax(0,1.25fr)_minmax(340px,0.75fr)]">
-        <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+        <Panel className="flex min-h-[420px] min-w-0 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">Risk rules</h2>
@@ -319,7 +319,7 @@ export default function AdminRiskPage() {
           </div>
         </Panel>
 
-        <Panel className="flex h-[420px] min-w-0 flex-col overflow-hidden">
+        <Panel className="flex min-h-[420px] min-w-0 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-accent">

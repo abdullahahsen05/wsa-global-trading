@@ -126,8 +126,8 @@ export default function PartnerTradersPage() {
             description="Traders assigned to you (or who sign up with your referral link) will appear here."
           />
         ) : (
-          <div className="grid items-stretch gap-5 xl:h-[600px] xl:grid-cols-[1.4fr_1fr]">
-            <Panel className="flex min-h-0 min-w-0 flex-col overflow-hidden xl:h-full">
+          <div className="grid items-stretch gap-5 xl:min-h-[600px] xl:grid-cols-[1.4fr_1fr]">
+            <Panel className="flex min-h-[360px] min-w-0 flex-col overflow-hidden">
               <div className="invisible-scrollbar min-h-0 flex-1 overflow-auto">
                 <DataTable
                 headers={["Trader", "Pipeline", "Model", "Total lots", "Wallet-ready", "Risk", ""]}
@@ -155,7 +155,7 @@ export default function PartnerTradersPage() {
             </Panel>
 
             {selected ? (
-              <Panel className="invisible-scrollbar min-h-0 overflow-y-auto xl:h-full">
+              <Panel className="invisible-scrollbar min-h-[360px] overflow-y-auto">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-accent">Trader</p>

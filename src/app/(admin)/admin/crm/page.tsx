@@ -210,7 +210,7 @@ export default function AdminCrmPage() {
       ) : null}
 
       <Panel className="mt-5">
-        <div className="grid gap-3 xl:grid-cols-[minmax(280px,1fr)_repeat(5,minmax(145px,auto))]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(280px,1.4fr)_repeat(5,minmax(145px,1fr))]">
           <label className="relative block">
             <span className="sr-only">Search traders</span>
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
@@ -448,7 +448,7 @@ export default function AdminCrmPage() {
                 Showing {(pagination.page - 1) * pagination.pageSize + 1}–
                 {Math.min(pagination.page * pagination.pageSize, pagination.total)} of {pagination.total}
               </span>
-              <div className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2 sm:flex sm:w-auto">
+              <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
                 <GhostButton type="button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
                   Previous
                 </GhostButton>

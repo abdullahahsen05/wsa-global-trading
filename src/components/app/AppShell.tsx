@@ -84,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <ToastProvider>
       <TradingAccountSelectionProvider>
-        <div className="min-h-screen min-w-0 overflow-x-auto bg-background">
+        <div className="min-h-screen min-w-0 bg-background">
           {role ? (
             <div className="flex min-h-screen min-w-0">
               <Sidebar
@@ -92,7 +92,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 mobileNavOpen={mobileNavOpen}
                 onMobileNavOpenChange={setMobileNavOpen}
               />
-              <div className="flex min-w-0 flex-1 flex-col overflow-x-auto">
+              <div className="flex min-w-0 flex-1 flex-col">
                 <Topbar role={role} userId={sessionQuery.data?.id ?? ""} onOpenMobileNav={() => setMobileNavOpen(true)} />
                 <main className="relative min-w-0 flex-1 overflow-x-auto px-3 py-4 sm:px-4 sm:py-5 md:px-5 lg:px-7 lg:py-6">{children}</main>
               </div>

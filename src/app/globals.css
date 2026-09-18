@@ -64,6 +64,15 @@ textarea {
   max-width: 100%;
 }
 
+a,
+button {
+  min-width: 0;
+}
+
+table {
+  min-width: 0;
+}
+
 .invisible-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -124,6 +133,8 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--card-radius);
   box-shadow: var(--shadow-card);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .section-surface {
@@ -131,6 +142,8 @@ body {
   border: 1px solid var(--line);
   border-radius: var(--section-radius);
   box-shadow: var(--shadow-soft);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .inner-surface {
@@ -176,6 +189,10 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  max-width: 100%;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .status-pill-green {
@@ -188,6 +205,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   gap: 0.5rem;
   padding: 0.4rem 0.85rem !important;
   min-height: 2.25rem !important;
@@ -205,6 +223,11 @@ body {
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
+.btn-dark svg,
+.btn-active svg {
+  flex-shrink: 0;
+}
+
 .btn-dark:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--line-strong);
@@ -214,6 +237,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   gap: 0.5rem;
   padding: 0.4rem 0.85rem !important;
   min-height: 2.25rem !important;

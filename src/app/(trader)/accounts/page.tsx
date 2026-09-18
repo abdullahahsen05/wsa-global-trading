@@ -474,7 +474,7 @@ function AccountsContent() {
                     ) : null}
 
                     <form className="mt-4 grid gap-4" onSubmit={handleCredentials}>
-                      <div className="grid gap-3 rounded-[4px] border border-line bg-background p-4 md:grid-cols-[1fr_auto] md:items-end">
+                      <div className="grid gap-3 rounded-[4px] border border-line bg-background p-4 md:grid-cols-[minmax(0,1fr)_minmax(160px,auto)] md:items-end">
                         <TextField
                           label="Find broker server"
                           value={serverSearchDraft}
