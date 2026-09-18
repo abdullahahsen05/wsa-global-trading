@@ -104,7 +104,7 @@ function mapFredRelease(row: FredReleaseDate): EconomicEventDto | null {
     endTime: null,
     timezone: "UTC",
     eventType: "ECONOMIC",
-    locationUrl: `https://fred.stlouisfed.org/releases/${row.release_id}`,
+    locationUrl: `https://fred.stlouisfed.org/release?rid=${row.release_id}`,
     status: "PUBLISHED",
     audience: "ALL",
     actual: null,
