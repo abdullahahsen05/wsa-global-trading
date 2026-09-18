@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchFredEconomicEvents } from "@/lib/services/fredCalendarService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Economic Calendar Service (server-only)
@@ -87,6 +88,38 @@ function mapEvent(row: EventRow): EconomicEventDto {
   };
 }
 
+function byEventTimeAscending(left: EconomicEventDto, right: EconomicEventDto): number {
+  return new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime();
+}
+
+function byEventTimeDescending(left: EconomicEventDto, right: EconomicEventDto): number {
+  return new Date(right.eventTime).getTime() - new Date(left.eventTime).getTime();
+}
+
+async function withFredEvents(
+  manualEvents: EconomicEventDto[],
+  params?: { from?: Date; to?: Date; limit?: number; sort?: "asc" | "desc" },
+): Promise<EconomicEventDto[]> {
+  let fredEvents: EconomicEventDto[] = [];
+  try {
+    fredEvents = await fetchFredEconomicEvents({
+      from: params?.from,
+      to: params?.to,
+      limit: params?.limit,
+    });
+  } catch {
+    fredEvents = [];
+  }
+
+  const merged = new Map<string, EconomicEventDto>();
+  for (const event of fredEvents) merged.set(event.id, event);
+  for (const event of manualEvents) merged.set(event.id, event);
+  const list = Array.from(merged.values()).sort(
+    params?.sort === "desc" ? byEventTimeDescending : byEventTimeAscending,
+  );
+  return list.slice(0, params?.limit ?? 200);
+}
+
 /**
  * Upcoming events for a set of currencies within a time window.
  * Used to build AI news-context for a trader's active pairs.
@@ -118,7 +151,20 @@ export async function listUpcomingEvents(params: {
 
   const { data, error } = await query;
   if (error) throw new Error(`Failed to fetch economic events: ${error.message}`);
-  return (data ?? []).map(mapEvent);
+  const manualEvents = (data ?? []).map(mapEvent);
+  const from = new Date(params.fromIso);
+  const to = new Date(params.toIso);
+  const merged = await withFredEvents(manualEvents, {
+    from,
+    to,
+    limit: params.limit ?? 50,
+  });
+  return merged.filter((event) => {
+    const inCurrency = params.currencies.includes(event.currency);
+    const inImpact = !params.impacts?.length || params.impacts.includes(event.impact);
+    const eventTime = new Date(event.eventTime).getTime();
+    return inCurrency && inImpact && eventTime >= from.getTime() && eventTime <= to.getTime();
+  });
 }
 
 /**
@@ -132,7 +178,7 @@ export async function listEvents(limit = 200): Promise<EconomicEventDto[]> {
     .order("event_time", { ascending: false })
     .limit(limit);
   if (error) throw new Error(`Failed to fetch economic events: ${error.message}`);
-  return (data ?? []).map(mapEvent);
+  return withFredEvents((data ?? []).map(mapEvent), { limit, sort: "desc" });
 }
 
 export async function listPublishedEvents(limit = 200): Promise<EconomicEventDto[]> {
@@ -145,7 +191,7 @@ export async function listPublishedEvents(limit = 200): Promise<EconomicEventDto
     .order("event_time", { ascending: true })
     .limit(limit);
   if (error) throw new Error(`Failed to fetch calendar events: ${error.message}`);
-  return (data ?? []).map(mapEvent);
+  return withFredEvents((data ?? []).map(mapEvent), { limit, sort: "asc" });
 }
 
 export interface EconomicEventInput {
