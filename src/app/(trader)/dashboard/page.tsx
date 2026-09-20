@@ -63,6 +63,40 @@ function normalizeSeriesPoints(values: number[], width: number, height: number, 
   });
 }
 
+function normalizePercentSeriesPoints(
+  values: number[],
+  width: number,
+  height: number,
+  padding: number,
+  domain: { min: number; max: number },
+): ChartMetricPoint[] {
+  if (values.length === 0) return [];
+  const range = domain.max - domain.min || 1;
+  return values.map((value, index) => {
+    const x = padding + (index / Math.max(values.length - 1, 1)) * (width - padding * 2);
+    const y = height - padding - ((value - domain.min) / range) * (height - padding * 2);
+    return { x, y };
+  });
+}
+
+function buildPercentDomain(...series: number[][]): { min: number; max: number } {
+  const values = series.flat().filter(Number.isFinite);
+  const rawMin = Math.min(0, ...values);
+  const rawMax = Math.max(0, ...values);
+  const rawRange = rawMax - rawMin;
+  if (rawRange < 1) return { min: -0.5, max: 0.5 };
+  const padding = Math.max(rawRange * 0.12, 0.15);
+  return { min: rawMin - padding, max: rawMax + padding };
+}
+
+function formatGrowthPercent(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  if (value === 0) return "0.00%";
+  if (Math.abs(value) < 0.01) return value > 0 ? "<0.01%" : ">-0.01%";
+  if (Math.abs(value) < 1) return `${value.toFixed(2)}%`;
+  return formatPercent(value);
+}
+
 function buildDashboardPnlSeries(trades: TradeDto[], fallbackValue: number): number[] {
   const closed = [...trades]
     .filter((trade) => trade.status === "CLOSED")
@@ -128,8 +162,11 @@ function TraderPerformanceChart({
   const profitBaseEquity = Math.max(latestEquity - latestPnl, startingEquity, 1);
   const profitGrowthPercent = profitBaseEquity > 0 ? (latestPnl / profitBaseEquity) * 100 : 0;
   const growthPercent = Math.abs(equityGrowthPercent) > 0.005 ? equityGrowthPercent : profitGrowthPercent;
-  const equityPoints = normalizeSeriesPoints(equityValues, width, height, padding);
-  const pnlPoints = normalizeSeriesPoints(pnlValues, width, height, padding);
+  const equityGrowthValues = equityValues.map((value) => (startingEquity > 0 ? ((value - startingEquity) / startingEquity) * 100 : 0));
+  const pnlGrowthValues = pnlValues.map((value) => (profitBaseEquity > 0 ? (value / profitBaseEquity) * 100 : 0));
+  const percentDomain = buildPercentDomain(equityGrowthValues, pnlGrowthValues);
+  const equityPoints = normalizePercentSeriesPoints(equityGrowthValues, width, height, padding, percentDomain);
+  const pnlPoints = normalizePercentSeriesPoints(pnlGrowthValues, width, height, padding, percentDomain);
   const equityPath = toSmoothPath(equityPoints);
   const equityArea = toSmoothAreaPath(equityPoints, height - padding);
   const pnlPath = toSmoothPath(pnlPoints);
@@ -178,7 +215,7 @@ function TraderPerformanceChart({
           {[
             ["Equity", formatMoney({ amount: latestEquity, currency }), "text-accent"],
             ["Closed P&L", formatMoney({ amount: latestPnl, currency }), latestPnl >= 0 ? "text-accent-2" : "text-danger"],
-            ["% Growth", formatPercent(growthPercent), growthPercent >= 0 ? "text-accent-2" : "text-danger"],
+            ["% Growth", formatGrowthPercent(growthPercent), growthPercent >= 0 ? "text-accent-2" : "text-danger"],
             ["Win rate", formatPercent(winRate), "text-foreground"],
           ].map(([label, value, tone]) => (
             <div key={label} className="min-w-28 border-r border-line px-4 py-3 last:border-r-0">
