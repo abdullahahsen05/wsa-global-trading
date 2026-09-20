@@ -124,7 +124,10 @@ function TraderPerformanceChart({
   const latestEquity = equityCurve.at(-1)?.equity ?? currentEquity;
   const latestPnl = pnlValues.at(-1) ?? periodProfit;
   const startingEquity = equityValues[0] || currentEquity || latestEquity;
-  const growthPercent = startingEquity > 0 ? ((latestEquity - startingEquity) / startingEquity) * 100 : 0;
+  const equityGrowthPercent = startingEquity > 0 ? ((latestEquity - startingEquity) / startingEquity) * 100 : 0;
+  const profitBaseEquity = Math.max(latestEquity - latestPnl, startingEquity, 1);
+  const profitGrowthPercent = profitBaseEquity > 0 ? (latestPnl / profitBaseEquity) * 100 : 0;
+  const growthPercent = Math.abs(equityGrowthPercent) > 0.005 ? equityGrowthPercent : profitGrowthPercent;
   const equityPoints = normalizeSeriesPoints(equityValues, width, height, padding);
   const pnlPoints = normalizeSeriesPoints(pnlValues, width, height, padding);
   const equityPath = toSmoothPath(equityPoints);

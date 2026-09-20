@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Eye, Key } from "lucide-react";
@@ -17,8 +17,18 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberedEmail, setRememberedEmail] = useState("");
   const router = useRouter();
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const savedEmail = window.localStorage.getItem("wsa-login-email") ?? "";
+    if (savedEmail) {
+      setRememberedEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -66,6 +76,12 @@ export default function LoginPage() {
         "Your account profile is incomplete. Contact support before signing in.",
       );
       return;
+    }
+
+    if (rememberMe) {
+      window.localStorage.setItem("wsa-login-email", email);
+    } else {
+      window.localStorage.removeItem("wsa-login-email");
     }
 
     setMessage("Signed in successfully. Redirecting...");
@@ -319,6 +335,7 @@ export default function LoginPage() {
                 label="Email"
                 name="email"
                 type="email"
+                defaultValue={rememberedEmail}
                 className="!h-[58px] !rounded-[6px] !border-white/15 !bg-[#0a0c0c] !px-5 !text-[15px] !text-foreground"
               />
 
@@ -342,7 +359,16 @@ export default function LoginPage() {
                 </button>
               </div>
 
-              <div className="-mt-[9px] flex justify-end">
+              <div className="-mt-[9px] flex flex-wrap items-center justify-between gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-[13px] font-semibold text-muted transition-colors hover:text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(event) => setRememberMe(event.target.checked)}
+                    className="h-4 w-4 rounded border-white/20 bg-[#0a0c0c] accent-[#ffcf00]"
+                  />
+                  Remember me
+                </label>
                 <Link
                   href="/forgot-password"
                   className="text-[13px] font-semibold text-accent transition-colors hover:text-foreground"

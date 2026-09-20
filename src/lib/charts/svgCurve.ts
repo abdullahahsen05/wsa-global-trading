@@ -3,26 +3,6 @@ export type SvgCurvePoint = {
   y: number;
 };
 
-function controlPoint(
-  current: SvgCurvePoint,
-  previous: SvgCurvePoint,
-  next: SvgCurvePoint,
-  reverse = false,
-): SvgCurvePoint {
-  const smoothing = 0.18;
-  const opposedLine = {
-    x: next.x - previous.x,
-    y: next.y - previous.y,
-  };
-  const angle = Math.atan2(opposedLine.y, opposedLine.x) + (reverse ? Math.PI : 0);
-  const length = Math.hypot(opposedLine.x, opposedLine.y) * smoothing;
-
-  return {
-    x: current.x + Math.cos(angle) * length,
-    y: current.y + Math.sin(angle) * length,
-  };
-}
-
 function bellCurveFallback(points: SvgCurvePoint[]): SvgCurvePoint[] {
   if (points.length === 0) return [];
 
@@ -58,31 +38,44 @@ function bellCurveFallback(points: SvgCurvePoint[]): SvgCurvePoint[] {
   });
 }
 
+function displayCurvePoints(points: SvgCurvePoint[]): SvgCurvePoint[] {
+  return bellCurveFallback(points).filter((point) => (
+    Number.isFinite(point.x) &&
+    Number.isFinite(point.y)
+  ));
+}
+
+function toMonotoneQuadraticPath(points: SvgCurvePoint[]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  if (points.length === 2) return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+
+  let path = `M ${points[0].x} ${points[0].y}`;
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const midX = (current.x + next.x) / 2;
+    const midY = (current.y + next.y) / 2;
+    path += ` Q ${current.x} ${current.y}, ${midX} ${midY}`;
+  }
+
+  const previous = points[points.length - 2];
+  const last = points[points.length - 1];
+  path += ` Q ${previous.x} ${previous.y}, ${last.x} ${last.y}`;
+  return path;
+}
+
 export function toSmoothPath(points: SvgCurvePoint[]): string {
-  const displayPoints = bellCurveFallback(points);
-  if (displayPoints.length === 0) return "";
-  if (displayPoints.length === 1) return `M ${displayPoints[0].x} ${displayPoints[0].y}`;
-
-  return displayPoints.reduce((path, point, index, list) => {
-    if (index === 0) return `M ${point.x} ${point.y}`;
-
-    const previous = list[index - 1];
-    const next = list[index + 1] ?? point;
-    const beforePrevious = list[index - 2] ?? previous;
-    const start = controlPoint(previous, beforePrevious, point);
-    const end = controlPoint(point, previous, next, true);
-
-    return `${path} C ${start.x} ${start.y}, ${end.x} ${end.y}, ${point.x} ${point.y}`;
-  }, "");
+  return toMonotoneQuadraticPath(displayCurvePoints(points));
 }
 
 export function toSmoothAreaPath(points: SvgCurvePoint[], baselineY: number): string {
-  const displayPoints = bellCurveFallback(points);
+  const displayPoints = displayCurvePoints(points);
   if (displayPoints.length === 0) return "";
 
   const first = displayPoints[0];
   const last = displayPoints[displayPoints.length - 1];
-  const curve = toSmoothPath(displayPoints);
+  const curve = toMonotoneQuadraticPath(displayPoints);
 
-  return `M ${first.x} ${baselineY} L ${first.x} ${first.y} ${curve.replace(/^M [^C]+/, "")} L ${last.x} ${baselineY} Z`;
+  return `${curve} L ${last.x} ${baselineY} L ${first.x} ${baselineY} Z`;
 }

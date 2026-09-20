@@ -14,7 +14,7 @@ export function BrandLogo({
       width={1280}
       height={853}
       priority={priority}
-      className={`${className} object-contain`}
+      className={`${className} scale-[1.16] transform-gpu object-contain`}
     />
   );
 }

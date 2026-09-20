@@ -148,3 +148,35 @@ export async function updatePendingTradingAccount(
   }
   return mapAccountToDto(account, null, 0)
 }
+
+export async function deleteTradingAccount(
+  accountId: string,
+  userId: string,
+  role: UserRole,
+): Promise<{ deleted: true }> {
+  const supabase = createAdminClient()
+  let lookup = supabase
+    .from('trading_accounts')
+    .select('id, user_id, account_name')
+    .eq('id', accountId)
+
+  if (!isAdmin(role)) {
+    lookup = lookup.eq('user_id', userId)
+  }
+
+  const { data: account, error: lookupError } = await lookup.single()
+  if (lookupError || !account) {
+    throw new Error('Trading account was not found or you do not have access.')
+  }
+
+  const { error } = await supabase
+    .from('trading_accounts')
+    .delete()
+    .eq('id', accountId)
+
+  if (error) {
+    throw new Error(`Failed to delete account: ${error.message}`)
+  }
+
+  return { deleted: true }
+}

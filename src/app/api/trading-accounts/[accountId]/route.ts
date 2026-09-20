@@ -1,6 +1,6 @@
 import { jsonFail, jsonOk } from "@/lib/api/envelope";
 import { requireAuth, AuthError } from "@/lib/auth/session";
-import { getTradingAccount, updatePendingTradingAccount } from "@/lib/services/tradingAccountService";
+import { deleteTradingAccount, getTradingAccount, updatePendingTradingAccount } from "@/lib/services/tradingAccountService";
 import { z } from "zod";
 
 const pendingAccountSchema = z.object({
@@ -42,5 +42,19 @@ export async function PATCH(
   } catch (err) {
     if (err instanceof AuthError) return jsonFail(err.code, err.message, err.statusCode);
     return jsonFail("ACCOUNT_UPDATE_FAILED", err instanceof Error ? err.message : "Pending account could not be updated.", 409);
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ accountId: string }> },
+) {
+  try {
+    const user = await requireAuth();
+    const { accountId } = await context.params;
+    return jsonOk(await deleteTradingAccount(accountId, user.id, user.role));
+  } catch (err) {
+    if (err instanceof AuthError) return jsonFail(err.code, err.message, err.statusCode);
+    return jsonFail("ACCOUNT_DELETE_FAILED", err instanceof Error ? err.message : "Trading account could not be deleted.", 409);
   }
 }

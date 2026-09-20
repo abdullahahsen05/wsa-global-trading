@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Plus, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -102,6 +102,7 @@ function AccountsContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [deletingAccountId, setDeletingAccountId] = useState<string | null>(null);
   // Holds the accountId created in step 1, used in step 2
   const [pendingAccountId, setPendingAccountId] = useState<string | null>(null);
   const [setupBrokerName, setSetupBrokerName] = useState("");
@@ -320,6 +321,27 @@ function AccountsContent() {
     setSuccessMessage(
       `Account created (PENDING). Add broker credentials later from the account detail page.`
     );
+  };
+
+  const handleDeleteAccount = async (account: TraderAccountSummary) => {
+    const confirmed = window.confirm(
+      `Delete ${account.accountName}? This removes the account record and its synced history from this platform.`,
+    );
+    if (!confirmed) return;
+    setDeletingAccountId(account.accountId);
+    setSuccessMessage("");
+    setErrorMessage("");
+    try {
+      const res = await fetch(`/api/trading-accounts/${account.accountId}`, { method: "DELETE" });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error?.message ?? "Account could not be deleted.");
+      await queryClient.invalidateQueries({ queryKey: ["trading-accounts"] });
+      setSuccessMessage(`${account.accountName} was deleted.`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Account could not be deleted.");
+    } finally {
+      setDeletingAccountId(null);
+    }
   };
 
   const connectedCount = tradingAccounts.filter((a) => a.status === "CONNECTED" && a.live !== false).length;
@@ -620,6 +642,11 @@ function AccountsContent() {
           {successMessage}
         </div>
       ) : null}
+      {errorMessage ? (
+        <div className="mt-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm font-medium text-danger">
+          {errorMessage}
+        </div>
+      ) : null}
 
       <div className="mt-5 flex flex-wrap items-end justify-between gap-4 rounded-[4px] border border-line bg-panel p-4">
         <div className="grid flex-1 gap-4">
@@ -717,13 +744,23 @@ function AccountsContent() {
               <span key="sync" className="whitespace-nowrap text-xs text-muted">
                 {account.lastSyncedAt ? new Date(account.lastSyncedAt).toLocaleString() : "Never"}
               </span>,
-              <Link
-                key="action"
-                href={`/accounts/${account.accountId}`}
-                className="btn-dark inline-flex h-9 items-center whitespace-nowrap px-3 text-xs font-semibold text-accent"
-              >
-                {accountActionLabel(account)}
-              </Link>,
+              <div key="action" className="flex flex-wrap items-center justify-end gap-2">
+                <Link
+                  href={`/accounts/${account.accountId}`}
+                  className="btn-dark inline-flex h-9 items-center whitespace-nowrap px-3 text-xs font-semibold text-accent"
+                >
+                  {accountActionLabel(account)}
+                </Link>
+                <button
+                  type="button"
+                  disabled={deletingAccountId === account.accountId}
+                  onClick={() => handleDeleteAccount(account)}
+                  className="inline-flex h-9 items-center gap-1 rounded-[4px] border border-danger/25 px-3 text-xs font-semibold text-danger transition hover:border-danger/60 hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deletingAccountId === account.accountId ? "Deleting" : "Delete"}
+                </button>
+              </div>,
             ])}
           />
         )}
