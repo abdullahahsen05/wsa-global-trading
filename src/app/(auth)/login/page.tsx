@@ -8,7 +8,7 @@ import { Eye, Key } from "lucide-react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import { BrandLogo } from "@/components/app/BrandLogo";
 import { TextField } from "@/components/app/FormFields";
-import { createClient } from "@/lib/supabase/client";
+import { createClient, setRememberSessionPreference } from "@/lib/supabase/client";
 import { parseUserRole, type UserRole } from "@/lib/auth/rbac";
 import { roleHome } from "@/lib/auth/routeAccess";
 
@@ -40,6 +40,7 @@ export default function LoginPage() {
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
 
+    setRememberSessionPreference(rememberMe);
     const supabase = createClient();
     const { error: authError } = await supabase.auth.signInWithPassword({
       email,
@@ -96,6 +97,7 @@ export default function LoginPage() {
     setError("");
 
     try {
+      setRememberSessionPreference(rememberMe);
       const optionsResponse = await fetch(
         "/api/auth/passkeys/login/options",
         { method: "POST" },
