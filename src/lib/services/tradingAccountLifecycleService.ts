@@ -6,6 +6,45 @@ import { ACCOUNT_INACTIVITY_DAYS, resolveAccountLifecycleStatus } from "@/lib/ac
 import type { AccountStatus } from "@/lib/domain/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+const ACCOUNT_SCAN_PAGE_SIZE = 1_000;
+const SNAPSHOT_LOOKUP_BATCH_SIZE = 500;
+
+type LifecycleAccountRow = {
+  id: string;
+  status: string;
+  broker_server: string | null;
+  broker_platform: string | null;
+  provider_account_id: string | null;
+  last_synced_at: string | null;
+};
+
+function chunk<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function loadLiveLifecycleAccounts(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<LifecycleAccountRow[]> {
+  const accounts: LifecycleAccountRow[] = [];
+  for (let from = 0; ; from += ACCOUNT_SCAN_PAGE_SIZE) {
+    const to = from + ACCOUNT_SCAN_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from("trading_accounts")
+      .select("id, status, broker_server, broker_platform, provider_account_id, last_synced_at")
+      .in("status", ["CONNECTED", "RESTRICTED"])
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (error) throw new Error(`Trading account lifecycle scan failed: ${error.message}`);
+    accounts.push(...((data ?? []) as LifecycleAccountRow[]));
+    if (!data || data.length < ACCOUNT_SCAN_PAGE_SIZE) break;
+  }
+  return accounts;
+}
+
 /**
  * Reconciles impossible/stale account states. The live worker calls this on a
  * bounded interval so an account cannot remain execution-eligible forever
@@ -13,25 +52,23 @@ import { createAdminClient } from "@/lib/supabase/admin";
  */
 export async function expireStaleTradingAccounts(): Promise<number> {
   const supabase = createAdminClient();
-  const { data: accounts, error } = await supabase
-    .from("trading_accounts")
-    .select("id, status, broker_server, broker_platform, provider_account_id, last_synced_at")
-    .in("status", ["CONNECTED", "RESTRICTED"])
-    .limit(2_000);
-  if (error) throw new Error(`Trading account lifecycle scan failed: ${error.message}`);
-  if (!accounts?.length) return 0;
+  const accounts = await loadLiveLifecycleAccounts(supabase);
+  if (!accounts.length) return 0;
 
   const accountIds = accounts.map((account) => account.id);
-  const { data: snapshots, error: snapshotError } = await supabase
-    .from("latest_account_snapshots")
-    .select("trading_account_id, captured_at")
-    .in("trading_account_id", accountIds);
-  if (snapshotError) {
-    throw new Error(`Trading account lifecycle snapshots failed: ${snapshotError.message}`);
+  const snapshotByAccount = new Map<string, string | null>();
+  for (const batch of chunk(accountIds, SNAPSHOT_LOOKUP_BATCH_SIZE)) {
+    const { data: snapshots, error: snapshotError } = await supabase
+      .from("latest_account_snapshots")
+      .select("trading_account_id, captured_at")
+      .in("trading_account_id", batch);
+    if (snapshotError) {
+      throw new Error(`Trading account lifecycle snapshots failed: ${snapshotError.message}`);
+    }
+    for (const snapshot of snapshots ?? []) {
+      snapshotByAccount.set(snapshot.trading_account_id, snapshot.captured_at);
+    }
   }
-  const snapshotByAccount = new Map(
-    (snapshots ?? []).map((snapshot) => [snapshot.trading_account_id, snapshot.captured_at]),
-  );
 
   let changed = 0;
   for (const account of accounts) {

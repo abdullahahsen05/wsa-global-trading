@@ -34,6 +34,21 @@ const GATE_CODES = new Set<string>([
   COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
 ]);
 
+async function loadAllIds(
+  table: "trading_accounts" | "copy_strategies",
+  buildQuery: (from: number, to: number) => Promise<{ data: Array<{ id: string }> | null; error: { message: string } | null }>,
+): Promise<string[]> {
+  const pageSize = 1_000;
+  const ids: string[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) throw new Error(`${table} page could not be loaded: ${error.message}`);
+    ids.push(...((data ?? []).map((row) => row.id)));
+    if (!data || data.length < pageSize) break;
+  }
+  return ids;
+}
+
 function requireId(job: BackgroundJob, key: string): string {
   const value = job.payload?.[key];
   if (typeof value !== "string" || value.length === 0) {
@@ -74,10 +89,12 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
         };
       }
       const supabase = createAdminClient();
-      const { data } = await supabase.from("trading_accounts").select("id").eq("status", "CONNECTED").limit(1000);
+      const accountIds = await loadAllIds("trading_accounts", async (from, to) =>
+        await supabase.from("trading_accounts").select("id").eq("status", "CONNECTED").order("id").range(from, to),
+      );
       let enqueued = 0;
-      for (const a of data ?? []) {
-        await enqueueJob({ type: "SYNC_ACCOUNT", payload: { accountId: a.id }, uniqueKey: `SYNC_ACCOUNT:${a.id}`, createdBy: actor });
+      for (const accountId of accountIds) {
+        await enqueueJob({ type: "SYNC_ACCOUNT", payload: { accountId }, uniqueKey: `SYNC_ACCOUNT:${accountId}`, createdBy: actor });
         enqueued++;
       }
       return { status: "SUCCESS", result: { enqueued } };
@@ -105,10 +122,12 @@ async function dispatch(job: BackgroundJob): Promise<JobResult> {
         };
       }
       const supabase = createAdminClient();
-      const { data } = await supabase.from("copy_strategies").select("id").eq("status", "ACTIVE").limit(1000);
+      const strategyIds = await loadAllIds("copy_strategies", async (from, to) =>
+        await supabase.from("copy_strategies").select("id").eq("status", "ACTIVE").order("id").range(from, to),
+      );
       let enqueued = 0;
-      for (const s of data ?? []) {
-        await enqueueJob({ type: "MONITOR_COPY_STRATEGY", payload: { strategyId: s.id }, uniqueKey: `MONITOR_COPY_STRATEGY:${s.id}`, createdBy: actor });
+      for (const strategyId of strategyIds) {
+        await enqueueJob({ type: "MONITOR_COPY_STRATEGY", payload: { strategyId }, uniqueKey: `MONITOR_COPY_STRATEGY:${strategyId}`, createdBy: actor });
         enqueued++;
       }
       return { status: "SUCCESS", result: { enqueued } };

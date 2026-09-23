@@ -31,6 +31,14 @@ const tradeReconcileMs = Math.max(
   10_000,
   Number.parseInt(process.env.WSA_TRADE_RECONCILE_MS ?? "15000", 10) || 15_000,
 );
+const accountQueryPageSize = Math.min(
+  1_000,
+  Math.max(100, Number.parseInt(process.env.WSA_RISK_ACCOUNT_PAGE_SIZE ?? "1000", 10) || 1_000),
+);
+const api2TradeAccountBatchSize = Math.min(
+  1_000,
+  Math.max(25, Number.parseInt(process.env.WSA_RISK_ACCOUNT_BATCH_SIZE ?? "250", 10) || 250),
+);
 const liveCopyStreamEnabled =
   process.env.WSA_COPY_ENGINE_ENABLED === "true"
   && process.env.BROKER_EXECUTION_ENABLED === "true";
@@ -40,6 +48,77 @@ const streamRetryAfter = new Map<string, number>();
 const api2TradeLastRefreshAt = new Map<string, number>();
 let stopping = false;
 let nextLifecycleScanAt = 0;
+let api2TradeAccountOffset = 0;
+
+async function loadAllConnectedRiskAccounts(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<RiskAccount[]> {
+  const accounts: RiskAccount[] = [];
+  for (let from = 0; ; from += accountQueryPageSize) {
+    const { data, error } = await supabase
+      .from("trading_accounts")
+      .select("id, provider_account_id")
+      .not("provider_account_id", "is", null)
+      .in("status", ["CONNECTED", "RESTRICTED"])
+      .order("id", { ascending: true })
+      .range(from, from + accountQueryPageSize - 1);
+    if (error) throw new Error(`Risk accounts could not be loaded: ${error.message}`);
+    accounts.push(...((data ?? []) as RiskAccount[]));
+    if (!data || data.length < accountQueryPageSize) break;
+  }
+  return accounts;
+}
+
+async function loadConnectedRiskAccountBatch(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<RiskAccount[]> {
+  const from = api2TradeAccountOffset;
+  const to = from + api2TradeAccountBatchSize - 1;
+  const { data, error, count } = await supabase
+    .from("trading_accounts")
+    .select("id, provider_account_id", { count: "exact" })
+    .not("provider_account_id", "is", null)
+    .in("status", ["CONNECTED", "RESTRICTED"])
+    .order("id", { ascending: true })
+    .range(from, to);
+  if (error) throw new Error(`Live risk accounts could not be loaded: ${error.message}`);
+
+  const total = count ?? 0;
+  if ((!data || data.length === 0) && from > 0) {
+    api2TradeAccountOffset = 0;
+    return loadConnectedRiskAccountBatch(supabase);
+  }
+
+  api2TradeAccountOffset = total > 0 && to + 1 < total ? to + 1 : 0;
+  return (data ?? []) as RiskAccount[];
+}
+
+async function loadCopyOwnedMasterIds(
+  supabase: ReturnType<typeof createAdminClient>,
+): Promise<Set<string>> {
+  const copyOwnedMasterIds = new Set<string>();
+  if (!liveCopyStreamEnabled) return copyOwnedMasterIds;
+
+  for (let from = 0; ; from += accountQueryPageSize) {
+    const { data, error } = await supabase
+      .from("copy_strategies")
+      .select("master_account_id")
+      .eq("status", "ACTIVE")
+      .eq("live_enabled", true)
+      .in("engine_status", ["LIVE", "STARTING", "ERROR"])
+      .order("id", { ascending: true })
+      .range(from, from + accountQueryPageSize - 1);
+    if (error) {
+      throw new Error(`Copy-owned risk accounts could not be loaded: ${error.message}`);
+    }
+    for (const strategy of data ?? []) {
+      copyOwnedMasterIds.add(strategy.master_account_id);
+    }
+    if (!data || data.length < accountQueryPageSize) break;
+  }
+
+  return copyOwnedMasterIds;
+}
 
 function retryDelayMs(failures: number): number {
   return Math.min(5 * 60_000, 15_000 * (2 ** Math.min(Math.max(failures - 1, 0), 5)));
@@ -461,31 +540,12 @@ async function reconcileStreams() {
     nextLifecycleScanAt = Date.now() + 60 * 60 * 1_000;
   }
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("trading_accounts")
-    .select("id, provider_account_id")
-    .not("provider_account_id", "is", null)
-    .in("status", ["CONNECTED", "RESTRICTED"])
-    .limit(2_000);
-  if (error) throw new Error(`Risk accounts could not be loaded: ${error.message}`);
-  const copyOwnedMasterIds = new Set<string>();
-  if (liveCopyStreamEnabled) {
-    const { data: strategyRows, error: strategyError } = await supabase
-      .from("copy_strategies")
-      .select("master_account_id")
-      .eq("status", "ACTIVE")
-      .eq("live_enabled", true)
-      .in("engine_status", ["LIVE", "STARTING", "ERROR"])
-      .limit(1_000);
-    if (strategyError) {
-      throw new Error(`Copy-owned risk accounts could not be loaded: ${strategyError.message}`);
-    }
-    for (const strategy of strategyRows ?? []) {
-      copyOwnedMasterIds.add(strategy.master_account_id);
-    }
-  }
+  const [data, copyOwnedMasterIds] = await Promise.all([
+    loadAllConnectedRiskAccounts(supabase),
+    loadCopyOwnedMasterIds(supabase),
+  ]);
   const active = new Map(
-    (data ?? [])
+    data
       .filter((account) => !copyOwnedMasterIds.has(account.id))
       .map((account) => [account.id, account as RiskAccount]),
   );
@@ -563,16 +623,10 @@ async function reconcileApi2TradeRiskAccounts() {
   }
 
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("trading_accounts")
-    .select("id, provider_account_id")
-    .not("provider_account_id", "is", null)
-    .in("status", ["CONNECTED", "RESTRICTED"])
-    .limit(2_000);
-  if (error) throw new Error(`Live risk accounts could not be loaded: ${error.message}`);
+  const data = await loadConnectedRiskAccountBatch(supabase);
 
   const adapter = createBrokerAdapter();
-  for (const accountRow of (data ?? []) as RiskAccount[]) {
+  for (const accountRow of data) {
     if ((streamRetryAfter.get(accountRow.id) ?? 0) > Date.now()) continue;
     if (hasExecutionPriority(accountRow.id)) continue;
     try {
