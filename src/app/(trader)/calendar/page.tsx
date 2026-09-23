@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, ExternalLink } from "lucide-react";
 import { EmptyState, InlineStatusStrip, Panel, WorkspacePage } from "@/components/app/WorkspaceUI";
@@ -24,6 +24,8 @@ type CalendarEvent = {
   source: string | null;
   category: string | null;
 };
+
+type DateRange = "UPCOMING" | "TODAY" | "THIS_WEEK" | "NEXT_30" | "ALL";
 
 const dateKey = (iso: string) => new Date(iso).toLocaleDateString(undefined, {
   weekday: "long",
@@ -73,27 +75,84 @@ function numericTone(value: string | null): string {
   return "text-accent-2";
 }
 
+function startOfLocalDay(timestamp: number): Date {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function endOfLocalDay(timestamp: number): Date {
+  const date = new Date(timestamp);
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function rangeLabel(range: DateRange): string {
+  if (range === "TODAY") return "Today";
+  if (range === "THIS_WEEK") return "Next 7 days";
+  if (range === "NEXT_30") return "Next 30 days";
+  if (range === "ALL") return "All dates";
+  return "Upcoming";
+}
+
 export default function TraderCalendarPage() {
   const [type, setType] = useState<"ALL" | CalendarEvent["eventType"]>("ALL");
   const [impact, setImpact] = useState<"ALL" | CalendarEvent["impact"]>("ALL");
-  const { data: events = [], isLoading, isError } = useQuery<CalendarEvent[]>({
-    queryKey: queryKeys.economicCalendar,
+  const [dateRange, setDateRange] = useState<DateRange>("UPCOMING");
+  const [now, setNow] = useState(() => Date.now());
+  const calendarWindow = useMemo(() => {
+    if (dateRange === "ALL") return { from: null as string | null, to: null as string | null };
+    const start = startOfLocalDay(now);
+    const end =
+      dateRange === "TODAY"
+        ? endOfLocalDay(now)
+        : dateRange === "THIS_WEEK"
+          ? endOfLocalDay(addDays(start, 7).getTime())
+          : endOfLocalDay(addDays(start, dateRange === "NEXT_30" ? 30 : 45).getTime());
+
+    return {
+      from: start.toISOString(),
+      to: end.toISOString(),
+    };
+  }, [dateRange, now]);
+  const { data: events = [], isLoading, isError, isFetching } = useQuery<CalendarEvent[]>({
+    queryKey: [...queryKeys.economicCalendar, calendarWindow.from, calendarWindow.to],
     queryFn: async () => {
-      const response = await fetch("/api/economic-calendar");
+      const params = new URLSearchParams({ limit: "300" });
+      if (calendarWindow.from) params.set("from", calendarWindow.from);
+      if (calendarWindow.to) params.set("to", calendarWindow.to);
+      const response = await fetch(`/api/economic-calendar?${params.toString()}`, {
+        cache: "no-store",
+      });
       const json = await response.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load calendar");
       return json.data;
     },
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 30_000,
   });
 
-  const [now] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const filtered = useMemo(
     () =>
-      events.filter(
-        (event) =>
-          (type === "ALL" || event.eventType === type) &&
-          (impact === "ALL" || event.impact === impact),
-      ),
+      events
+        .filter(
+          (event) =>
+            (type === "ALL" || event.eventType === type) &&
+            (impact === "ALL" || event.impact === impact),
+        )
+        .sort((left, right) => new Date(left.eventTime).getTime() - new Date(right.eventTime).getTime()),
     [events, impact, type],
   );
   const groups = useMemo(() => {
@@ -118,6 +177,7 @@ export default function TraderCalendarPage() {
         items={[
           { label: "Published events", value: events.length },
           { label: "Upcoming", value: upcoming, tone: "accent" },
+          { label: "Window", value: rangeLabel(dateRange), tone: "lime" },
           { label: "Next event", value: nextEvent ? new Date(nextEvent.eventTime).toLocaleDateString() : "None", tone: nextEvent ? "lime" : undefined },
         ]}
       />
@@ -128,7 +188,16 @@ export default function TraderCalendarPage() {
             <h2 className="text-lg font-semibold text-foreground">Calendar</h2>
             <p className="mt-1 text-sm text-muted">ForexFactory-style macro calendar using FRED releases and WSA events.</p>
           </div>
-          <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-2">
+          <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-3">
+            <div className="min-w-[180px]">
+              <SelectField label="Date range" value={dateRange} onChange={(event) => setDateRange(event.target.value as DateRange)}>
+                <option value="UPCOMING">Upcoming</option>
+                <option value="TODAY">Today</option>
+                <option value="THIS_WEEK">Next 7 days</option>
+                <option value="NEXT_30">Next 30 days</option>
+                <option value="ALL">All dates</option>
+              </SelectField>
+            </div>
             <div className="min-w-[180px]">
               <SelectField label="Event type" value={type} onChange={(event) => setType(event.target.value as typeof type)}>
                 <option value="ALL">All events</option>
@@ -154,8 +223,11 @@ export default function TraderCalendarPage() {
           <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted">
             <span className="text-accent">{new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
             <span>Today: {shortDateLabel(new Date(now).toISOString()).replace(/^[^,]+,?\s*/, "")}</span>
-            <span className="rounded-[3px] border border-line bg-background px-2 py-1">Filter</span>
+            <span className="rounded-[3px] border border-line bg-background px-2 py-1">{rangeLabel(dateRange)}</span>
             <span className="rounded-[3px] border border-line bg-background px-2 py-1">FRED + WSA</span>
+            <span className="rounded-[3px] border border-line bg-background px-2 py-1">
+              {isFetching ? "Refreshing" : "Auto refresh 60s"}
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <span>{filtered.length} events</span>
@@ -175,7 +247,11 @@ export default function TraderCalendarPage() {
           ) : groups.length === 0 ? (
             <EmptyState
               title="No published events"
-              description={type === "ALL" ? "WSA Global has not published any calendar events yet." : "There are no published events for this category."}
+              description={
+                type === "ALL" && impact === "ALL"
+                  ? "There are no events in the selected date range yet."
+                  : "There are no events matching the selected filters."
+              }
             />
           ) : (
             <div className="overflow-x-auto border-x border-b border-line">

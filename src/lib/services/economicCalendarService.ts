@@ -181,17 +181,40 @@ export async function listEvents(limit = 200): Promise<EconomicEventDto[]> {
   return withFredEvents((data ?? []).map(mapEvent), { limit, sort: "desc" });
 }
 
-export async function listPublishedEvents(limit = 200): Promise<EconomicEventDto[]> {
+export async function listPublishedEvents(params?: {
+  from?: Date;
+  to?: Date;
+  limit?: number;
+}): Promise<EconomicEventDto[]> {
   const supabase = createAdminClient();
-  const { data, error } = await supabase
+  const from = params?.from;
+  const to = params?.to;
+  const limit = params?.limit ?? 200;
+  let query = supabase
     .from("economic_calendar_events")
     .select(SELECT_COLS)
     .eq("status", "PUBLISHED")
     .in("audience", ["ALL", "TRADER"])
-    .order("event_time", { ascending: true })
-    .limit(limit);
+    .order("event_time", { ascending: true });
+
+  if (from) query = query.gte("event_time", from.toISOString());
+  if (to) query = query.lte("event_time", to.toISOString());
+
+  const { data, error } = await query.limit(limit);
   if (error) throw new Error(`Failed to fetch calendar events: ${error.message}`);
-  return withFredEvents((data ?? []).map(mapEvent), { limit, sort: "asc" });
+  const merged = await withFredEvents((data ?? []).map(mapEvent), {
+    from,
+    to,
+    limit,
+    sort: "asc",
+  });
+
+  return merged.filter((event) => {
+    const eventTime = new Date(event.eventTime).getTime();
+    const afterStart = !from || eventTime >= from.getTime();
+    const beforeEnd = !to || eventTime <= to.getTime();
+    return afterStart && beforeEnd;
+  });
 }
 
 export interface EconomicEventInput {
