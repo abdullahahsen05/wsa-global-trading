@@ -167,7 +167,11 @@ export function DashboardModeOverlay({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/82" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[96vw] max-w-7xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[6px] border border-line bg-panel focus:outline-none">
+        <Dialog.Content
+          onInteractOutside={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+          className="fixed left-1/2 top-1/2 z-50 flex max-h-[90dvh] w-[96vw] max-w-7xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[6px] border border-line bg-panel focus:outline-none"
+        >
           <motion.div
             variants={container}
             initial="hidden"
@@ -192,7 +196,7 @@ export function DashboardModeOverlay({
               </Dialog.Close>
             </div>
 
-            <div className="invisible-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
+            <div className="invisible-scrollbar min-h-0 flex-1 overscroll-contain overflow-y-auto p-5">
               {view === "CURRENT_EQUITY" ? (
                 <div className="grid items-stretch gap-4 xl:grid-cols-[0.66fr_0.34fr]">
                   <Panel className="h-full">
