@@ -799,10 +799,11 @@ async function runApi2TradeSync(params: {
       const preservedConnectedStatus = await markFailed(supabase, accountId, message, previousStatus);
       return {
         accountId,
-        status: preservedConnectedStatus ? 'CONNECTED' : 'PENDING',
+        status: preservedConnectedStatus ? 'CONNECTED' : 'DISCONNECTED',
         snapshotInserted: false,
         tradesUpserted: 0,
-        pendingMessage: message,
+        error: preservedConnectedStatus ? undefined : message,
+        pendingMessage: preservedConnectedStatus ? message : undefined,
       };
     }
 
