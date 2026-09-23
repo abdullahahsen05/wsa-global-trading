@@ -1205,7 +1205,7 @@ export async function refreshAccountTrades(
 
   const { data: account, error: loadErr } = await supabase
     .from('trading_accounts')
-    .select('id, status, provider_account_id, user_id')
+    .select('id, status, provider_account_id, user_id, broker_name, broker_server, broker_platform')
     .eq('id', accountId)
     .single();
 
@@ -1287,8 +1287,9 @@ export async function refreshAccountTrades(
         .update({
           last_synced_at: new Date().toISOString(),
           sync_error: null,
-          broker_name: snapshot.brokerName?.trim() || 'WSA GLOBAL',
-          broker_server: snapshot.serverName?.trim() || null,
+          broker_name: snapshot.brokerName?.trim() || account.broker_name || 'WSA GLOBAL',
+          broker_server: snapshot.serverName?.trim() || account.broker_server || null,
+          broker_platform: account.broker_platform || 'MT5',
         })
         .eq('id', accountId);
       void writeAuditLog({
@@ -1542,8 +1543,9 @@ export async function refreshAccountTrades(
         .update({
           last_synced_at: new Date().toISOString(),
           sync_error: null,
-          broker_name: info?.brokerName?.trim() || 'WSA GLOBAL',
-          broker_server: info?.server?.trim() || null,
+          broker_name: info?.brokerName?.trim() || account.broker_name || 'WSA GLOBAL',
+          broker_server: info?.server?.trim() || account.broker_server || null,
+          broker_platform: account.broker_platform || 'MT5',
         })
         .eq('id', accountId);
 
