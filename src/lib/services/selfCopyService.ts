@@ -390,7 +390,7 @@ export async function simulateSelfCopy(params: {
   }
   const { data: trade } = await supabase
     .from("trades")
-    .select("id, symbol, side, volume, opened_at")
+    .select("id, symbol, side, volume, open_price, opened_at")
     .eq("trading_account_id", data.source_account_id)
     .order("opened_at", { ascending: false })
     .limit(1)
@@ -426,6 +426,8 @@ export async function simulateSelfCopy(params: {
   );
   const lot = calculateFollowerLot({
     masterLot: Number(trade.volume),
+    entryPrice: trade.open_price === null ? null : Number(trade.open_price),
+    stopLoss: null,
     masterBalance: sourceSnapshot?.balance ?? null,
     masterEquity: sourceSnapshot?.equity ?? null,
     followerBalance: followerSnapshot?.balance ?? null,
@@ -474,6 +476,7 @@ export interface SelfCopyPositionEvent {
   side: "BUY" | "SELL";
   volume: number;
   previousVolume?: number | null;
+  entryPrice?: number | null;
   stopLoss?: number | null;
   takeProfit?: number | null;
 }
@@ -681,6 +684,8 @@ export async function executeSelfCopyPositionEvent(
     );
     const lot = calculateFollowerLot({
       masterLot: event.volume,
+      entryPrice: event.entryPrice ?? null,
+      stopLoss: event.stopLoss ?? null,
       masterBalance: sourceSnapshot?.balance ?? null,
       masterEquity: sourceSnapshot?.equity ?? null,
       followerBalance: followerSnapshot?.balance ?? null,
