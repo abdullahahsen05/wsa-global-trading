@@ -419,14 +419,19 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
       if (client.usesApiKeyAuth()) {
         const refreshedProviderAccountId = await this.reconnectWithStoredCredentials(accountId, providerAccountId);
         if (!refreshedProviderAccountId) throw error;
-        await this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => true);
+        if (!(await this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => false))) {
+          throw new Error("Broker account reconnect was accepted but did not become active.");
+        }
         return refreshedProviderAccountId;
       }
       const reconnected = await client.connectByToken(providerAccountId)
         .then(() => providerAccountId)
         .catch(async () => this.reconnectWithStoredCredentials(accountId, providerAccountId));
       if (!reconnected) throw error;
-      return this.checkApi2TradeSession(reconnected).catch(() => true).then(() => reconnected);
+      if (!(await this.checkApi2TradeSession(reconnected).catch(() => false))) {
+        throw new Error("Broker account reconnect was accepted but did not become active.");
+      }
+      return reconnected;
     }
 
     if (client.usesApiKeyAuth()) {
@@ -434,20 +439,24 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
       if (!refreshedProviderAccountId) {
         throw new Error("Broker account is not connected and could not be refreshed.");
       }
-      await this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => true);
+      if (!(await this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => false))) {
+        throw new Error("Broker account reconnect was accepted but did not become active.");
+      }
       return refreshedProviderAccountId;
     }
 
     const tokenReconnectOk = await client.connectByToken(providerAccountId)
-      .then(() => true)
+      .then(async () => this.checkApi2TradeSession(providerAccountId).catch(() => false))
       .catch(async (error) => {
         if (!isRecoverableApi2TradeSessionError(error)) return false;
-        return Boolean(await this.reconnectWithStoredCredentials(accountId, providerAccountId));
+        const refreshedProviderAccountId = await this.reconnectWithStoredCredentials(accountId, providerAccountId);
+        return refreshedProviderAccountId
+          ? this.checkApi2TradeSession(refreshedProviderAccountId).catch(() => false)
+          : false;
       });
     if (!tokenReconnectOk) {
       throw new Error("Broker account is not connected and reconnect failed.");
     }
-    await this.checkApi2TradeSession(providerAccountId).catch(() => true);
     return providerAccountId;
   }
 

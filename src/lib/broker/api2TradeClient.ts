@@ -198,10 +198,48 @@ export function loadApi2TradeConfig(): Api2TradeConfig | null {
   };
 }
 
-function assertRecord(value: unknown, _endpoint: string): Record<string, unknown> {
-  void _endpoint;
+function isProviderErrorRecord(record: Record<string, unknown>): boolean {
+  if (record.error) return true;
+  const code = String(record.code ?? "").trim().toUpperCase();
+  const message = String(record.message ?? "").trim();
+  if (!code && !message) return false;
+  if (code && ["OK", "DONE", "SUCCESS", "CONNECTED"].includes(code)) return false;
+  if (code && /ERROR|INVALID|NOT_FOUND|UNAUTHORIZED|FORBIDDEN|FAILED|FAIL/.test(code)) return true;
+  if (/client with id .*not found|invalid[_ -]?token|not authorized|unauthorized|forbidden/i.test(message)) return true;
+  return false;
+}
+
+function parseProviderRecord(value: string): Record<string, unknown> | null {
+  const trimmed = value.trim();
+  if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function assertNoProviderError(value: unknown, endpoint: string): void {
+  const record = typeof value === "string"
+    ? parseProviderRecord(value)
+    : typeof value === "object" && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  if (!record || !isProviderErrorRecord(record)) return;
+  const code = record.code ? `${String(record.code)}: ` : "";
+  const message = record.message ?? record.error ?? "Broker service returned an error.";
+  throw new Error(publicApi2TradeError(`${endpoint} failed: ${code}${String(message)}`));
+}
+
+function assertRecord(value: unknown, endpoint: string): Record<string, unknown> {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
+    const record = value as Record<string, unknown>;
+    assertNoProviderError(record, endpoint);
+    return record;
   }
   throw new Error("Broker service returned an unexpected response.");
 }
@@ -385,6 +423,7 @@ export class Api2TradeClient {
       downloadOrderHistory: params.downloadOrderHistory ?? true,
       reconnectOnSymbolUpdate: true,
     }, { expectText: true });
+    assertNoProviderError(result, "ConnectEx");
     const token = normalizeApi2TradeToken(result);
     if (!token) {
       throw new Error("Broker service did not return an account token.");
@@ -393,9 +432,11 @@ export class Api2TradeClient {
   }
 
   async connectByToken(accountId: string): Promise<string> {
-    return normalizeApi2TradeToken(
-      await this.request<string>("GET", "ConnectByToken", this.accountParams(accountId), { expectText: true }),
-    );
+    const result = await this.request<string>("GET", "ConnectByToken", this.accountParams(accountId), { expectText: true });
+    assertNoProviderError(result, "ConnectByToken");
+    const token = normalizeApi2TradeToken(result);
+    if (!token) throw new Error("Broker service did not reconnect the account session.");
+    return token;
   }
 
   async subscribeOrderUpdate(accountId: string): Promise<string> {
@@ -403,7 +444,9 @@ export class Api2TradeClient {
   }
 
   async checkConnect(accountId: string): Promise<string | Api2TradeConnectionStatus> {
-    return this.request<string | Api2TradeConnectionStatus>("GET", "CheckConnect", this.accountParams(accountId));
+    const result = await this.request<unknown>("GET", "CheckConnect", this.accountParams(accountId));
+    assertNoProviderError(result, "CheckConnect");
+    return result as string | Api2TradeConnectionStatus;
   }
 
   async connectionStatus(accountId: string): Promise<Api2TradeConnectionStatus> {
