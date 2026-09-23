@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2 } from "lucide-react";
 import { GhostButton, Panel, PrimaryButton, StatusPill } from "@/components/app/WorkspaceUI";
 import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
+import { normalizeBrokerLogin } from "@/lib/utils/brokerLogin";
 
 interface CredentialStatus {
   accountId: string;
@@ -418,7 +419,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
               type="text"
               required
               value={form.login}
-              onChange={(e) => setForm((f) => ({ ...f, login: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, login: normalizeBrokerLogin(e.target.value) }))}
               placeholder={`${form.platform} account number`}
               maxLength={50}
               className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"

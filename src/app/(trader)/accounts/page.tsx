@@ -22,6 +22,7 @@ import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptio
 import { SearchField, SelectField, TextField } from "@/components/app/FormFields";
 import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
+import { normalizeBrokerLogin } from "@/lib/utils/brokerLogin";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 
@@ -573,6 +574,9 @@ function AccountsContent() {
                           placeholder="e.g. 12345678"
                           required
                           autoComplete="off"
+                          onInput={(event) => {
+                            event.currentTarget.value = normalizeBrokerLogin(event.currentTarget.value);
+                          }}
                         />
                         <TextField
                           label={`${selectedPlatform} trading password`}

@@ -17,6 +17,7 @@ import {
 } from "@/components/app/WorkspaceUI";
 import { SelectField } from "@/components/app/FormFields";
 import type { AdminTradingAccountSummary } from "@/lib/domain/types";
+import { normalizeBrokerLogin } from "@/lib/utils/brokerLogin";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 
 const STATUS_TONE: Record<string, "lime" | "accent" | "danger" | "muted"> = {
@@ -620,7 +621,7 @@ export default function AdminAccountsPage() {
                   type="text"
                   required
                   value={credForm.login}
-                  onChange={(e) => setCredForm((f) => ({ ...f, login: e.target.value }))}
+                  onChange={(e) => setCredForm((f) => ({ ...f, login: normalizeBrokerLogin(e.target.value) }))}
                   placeholder="MT5 account number"
                   maxLength={50}
                   className="w-full rounded-[4px] border border-line bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-2 focus:ring-accent/50"

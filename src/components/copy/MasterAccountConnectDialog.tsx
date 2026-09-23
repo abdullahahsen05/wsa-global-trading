@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck, X } from "lucide-react";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
 import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
+import { normalizeBrokerLogin } from "@/lib/utils/brokerLogin";
 
 type Platform = "MT4" | "MT5";
 type BrokerServer = {
@@ -213,7 +214,7 @@ export function MasterAccountConnectDialog({
             ) : null}
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={`${platform} login`} value={login} onChange={setLogin} placeholder="Trading account number" autoComplete="username" />
+              <Field label={`${platform} login`} value={login} onChange={(value) => setLogin(normalizeBrokerLogin(value))} placeholder="Trading account number" autoComplete="username" />
               <Field label="Trading password" type="password" value={password} onChange={setPassword} placeholder="Main trading password" autoComplete="new-password" />
             </div>
 
