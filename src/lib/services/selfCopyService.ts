@@ -5,7 +5,10 @@ import {
   reverseFollowerSide,
 } from "@/lib/copy/settings";
 import { COPY_ERROR, CopyError } from "@/lib/copy/types";
-import { BrokerExecutionError, type BrokerAdapter } from "@/lib/broker/BrokerAdapter";
+import {
+  BrokerExecutionError,
+  type BrokerAdapter,
+} from "@/lib/broker/BrokerAdapter";
 import { createBrokerAdapter } from "@/lib/broker/provider";
 import type { FollowerSettingsPatch } from "@/lib/services/copyTradingService";
 import { getCopyGlobalSettings } from "@/lib/services/copyTradingService";
@@ -51,7 +54,8 @@ async function ownedAccountMap(traderId: string, accountIds?: string[]) {
     .eq("user_id", traderId);
   if (accountIds?.length) query = query.in("id", accountIds);
   const { data, error } = await query;
-  if (error) throw new Error(`Failed to load trader accounts: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to load trader accounts: ${error.message}`);
   return new Map((data ?? []).map((account) => [account.id, account]));
 }
 
@@ -62,7 +66,10 @@ function hasPath(
 ): boolean {
   const adjacency = new Map<string, string[]>();
   for (const edge of edges) {
-    adjacency.set(edge.source, [...(adjacency.get(edge.source) ?? []), edge.follower]);
+    adjacency.set(edge.source, [
+      ...(adjacency.get(edge.source) ?? []),
+      edge.follower,
+    ]);
   }
   const queue = [start];
   const visited = new Set<string>();
@@ -84,7 +91,9 @@ async function loadSelfCopyRiskSymbolSpecifications(
 ): Promise<Parameters<typeof calculateFollowerLot>[0]["symbolSpecifications"]> {
   if (scalingMode !== "RISK_PERCENT") return null;
   if (!adapter.fetchSymbolSpecifications) return null;
-  const specs = await adapter.fetchSymbolSpecifications(accountId, symbol).catch(() => null);
+  const specs = await adapter
+    .fetchSymbolSpecifications(accountId, symbol)
+    .catch(() => null);
   if (!specs) return null;
   return {
     tickSize: specs.tickSize,
@@ -109,20 +118,26 @@ function validateSupportedSettings(settings: FollowerSettingsPatch): void {
   }
 }
 
-export async function listSelfCopyRelationships(traderId: string): Promise<SelfCopyRelationshipDto[]> {
+export async function listSelfCopyRelationships(
+  traderId: string,
+): Promise<SelfCopyRelationshipDto[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("self_copy_relationships")
-    .select("id, trader_id, source_account_id, follower_account_id, status, copy_settings, created_at, updated_at")
+    .select(
+      "id, trader_id, source_account_id, follower_account_id, status, copy_settings, created_at, updated_at",
+    )
     .eq("trader_id", traderId)
     .neq("status", "ARCHIVED")
     .order("created_at", { ascending: false });
-  if (error) throw new Error(`Failed to load self-copy setups: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to load self-copy setups: ${error.message}`);
   const rows = (data ?? []) as RelationshipRow[];
-  const accounts = await ownedAccountMap(
-    traderId,
-    [...new Set(rows.flatMap((row) => [row.source_account_id, row.follower_account_id]))],
-  );
+  const accounts = await ownedAccountMap(traderId, [
+    ...new Set(
+      rows.flatMap((row) => [row.source_account_id, row.follower_account_id]),
+    ),
+  ]);
   return rows.map((row) => {
     const source = accounts.get(row.source_account_id);
     const follower = accounts.get(row.follower_account_id);
@@ -150,7 +165,11 @@ export async function createSelfCopyRelationship(params: {
   copySettings: FollowerSettingsPatch;
 }): Promise<SelfCopyRelationshipDto> {
   if (params.sourceAccountId === params.followerAccountId) {
-    throw new CopyError(COPY_ERROR.VALIDATION_ERROR, "Source and follower accounts must be different.", 400);
+    throw new CopyError(
+      COPY_ERROR.VALIDATION_ERROR,
+      "Source and follower accounts must be different.",
+      400,
+    );
   }
   validateSupportedSettings(params.copySettings);
   const accounts = await ownedAccountMap(params.traderId, [
@@ -158,7 +177,11 @@ export async function createSelfCopyRelationship(params: {
     params.followerAccountId,
   ]);
   if (accounts.size !== 2) {
-    throw new CopyError(COPY_ERROR.FORBIDDEN, "Both accounts must belong to you.", 403);
+    throw new CopyError(
+      COPY_ERROR.FORBIDDEN,
+      "Both accounts must belong to you.",
+      403,
+    );
   }
   for (const accountId of [params.sourceAccountId, params.followerAccountId]) {
     const account = accounts.get(accountId);
@@ -189,11 +212,25 @@ export async function createSelfCopyRelationship(params: {
     source: row.source_account_id as string,
     follower: row.follower_account_id as string,
   }));
-  if (edges.some((edge) => edge.source === params.sourceAccountId && edge.follower === params.followerAccountId)) {
-    throw new CopyError(COPY_ERROR.VALIDATION_ERROR, "This self-copy pair already exists.", 409);
+  if (
+    edges.some(
+      (edge) =>
+        edge.source === params.sourceAccountId &&
+        edge.follower === params.followerAccountId,
+    )
+  ) {
+    throw new CopyError(
+      COPY_ERROR.VALIDATION_ERROR,
+      "This self-copy pair already exists.",
+      409,
+    );
   }
   if (hasPath(edges, params.followerAccountId, params.sourceAccountId)) {
-    throw new CopyError(COPY_ERROR.VALIDATION_ERROR, "This setup would create a circular copy chain.", 409);
+    throw new CopyError(
+      COPY_ERROR.VALIDATION_ERROR,
+      "This setup would create a circular copy chain.",
+      409,
+    );
   }
 
   const { data, error } = await supabase
@@ -208,7 +245,12 @@ export async function createSelfCopyRelationship(params: {
     .select("id")
     .single();
   if (error || !data) {
-    if (error?.code === "23505") throw new CopyError(COPY_ERROR.VALIDATION_ERROR, "This self-copy pair already exists.", 409);
+    if (error?.code === "23505")
+      throw new CopyError(
+        COPY_ERROR.VALIDATION_ERROR,
+        "This self-copy pair already exists.",
+        409,
+      );
     throw new Error(`Failed to create self-copy setup: ${error?.message}`);
   }
   await writeAuditLog({
@@ -240,29 +282,49 @@ export async function updateSelfCopyRelationship(params: {
     .eq("id", params.id)
     .eq("trader_id", params.traderId)
     .maybeSingle();
-  if (!data) throw new CopyError(COPY_ERROR.FORBIDDEN, "Self-copy setup not found or not yours.", 404);
+  if (!data)
+    throw new CopyError(
+      COPY_ERROR.FORBIDDEN,
+      "Self-copy setup not found or not yours.",
+      404,
+    );
   const patch: Record<string, unknown> = {};
   if (params.status !== undefined) patch.status = params.status;
   if (params.copySettings !== undefined) {
-    const existing = (data.copy_settings ?? {}) as Partial<FollowerSettingsPatch>;
+    const existing = (data.copy_settings ??
+      {}) as Partial<FollowerSettingsPatch>;
     patch.copy_settings = {
       ...existing,
       ...params.copySettings,
-      fixedLot: params.copySettings.copyMode === "FIXED_LOT" ? params.copySettings.fixedLot : null,
-      lotMultiplier: params.copySettings.copyMode === "LOT_MULTIPLIER" || params.copySettings.copyMode === "RISK_PERCENT"
-        ? params.copySettings.lotMultiplier
-        : null,
-      riskPercent: params.copySettings.copyMode === "RISK_PERCENT" ? params.copySettings.riskPercent : null,
+      fixedLot:
+        params.copySettings.copyMode === "FIXED_LOT"
+          ? params.copySettings.fixedLot
+          : null,
+      lotMultiplier:
+        params.copySettings.copyMode === "LOT_MULTIPLIER"
+          ? params.copySettings.lotMultiplier
+          : null,
+      riskPercent:
+        params.copySettings.copyMode === "RISK_PERCENT"
+          ? params.copySettings.riskPercent
+          : null,
     };
   }
-  const { error } = await supabase.from("self_copy_relationships").update(patch).eq("id", params.id);
-  if (error) throw new Error(`Failed to update self-copy setup: ${error.message}`);
+  const { error } = await supabase
+    .from("self_copy_relationships")
+    .update(patch)
+    .eq("id", params.id);
+  if (error)
+    throw new Error(`Failed to update self-copy setup: ${error.message}`);
   await writeAuditLog({
     actorUserId: params.traderId,
     action: "SELF_COPY_UPDATED",
     entityType: "self_copy_relationship",
     entityId: params.id,
-    metadata: { status: params.status, settingsUpdated: Boolean(params.copySettings) },
+    metadata: {
+      status: params.status,
+      settingsUpdated: Boolean(params.copySettings),
+    },
   });
 }
 
@@ -275,10 +337,15 @@ async function latestSnapshot(accountId: string) {
     .order("captured_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return data ? { balance: Number(data.balance), equity: Number(data.equity) } : null;
+  return data
+    ? { balance: Number(data.balance), equity: Number(data.equity) }
+    : null;
 }
 
-export async function simulateSelfCopy(params: { traderId: string; id: string }) {
+export async function simulateSelfCopy(params: {
+  traderId: string;
+  id: string;
+}) {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("self_copy_relationships")
@@ -286,9 +353,18 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
     .eq("id", params.id)
     .eq("trader_id", params.traderId)
     .maybeSingle();
-  if (!data) throw new CopyError(COPY_ERROR.FORBIDDEN, "Self-copy setup not found or not yours.", 404);
+  if (!data)
+    throw new CopyError(
+      COPY_ERROR.FORBIDDEN,
+      "Self-copy setup not found or not yours.",
+      404,
+    );
   if (data.status !== "SIMULATION") {
-    throw new CopyError(COPY_ERROR.FOLLOWER_NOT_ELIGIBLE, "Resume this setup before simulating it.", 409);
+    throw new CopyError(
+      COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
+      "Resume this setup before simulating it.",
+      409,
+    );
   }
   const accounts = await ownedAccountMap(params.traderId, [
     data.source_account_id,
@@ -306,7 +382,11 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
   }
   const settings = data.copy_settings as FollowerSettingsPatch;
   if (!settings.copyEnabled || settings.emergencyStop) {
-    throw new CopyError(COPY_ERROR.COPY_RISK_BLOCKED, "Copying is paused by follower settings.", 409);
+    throw new CopyError(
+      COPY_ERROR.COPY_RISK_BLOCKED,
+      "Copying is paused by follower settings.",
+      409,
+    );
   }
   const { data: trade } = await supabase
     .from("trades")
@@ -327,10 +407,23 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
     latestSnapshot(data.follower_account_id),
   ]);
   const scalingMode = copyModeToScalingMode(settings.copyMode);
-  if (!scalingMode) throw new CopyError(COPY_ERROR.COPY_INVALID_LOT, "Selected mode is not supported.", 400);
-  const followerSymbol = mapFollowerSymbol(trade.symbol, settings.symbolMapping);
+  if (!scalingMode)
+    throw new CopyError(
+      COPY_ERROR.COPY_INVALID_LOT,
+      "Selected mode is not supported.",
+      400,
+    );
+  const followerSymbol = mapFollowerSymbol(
+    trade.symbol,
+    settings.symbolMapping,
+  );
   const adapter = createBrokerAdapter();
-  const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(adapter, data.follower_account_id, followerSymbol, scalingMode);
+  const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(
+    adapter,
+    data.follower_account_id,
+    followerSymbol,
+    scalingMode,
+  );
   const lot = calculateFollowerLot({
     masterLot: Number(trade.volume),
     masterBalance: sourceSnapshot?.balance ?? null,
@@ -339,17 +432,21 @@ export async function simulateSelfCopy(params: { traderId: string; id: string })
     followerEquity: followerSnapshot?.equity ?? null,
     scalingMode,
     fixedLot: settings.fixedLot,
-    lotMultiplier: settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
-    riskMultiplier: settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null,
+    lotMultiplier:
+      settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
+    riskMultiplier: null,
+    riskPercent:
+      settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null,
     minLot: settings.minLot,
     maxLot: settings.maxLot,
     symbolSpecifications,
   });
   const result = {
     simulated: lot.lot > 0,
-    message: lot.lot > 0
-      ? "Simulation preview calculated. No broker order was sent."
-      : lot.reason ?? "Simulation could not calculate a safe lot.",
+    message:
+      lot.lot > 0
+        ? "Simulation preview calculated. No broker order was sent."
+        : (lot.reason ?? "Simulation could not calculate a safe lot."),
     sourceTradeId: trade.id,
     sourceSymbol: trade.symbol,
     followerSymbol,
@@ -386,20 +483,28 @@ export interface SelfCopyPositionEvent {
  * relationship. A copied public-strategy position is just another real source
  * position, so it naturally continues through A -> B -> C chains.
  */
-export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent) {
+export async function executeSelfCopyPositionEvent(
+  event: SelfCopyPositionEvent,
+) {
   const supabase = createAdminClient();
   const adapter = createBrokerAdapter();
   const global = await getCopyGlobalSettings();
   const result = { attempted: 0, success: 0, failed: 0, skipped: 0 };
 
   if (!adapter.executionAvailable()) {
-    throw new CopyError(COPY_ERROR.COPY_EXECUTION_NOT_CONFIGURED, "Live broker execution is disabled.", 503);
+    throw new CopyError(
+      COPY_ERROR.COPY_EXECUTION_NOT_CONFIGURED,
+      "Live broker execution is disabled.",
+      503,
+    );
   }
 
   if (event.eventType !== "OPEN") {
     const { data: links } = await supabase
       .from("self_copy_trade_links")
-      .select("id, follower_account_id, follower_position_id, copied_volume, status")
+      .select(
+        "id, follower_account_id, follower_position_id, copied_volume, status",
+      )
       .eq("source_account_id", event.sourceAccountId)
       .eq("source_position_id", event.sourcePositionId)
       .in("status", ["OPEN", "CLOSING"]);
@@ -411,22 +516,30 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       result.attempted++;
       try {
         if (event.eventType === "CLOSE") {
-          await supabase.from("self_copy_trade_links").update({ status: "CLOSING" }).eq("id", link.id);
+          await supabase
+            .from("self_copy_trade_links")
+            .update({ status: "CLOSING" })
+            .eq("id", link.id);
           await adapter.closeTrade({
             accountId: link.follower_account_id,
             brokerPositionId: link.follower_position_id,
             comment: "wsa:self-copy:close",
           });
-          await supabase.from("self_copy_trade_links").update({
-            status: "CLOSED",
-            closed_at: new Date().toISOString(),
-            error_code: null,
-            error_message: null,
-          }).eq("id", link.id);
+          await supabase
+            .from("self_copy_trade_links")
+            .update({
+              status: "CLOSED",
+              closed_at: new Date().toISOString(),
+              error_code: null,
+              error_message: null,
+            })
+            .eq("id", link.id);
         } else {
           const previous = Number(event.previousVolume ?? event.volume);
           if (previous > event.volume && previous > 0) {
-            const partialVolume = Number(link.copied_volume) * ((previous - event.volume) / previous);
+            const partialVolume =
+              Number(link.copied_volume) *
+              ((previous - event.volume) / previous);
             if (partialVolume > 0) {
               await adapter.closeTrade({
                 accountId: link.follower_account_id,
@@ -434,9 +547,15 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
                 volume: partialVolume,
                 comment: "wsa:self-copy:partial",
               });
-              await supabase.from("self_copy_trade_links").update({
-                copied_volume: Math.max(0, Number(link.copied_volume) - partialVolume),
-              }).eq("id", link.id);
+              await supabase
+                .from("self_copy_trade_links")
+                .update({
+                  copied_volume: Math.max(
+                    0,
+                    Number(link.copied_volume) - partialVolume,
+                  ),
+                })
+                .eq("id", link.id);
             }
           }
           await adapter.modifyTrade({
@@ -448,34 +567,59 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
         }
         result.success++;
       } catch (error) {
-        const message = (error instanceof Error ? error.message : "Self-copy broker operation failed").slice(0, 400);
-        await supabase.from("self_copy_trade_links").update({
-          status: event.eventType === "CLOSE" ? "OPEN" : link.status,
-          error_code: error instanceof BrokerExecutionError ? error.code : COPY_ERROR.COPY_PROVIDER_ERROR,
-          error_message: message,
-        }).eq("id", link.id);
+        const message = (
+          error instanceof Error
+            ? error.message
+            : "Self-copy broker operation failed"
+        ).slice(0, 400);
+        await supabase
+          .from("self_copy_trade_links")
+          .update({
+            status: event.eventType === "CLOSE" ? "OPEN" : link.status,
+            error_code:
+              error instanceof BrokerExecutionError
+                ? error.code
+                : COPY_ERROR.COPY_PROVIDER_ERROR,
+            error_message: message,
+          })
+          .eq("id", link.id);
         result.failed++;
       }
     }
     return result;
   }
 
-  if (!global.copyEnabled || !global.liveCopyEnabled || global.emergencyStopEnabled) {
+  if (
+    !global.copyEnabled ||
+    !global.liveCopyEnabled ||
+    global.emergencyStopEnabled
+  ) {
     return { ...result, skipped: 1 };
   }
 
   const { data: relationships, error } = await supabase
     .from("self_copy_relationships")
-    .select("id, trader_id, source_account_id, follower_account_id, status, copy_settings")
+    .select(
+      "id, trader_id, source_account_id, follower_account_id, status, copy_settings",
+    )
     .eq("source_account_id", event.sourceAccountId)
     .eq("status", "LIVE");
-  if (error) throw new Error(`Failed to load live self-copy relationships: ${error.message}`);
+  if (error)
+    throw new Error(
+      `Failed to load live self-copy relationships: ${error.message}`,
+    );
 
   const sourceSnapshot = await latestSnapshot(event.sourceAccountId);
   for (const relationship of relationships ?? []) {
     const settings = relationship.copy_settings as FollowerSettingsPatch;
-    const followerSymbol = mapFollowerSymbol(event.symbol, settings.symbolMapping);
-    const followerSide = reverseFollowerSide(event.side, settings.reverseCopy) === "SELL" ? "SELL" : "BUY";
+    const followerSymbol = mapFollowerSymbol(
+      event.symbol,
+      settings.symbolMapping,
+    );
+    const followerSide =
+      reverseFollowerSide(event.side, settings.reverseCopy) === "SELL"
+        ? "SELL"
+        : "BUY";
 
     const { data: existing } = await supabase
       .from("self_copy_trade_links")
@@ -488,25 +632,37 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       continue;
     }
 
-    const [{ data: followerAccount }, riskState, followerSnapshot, openLinks] = await Promise.all([
-      supabase.from("trading_accounts").select("status").eq("id", relationship.follower_account_id).maybeSingle(),
-      getRiskEnforcementState(relationship.follower_account_id),
-      latestSnapshot(relationship.follower_account_id),
-      supabase.from("self_copy_trade_links").select("id", { count: "exact", head: true })
-        .eq("follower_account_id", relationship.follower_account_id).eq("status", "OPEN"),
-    ]);
-    const symbolAllowed = !settings.allowedSymbols?.length || settings.allowedSymbols.includes(followerSymbol);
-    const symbolBlocked = settings.blockedSymbols?.includes(followerSymbol) ?? false;
-    const maxOpenReached = settings.maxOpenTrades !== null
-      && (openLinks.count ?? 0) >= settings.maxOpenTrades;
+    const [{ data: followerAccount }, riskState, followerSnapshot, openLinks] =
+      await Promise.all([
+        supabase
+          .from("trading_accounts")
+          .select("status")
+          .eq("id", relationship.follower_account_id)
+          .maybeSingle(),
+        getRiskEnforcementState(relationship.follower_account_id),
+        latestSnapshot(relationship.follower_account_id),
+        supabase
+          .from("self_copy_trade_links")
+          .select("id", { count: "exact", head: true })
+          .eq("follower_account_id", relationship.follower_account_id)
+          .eq("status", "OPEN"),
+      ]);
+    const symbolAllowed =
+      !settings.allowedSymbols?.length ||
+      settings.allowedSymbols.includes(followerSymbol);
+    const symbolBlocked =
+      settings.blockedSymbols?.includes(followerSymbol) ?? false;
+    const maxOpenReached =
+      settings.maxOpenTrades !== null &&
+      (openLinks.count ?? 0) >= settings.maxOpenTrades;
     if (
-      !settings.copyEnabled
-      || settings.emergencyStop
-      || followerAccount?.status !== "CONNECTED"
-      || riskState?.blockedNewTrades
-      || !symbolAllowed
-      || symbolBlocked
-      || maxOpenReached
+      !settings.copyEnabled ||
+      settings.emergencyStop ||
+      followerAccount?.status !== "CONNECTED" ||
+      riskState?.blockedNewTrades ||
+      !symbolAllowed ||
+      symbolBlocked ||
+      maxOpenReached
     ) {
       result.skipped++;
       continue;
@@ -517,7 +673,12 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       result.skipped++;
       continue;
     }
-    const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(adapter, relationship.follower_account_id, followerSymbol, scalingMode);
+    const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(
+      adapter,
+      relationship.follower_account_id,
+      followerSymbol,
+      scalingMode,
+    );
     const lot = calculateFollowerLot({
       masterLot: event.volume,
       masterBalance: sourceSnapshot?.balance ?? null,
@@ -526,9 +687,11 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
       followerEquity: followerSnapshot?.equity ?? null,
       scalingMode,
       fixedLot: settings.fixedLot,
-      lotMultiplier: settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
-      riskMultiplier: settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null,
-      riskPercent: settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null,
+      lotMultiplier:
+        settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
+      riskMultiplier: null,
+      riskPercent:
+        settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null,
       minLot: settings.minLot,
       maxLot: settings.maxLot,
       symbolSpecifications,
@@ -542,9 +705,14 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
     let linkId = existing?.id as string | undefined;
     try {
       if (linkId) {
-        await supabase.from("self_copy_trade_links").update({
-          status: "PENDING", error_code: null, error_message: null,
-        }).eq("id", linkId);
+        await supabase
+          .from("self_copy_trade_links")
+          .update({
+            status: "PENDING",
+            error_code: null,
+            error_message: null,
+          })
+          .eq("id", linkId);
       } else {
         const { data: reserved, error: reserveError } = await supabase
           .from("self_copy_trade_links")
@@ -561,7 +729,10 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
           })
           .select("id")
           .single();
-        if (reserveError || !reserved) throw new Error(`Self-copy reservation failed: ${reserveError?.message}`);
+        if (reserveError || !reserved)
+          throw new Error(
+            `Self-copy reservation failed: ${reserveError?.message}`,
+          );
         linkId = reserved.id;
       }
       const opened = await adapter.openTrade({
@@ -573,24 +744,38 @@ export async function executeSelfCopyPositionEvent(event: SelfCopyPositionEvent)
         takeProfit: event.takeProfit ?? null,
         comment: `wsa:self:${relationship.id.slice(0, 8)}`,
       });
-      await supabase.from("self_copy_trade_links").update({
-        status: "OPEN",
-        follower_position_id: opened.brokerPositionId ?? opened.brokerOrderId ?? null,
-        follower_order_id: opened.brokerOrderId ?? null,
-        copied_volume: opened.executedVolume ?? lot.lot,
-        opened_at: new Date().toISOString(),
-        error_code: null,
-        error_message: null,
-      }).eq("id", linkId);
+      await supabase
+        .from("self_copy_trade_links")
+        .update({
+          status: "OPEN",
+          follower_position_id:
+            opened.brokerPositionId ?? opened.brokerOrderId ?? null,
+          follower_order_id: opened.brokerOrderId ?? null,
+          copied_volume: opened.executedVolume ?? lot.lot,
+          opened_at: new Date().toISOString(),
+          error_code: null,
+          error_message: null,
+        })
+        .eq("id", linkId);
       result.success++;
     } catch (error) {
-      const message = (error instanceof Error ? error.message : "Self-copy broker execution failed").slice(0, 400);
+      const message = (
+        error instanceof Error
+          ? error.message
+          : "Self-copy broker execution failed"
+      ).slice(0, 400);
       if (linkId) {
-        await supabase.from("self_copy_trade_links").update({
-          status: "FAILED",
-          error_code: error instanceof BrokerExecutionError ? error.code : COPY_ERROR.COPY_PROVIDER_ERROR,
-          error_message: message,
-        }).eq("id", linkId);
+        await supabase
+          .from("self_copy_trade_links")
+          .update({
+            status: "FAILED",
+            error_code:
+              error instanceof BrokerExecutionError
+                ? error.code
+                : COPY_ERROR.COPY_PROVIDER_ERROR,
+            error_message: message,
+          })
+          .eq("id", linkId);
       }
       result.failed++;
     }

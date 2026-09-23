@@ -4,7 +4,11 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2, ShieldAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
-import { SelectField, TextAreaField, TextField } from "@/components/app/FormFields";
+import {
+  SelectField,
+  TextAreaField,
+  TextField,
+} from "@/components/app/FormFields";
 import type { CopyFollowerDto, FollowerCopyMode } from "@/lib/copy/types";
 
 function optionalNumber(value: string): number | null {
@@ -25,16 +29,22 @@ function parseMapping(value: string): Record<string, string> {
     if (!line.trim()) continue;
     const [source, target, ...extra] = line.split(":");
     if (!source?.trim() || !target?.trim() || extra.length > 0) {
-      throw new Error(`Invalid mapping "${line}". Use SOURCE:TARGET, one per line.`);
+      throw new Error(
+        `Invalid mapping "${line}". Use SOURCE:TARGET, one per line.`,
+      );
     }
     result[source.trim().toUpperCase()] = target.trim().toUpperCase();
   }
   return result;
 }
 
-function defaultMultiplierValue(copyMode: FollowerCopyMode | undefined, multiplier: number | null | undefined): string {
-  if (multiplier !== null && multiplier !== undefined) return multiplier.toString();
-  return copyMode === "RISK_PERCENT" ? "1" : "";
+function defaultMultiplierValue(
+  copyMode: FollowerCopyMode | undefined,
+  multiplier: number | null | undefined,
+): string {
+  if (multiplier !== null && multiplier !== undefined)
+    return multiplier.toString();
+  return "";
 }
 
 export function FollowerSettingsDialog(props: {
@@ -44,23 +54,45 @@ export function FollowerSettingsDialog(props: {
 }) {
   const sub = props.subscription;
   const [copyEnabled, setCopyEnabled] = useState(sub?.copyEnabled ?? true);
-  const [copyMode, setCopyMode] = useState<FollowerCopyMode>(sub?.copyMode ?? "BALANCE_RATIO");
+  const [copyMode, setCopyMode] = useState<FollowerCopyMode>(
+    sub?.copyMode ?? "BALANCE_RATIO",
+  );
   const [fixedLot, setFixedLot] = useState(sub?.fixedLot?.toString() ?? "");
-  const [lotMultiplier, setLotMultiplier] = useState(defaultMultiplierValue(sub?.copyMode, sub?.lotMultiplier));
-  const [riskPercent, setRiskPercent] = useState(sub?.riskPercent?.toString() ?? "");
+  const [lotMultiplier, setLotMultiplier] = useState(
+    defaultMultiplierValue(sub?.copyMode, sub?.lotMultiplier),
+  );
+  const [riskPercent, setRiskPercent] = useState(
+    sub?.riskPercent?.toString() ?? "",
+  );
   const [minLot, setMinLot] = useState(sub?.minLot?.toString() ?? "");
   const [maxLot, setMaxLot] = useState(sub?.maxLot?.toString() ?? "");
-  const [maxOpenTrades, setMaxOpenTrades] = useState(sub?.maxOpenTrades?.toString() ?? "");
-  const [maxDailyLoss, setMaxDailyLoss] = useState(sub?.maxDailyLossPercent?.toString() ?? "");
-  const [maxDrawdown, setMaxDrawdown] = useState(sub?.maxDrawdownPercent?.toString() ?? "");
-  const [allowedSymbols, setAllowedSymbols] = useState(sub?.allowedSymbols?.join(", ") ?? "");
-  const [blockedSymbols, setBlockedSymbols] = useState(sub?.blockedSymbols?.join(", ") ?? "");
+  const [maxOpenTrades, setMaxOpenTrades] = useState(
+    sub?.maxOpenTrades?.toString() ?? "",
+  );
+  const [maxDailyLoss, setMaxDailyLoss] = useState(
+    sub?.maxDailyLossPercent?.toString() ?? "",
+  );
+  const [maxDrawdown, setMaxDrawdown] = useState(
+    sub?.maxDrawdownPercent?.toString() ?? "",
+  );
+  const [allowedSymbols, setAllowedSymbols] = useState(
+    sub?.allowedSymbols?.join(", ") ?? "",
+  );
+  const [blockedSymbols, setBlockedSymbols] = useState(
+    sub?.blockedSymbols?.join(", ") ?? "",
+  );
   const [mapping, setMapping] = useState(
-    Object.entries(sub?.symbolMapping ?? {}).map(([source, target]) => `${source}:${target}`).join("\n"),
+    Object.entries(sub?.symbolMapping ?? {})
+      .map(([source, target]) => `${source}:${target}`)
+      .join("\n"),
   );
   const [reverseCopy, setReverseCopy] = useState(sub?.reverseCopy ?? false);
-  const [pauseOnDisconnect, setPauseOnDisconnect] = useState(sub?.pauseOnDisconnect ?? true);
-  const [emergencyStop, setEmergencyStop] = useState(sub?.emergencyStop ?? false);
+  const [pauseOnDisconnect, setPauseOnDisconnect] = useState(
+    sub?.pauseOnDisconnect ?? true,
+  );
+  const [emergencyStop, setEmergencyStop] = useState(
+    sub?.emergencyStop ?? false,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -78,7 +110,11 @@ export function FollowerSettingsDialog(props: {
     setMaxDrawdown(sub.maxDrawdownPercent?.toString() ?? "");
     setAllowedSymbols(sub.allowedSymbols?.join(", ") ?? "");
     setBlockedSymbols(sub.blockedSymbols?.join(", ") ?? "");
-    setMapping(Object.entries(sub.symbolMapping ?? {}).map(([source, target]) => `${source}:${target}`).join("\n"));
+    setMapping(
+      Object.entries(sub.symbolMapping ?? {})
+        .map(([source, target]) => `${source}:${target}`)
+        .join("\n"),
+    );
     setReverseCopy(sub.reverseCopy ?? false);
     setPauseOnDisconnect(sub.pauseOnDisconnect ?? true);
     setEmergencyStop(sub.emergencyStop ?? false);
@@ -90,87 +126,124 @@ export function FollowerSettingsDialog(props: {
     setSaving(true);
     setError("");
     try {
-      const response = await fetch(`/api/copy/subscriptions/${sub.id}/settings`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          copyEnabled,
-          copyMode,
-          fixedLot: copyMode === "FIXED_LOT" ? optionalNumber(fixedLot) : null,
-          lotMultiplier: copyMode === "LOT_MULTIPLIER" || copyMode === "RISK_PERCENT" ? optionalNumber(lotMultiplier) : null,
-          riskPercent: copyMode === "RISK_PERCENT" ? optionalNumber(riskPercent) : null,
-          minLot: optionalNumber(minLot),
-          maxLot: optionalNumber(maxLot),
-          maxOpenTrades: optionalNumber(maxOpenTrades),
-          maxDailyLossPercent: optionalNumber(maxDailyLoss),
-          maxDrawdownPercent: optionalNumber(maxDrawdown),
-          allowedSymbols: symbolList(allowedSymbols),
-          blockedSymbols: symbolList(blockedSymbols),
-          symbolMapping: parseMapping(mapping),
-          copyNewTradesOnly: true,
-          reverseCopy,
-          pauseOnDisconnect,
-          emergencyStop,
-        }),
-      });
+      const response = await fetch(
+        `/api/copy/subscriptions/${sub.id}/settings`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            copyEnabled,
+            copyMode,
+            fixedLot:
+              copyMode === "FIXED_LOT" ? optionalNumber(fixedLot) : null,
+            lotMultiplier:
+              copyMode === "LOT_MULTIPLIER"
+                ? optionalNumber(lotMultiplier)
+                : null,
+            riskPercent:
+              copyMode === "RISK_PERCENT" ? optionalNumber(riskPercent) : null,
+            minLot: optionalNumber(minLot),
+            maxLot: optionalNumber(maxLot),
+            maxOpenTrades: optionalNumber(maxOpenTrades),
+            maxDailyLossPercent: optionalNumber(maxDailyLoss),
+            maxDrawdownPercent: optionalNumber(maxDrawdown),
+            allowedSymbols: symbolList(allowedSymbols),
+            blockedSymbols: symbolList(blockedSymbols),
+            symbolMapping: parseMapping(mapping),
+            copyNewTradesOnly: true,
+            reverseCopy,
+            pauseOnDisconnect,
+            emergencyStop,
+          }),
+        },
+      );
       const payload = await response.json();
-      if (!payload.ok) throw new Error(payload.error?.message ?? "Settings could not be saved.");
+      if (!payload.ok)
+        throw new Error(
+          payload.error?.message ?? "Settings could not be saved.",
+        );
       await props.onSaved(payload.data.subscription as CopyFollowerDto);
       props.onClose();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Settings could not be saved.");
+      setError(
+        saveError instanceof Error
+          ? saveError.message
+          : "Settings could not be saved.",
+      );
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Dialog.Root open={Boolean(sub)} onOpenChange={(open) => !open && !saving && props.onClose()}>
+    <Dialog.Root
+      open={Boolean(sub)}
+      onOpenChange={(open) => !open && !saving && props.onClose()}
+    >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
         <Dialog.Content className="invisible-scrollbar fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-line bg-panel p-4 shadow-[0_20px_60px_rgba(0,0,0,0.48)] focus:outline-none sm:p-6">
-          <Dialog.Title className="text-xl font-semibold text-foreground">Follower copy settings</Dialog.Title>
+          <Dialog.Title className="text-xl font-semibold text-foreground">
+            Follower copy settings
+          </Dialog.Title>
           <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
-            {sub?.followerAccountName ?? "Follower account"} · supported settings are enforced by both simulation and the guarded live path.
+            {sub?.followerAccountName ?? "Follower account"} · supported
+            settings are enforced by both simulation and the guarded live path.
           </Dialog.Description>
 
           <div className="mt-5 grid gap-5">
             <div className="rounded-[4px] border border-line bg-background p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h3 className="font-semibold text-foreground">Copy control</h3>
-                  <p className="mt-1 text-xs text-muted">Emergency stop overrides the normal enabled setting.</p>
+                  <h3 className="font-semibold text-foreground">
+                    Copy control
+                  </h3>
+                  <p className="mt-1 text-xs text-muted">
+                    Emergency stop overrides the normal enabled setting.
+                  </p>
                 </div>
                 <label className="flex items-center gap-2 text-sm text-foreground">
-                  <input type="checkbox" checked={copyEnabled} onChange={(event) => setCopyEnabled(event.target.checked)} />
+                  <input
+                    type="checkbox"
+                    checked={copyEnabled}
+                    onChange={(event) => setCopyEnabled(event.target.checked)}
+                  />
                   Copy enabled
                 </label>
               </div>
               <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                <SelectField label="Copy mode" value={copyMode} onChange={(event) => setCopyMode(event.target.value as FollowerCopyMode)}>
+                <SelectField
+                  label="Copy mode"
+                  value={copyMode}
+                  onChange={(event) =>
+                    setCopyMode(event.target.value as FollowerCopyMode)
+                  }
+                >
                   <option value="BALANCE_RATIO">Balance ratio</option>
                   <option value="LOT_MULTIPLIER">Lot multiplier</option>
                   <option value="FIXED_LOT">Fixed lot</option>
                   <option value="RISK_PERCENT">Risk percent</option>
                 </SelectField>
-                <TextField
-                  label="Fixed lot"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  disabled={copyMode !== "FIXED_LOT"}
-                  value={fixedLot}
-                  onChange={(event) => setFixedLot(event.target.value)}
-                />
-                <TextField
-                  label={copyMode === "RISK_PERCENT" ? "Risk multiplier" : "Lot multiplier"}
-                  type="number"
-                  min="0.01"
-                  step="any"
-                  disabled={copyMode !== "LOT_MULTIPLIER" && copyMode !== "RISK_PERCENT"}
-                  value={lotMultiplier}
-                  onChange={(event) => setLotMultiplier(event.target.value)}
-                />
+                {copyMode === "FIXED_LOT" ? (
+                  <TextField
+                    label="Fixed lot"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={fixedLot}
+                    onChange={(event) => setFixedLot(event.target.value)}
+                  />
+                ) : null}
+                {copyMode === "LOT_MULTIPLIER" ? (
+                  <TextField
+                    label="Lot multiplier"
+                    type="number"
+                    min="0.01"
+                    step="any"
+                    value={lotMultiplier}
+                    onChange={(event) => setLotMultiplier(event.target.value)}
+                  />
+                ) : null}
                 {copyMode === "RISK_PERCENT" ? (
                   <TextField
                     label="Risk percent"
@@ -185,27 +258,74 @@ export function FollowerSettingsDialog(props: {
               </div>
               {copyMode === "RISK_PERCENT" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
-                  Risk-percent mode uses the follower balance/equity, master entry price, stop loss, and broker symbol specifications. Trades without a stop loss are rejected instead of guessed.
+                  Risk-percent mode uses the follower balance/equity, master
+                  entry price, stop loss, and broker symbol specifications.
+                  Trades without a stop loss are rejected instead of guessed.
                 </p>
               ) : copyMode === "BALANCE_RATIO" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
-                  Balance ratio uses (master lot ÷ master balance) × follower balance. Example: master 1.00 lot, master balance $10,000, follower balance $5,000 = follower 0.50 lots.
+                  Balance ratio uses (master lot ÷ master balance) × follower
+                  balance. Example: master 1.00 lot, master balance $10,000,
+                  follower balance $5,000 = follower 0.50 lots.
                 </p>
               ) : copyMode === "LOT_MULTIPLIER" ? (
                 <p className="mt-3 text-xs leading-5 text-muted">
-                  Lot multiplier copies the master trade size multiplied by this value. Decimal point values are supported, for example 1.2, 1.8, or 1.9.
+                  Lot multiplier copies the master trade size multiplied by this
+                  value. Decimal point values are supported, for example 1.2,
+                  1.8, or 1.9.
                 </p>
               ) : null}
             </div>
 
             <div className="grid gap-4 rounded-[4px] border border-line bg-background p-4 sm:grid-cols-2 lg:grid-cols-3">
-              <TextField label="Minimum lot" type="number" min="0.01" step="0.01" value={minLot} onChange={(event) => setMinLot(event.target.value)} />
-              <TextField label="Maximum lot" type="number" min="0.01" step="0.01" value={maxLot} onChange={(event) => setMaxLot(event.target.value)} />
-              <TextField label="Maximum open trades" type="number" min="1" step="1" value={maxOpenTrades} onChange={(event) => setMaxOpenTrades(event.target.value)} />
-              <TextField label="Maximum daily loss %" type="number" min="1" max="100" step="1" value={maxDailyLoss} onChange={(event) => setMaxDailyLoss(event.target.value)} />
-              <TextField label="Maximum drawdown %" type="number" min="1" max="100" step="1" value={maxDrawdown} onChange={(event) => setMaxDrawdown(event.target.value)} />
+              <TextField
+                label="Minimum lot"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={minLot}
+                onChange={(event) => setMinLot(event.target.value)}
+              />
+              <TextField
+                label="Maximum lot"
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={maxLot}
+                onChange={(event) => setMaxLot(event.target.value)}
+              />
+              <TextField
+                label="Maximum open trades"
+                type="number"
+                min="1"
+                step="1"
+                value={maxOpenTrades}
+                onChange={(event) => setMaxOpenTrades(event.target.value)}
+              />
+              <TextField
+                label="Maximum daily loss %"
+                type="number"
+                min="1"
+                max="100"
+                step="1"
+                value={maxDailyLoss}
+                onChange={(event) => setMaxDailyLoss(event.target.value)}
+              />
+              <TextField
+                label="Maximum drawdown %"
+                type="number"
+                min="1"
+                max="100"
+                step="1"
+                value={maxDrawdown}
+                onChange={(event) => setMaxDrawdown(event.target.value)}
+              />
               <label className="flex items-center gap-2 self-end rounded-[4px] border border-line px-3 py-3 text-sm text-foreground">
-                <input type="checkbox" checked={reverseCopy} onChange={(event) => setReverseCopy(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={reverseCopy}
+                  onChange={(event) => setReverseCopy(event.target.checked)}
+                />
                 Reverse BUY / SELL
               </label>
             </div>
@@ -245,11 +365,21 @@ export function FollowerSettingsDialog(props: {
                 New trades only
               </label>
               <label className="flex items-center gap-2 text-sm text-foreground">
-                <input type="checkbox" checked={pauseOnDisconnect} onChange={(event) => setPauseOnDisconnect(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={pauseOnDisconnect}
+                  onChange={(event) =>
+                    setPauseOnDisconnect(event.target.checked)
+                  }
+                />
                 Pause on disconnect
               </label>
               <label className="flex items-center gap-2 text-sm font-semibold text-danger">
-                <input type="checkbox" checked={emergencyStop} onChange={(event) => setEmergencyStop(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={emergencyStop}
+                  onChange={(event) => setEmergencyStop(event.target.checked)}
+                />
                 Emergency stop
               </label>
             </div>
@@ -260,19 +390,36 @@ export function FollowerSettingsDialog(props: {
                 <h3 className="font-semibold text-foreground">Coming soon</h3>
               </div>
               <p className="mt-2 text-xs leading-5 text-muted">
-                Equity-peak drawdown, live spread/slippage checks, copying historical positions, and copying
-                source stop-loss/take-profit are disabled because the current engine cannot guarantee those
+                Equity-peak drawdown, live spread/slippage checks, copying
+                historical positions, and copying source stop-loss/take-profit
+                are disabled because the current engine cannot guarantee those
                 behaviors yet.
               </p>
             </div>
 
-            {error ? <p className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">{error}</p> : null}
+            {error ? (
+              <p className="rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
+                {error}
+              </p>
+            ) : null}
           </div>
 
           <div className="mt-5 flex justify-end gap-3 border-t border-line pt-4">
-            <GhostButton type="button" disabled={saving} onClick={props.onClose}>Cancel</GhostButton>
-            <PrimaryButton type="button" disabled={saving} onClick={() => void save()}>
-              {saving ? <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" /> : null}
+            <GhostButton
+              type="button"
+              disabled={saving}
+              onClick={props.onClose}
+            >
+              Cancel
+            </GhostButton>
+            <PrimaryButton
+              type="button"
+              disabled={saving}
+              onClick={() => void save()}
+            >
+              {saving ? (
+                <Loader2 className="mr-2 inline-block h-4 w-4 animate-spin" />
+              ) : null}
               {saving ? "Saving…" : "Save enforced settings"}
             </PrimaryButton>
           </div>

@@ -2,8 +2,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
 import { calculateFollowerLot } from "@/lib/copy/lotScaling";
 import { evaluateFollowerEligibility } from "@/lib/copy/eligibility";
-import { BROKER_EXEC_ERROR, BrokerExecutionError, type BrokerAdapter } from "@/lib/broker/BrokerAdapter";
-import { createBrokerAdapter, getBrokerProviderId } from "@/lib/broker/provider";
+import {
+  BROKER_EXEC_ERROR,
+  BrokerExecutionError,
+  type BrokerAdapter,
+} from "@/lib/broker/BrokerAdapter";
+import {
+  createBrokerAdapter,
+  getBrokerProviderId,
+} from "@/lib/broker/provider";
 import { logBrokerOperation } from "@/lib/services/brokerOperationLog";
 import { getRiskEnforcementState } from "@/lib/services/riskService";
 import {
@@ -35,18 +42,29 @@ function timingLabel(eventId: string): string {
   return eventId.slice(0, 8);
 }
 
-function logCopyTiming(eventId: string, stage: string, startedAt: number, extra?: unknown) {
+function logCopyTiming(
+  eventId: string,
+  stage: string,
+  startedAt: number,
+  extra?: unknown,
+) {
   if (!copyTimingEnabled()) return;
   const elapsedMs = Date.now() - startedAt;
   const suffix = extra ? ` ${JSON.stringify(extra)}` : "";
-  console.log(`[copy-timing:${timingLabel(eventId)}] ${stage} +${elapsedMs}ms${suffix}`);
+  console.log(
+    `[copy-timing:${timingLabel(eventId)}] ${stage} +${elapsedMs}ms${suffix}`,
+  );
 }
 
-const defaultBrokerExecutionConcurrency = getBrokerProviderId() === "api2trade" ? "24" : "8";
+const defaultBrokerExecutionConcurrency =
+  getBrokerProviderId() === "api2trade" ? "24" : "8";
 const brokerExecutionConcurrency = Math.max(
   1,
-  Number.parseInt(process.env.WSA_COPY_BROKER_CONCURRENCY ?? defaultBrokerExecutionConcurrency, 10)
-    || Number(defaultBrokerExecutionConcurrency),
+  Number.parseInt(
+    process.env.WSA_COPY_BROKER_CONCURRENCY ??
+      defaultBrokerExecutionConcurrency,
+    10,
+  ) || Number(defaultBrokerExecutionConcurrency),
 );
 let activeBrokerExecutions = 0;
 const brokerExecutionQueue: Array<() => void> = [];
@@ -70,7 +88,10 @@ type RuntimeCacheEntry<T> = {
 };
 
 function copyRuntimeCacheMs(): number {
-  const parsed = Number.parseInt(process.env.WSA_COPY_RUNTIME_CACHE_MS ?? "300000", 10);
+  const parsed = Number.parseInt(
+    process.env.WSA_COPY_RUNTIME_CACHE_MS ?? "300000",
+    10,
+  );
   if (!Number.isFinite(parsed) || parsed < 0) return 300_000;
   return Math.min(parsed, 600_000);
 }
@@ -92,9 +113,15 @@ async function getRuntimeCached<T>(
   return value;
 }
 
-const settingsRuntimeCache = new Map<string, RuntimeCacheEntry<CopyGlobalSettingsDto>>();
+const settingsRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<CopyGlobalSettingsDto>
+>();
 const strategyRuntimeCache = new Map<string, RuntimeCacheEntry<StrategyRow>>();
-const followersRuntimeCache = new Map<string, RuntimeCacheEntry<FollowerRow[]>>();
+const followersRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<FollowerRow[]>
+>();
 type StrategyHotRuntime = {
   strategy: StrategyRow;
   settings: CopyGlobalSettingsDto;
@@ -102,18 +129,39 @@ type StrategyHotRuntime = {
   masterSnap: SnapshotLite | null;
   accountRules: Map<string, AccountRuleRuntime>;
   statusByAccount: Map<string, string>;
-  followerRuntimeByAccount: Map<string, {
-    snapshot: SnapshotLite | null;
-    generalRiskState: Awaited<ReturnType<typeof getRiskEnforcementState>>;
-    risk: AccountRiskRuntime;
-  }>;
+  followerRuntimeByAccount: Map<
+    string,
+    {
+      snapshot: SnapshotLite | null;
+      generalRiskState: Awaited<ReturnType<typeof getRiskEnforcementState>>;
+      risk: AccountRiskRuntime;
+    }
+  >;
 };
-const strategyHotRuntimeCache = new Map<string, RuntimeCacheEntry<StrategyHotRuntime>>();
-const snapshotRuntimeCache = new Map<string, RuntimeCacheEntry<SnapshotLite | null>>();
-const accountRulesRuntimeCache = new Map<string, RuntimeCacheEntry<Map<string, AccountRuleRuntime>>>();
-const accountStatusRuntimeCache = new Map<string, RuntimeCacheEntry<Map<string, string>>>();
-const accountRiskRuntimeCache = new Map<string, RuntimeCacheEntry<AccountRiskRuntime>>();
-const generalRiskRuntimeCache = new Map<string, RuntimeCacheEntry<Awaited<ReturnType<typeof getRiskEnforcementState>>>>();
+const strategyHotRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<StrategyHotRuntime>
+>();
+const snapshotRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<SnapshotLite | null>
+>();
+const accountRulesRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<Map<string, AccountRuleRuntime>>
+>();
+const accountStatusRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<Map<string, string>>
+>();
+const accountRiskRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<AccountRiskRuntime>
+>();
+const generalRiskRuntimeCache = new Map<
+  string,
+  RuntimeCacheEntry<Awaited<ReturnType<typeof getRiskEnforcementState>>>
+>();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Copy Trading Service (server-only). All access is via the service-role admin
@@ -128,25 +176,40 @@ export async function getCopyGlobalSettings(): Promise<CopyGlobalSettingsDto> {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("copy_global_settings")
-    .select("copy_enabled, live_copy_enabled, emergency_stop_enabled, max_daily_loss_percent, max_drawdown_percent, max_copied_open_positions, max_lot_size, max_slippage_points, pause_on_disconnect, updated_at")
+    .select(
+      "copy_enabled, live_copy_enabled, emergency_stop_enabled, max_daily_loss_percent, max_drawdown_percent, max_copied_open_positions, max_lot_size, max_slippage_points, pause_on_disconnect, updated_at",
+    )
     .eq("id", true)
     .maybeSingle();
   return {
     copyEnabled: data?.copy_enabled ?? true,
     liveCopyEnabled: data?.live_copy_enabled ?? false,
     emergencyStopEnabled: data?.emergency_stop_enabled ?? false,
-    maxDailyLossPercent: data?.max_daily_loss_percent == null ? null : Number(data.max_daily_loss_percent),
-    maxDrawdownPercent: data?.max_drawdown_percent == null ? null : Number(data.max_drawdown_percent),
+    maxDailyLossPercent:
+      data?.max_daily_loss_percent == null
+        ? null
+        : Number(data.max_daily_loss_percent),
+    maxDrawdownPercent:
+      data?.max_drawdown_percent == null
+        ? null
+        : Number(data.max_drawdown_percent),
     maxCopiedOpenPositions: data?.max_copied_open_positions ?? null,
     maxLotSize: data?.max_lot_size == null ? null : Number(data.max_lot_size),
-    maxSlippagePoints: data?.max_slippage_points == null ? null : Number(data.max_slippage_points),
+    maxSlippagePoints:
+      data?.max_slippage_points == null
+        ? null
+        : Number(data.max_slippage_points),
     pauseOnDisconnect: data?.pause_on_disconnect ?? true,
     updatedAt: data?.updated_at ?? new Date(0).toISOString(),
   };
 }
 
 async function getCopyGlobalSettingsCached(): Promise<CopyGlobalSettingsDto> {
-  return getRuntimeCached(settingsRuntimeCache, "global", getCopyGlobalSettings);
+  return getRuntimeCached(
+    settingsRuntimeCache,
+    "global",
+    getCopyGlobalSettings,
+  );
 }
 
 export async function updateCopyGlobalSettings(
@@ -155,18 +218,28 @@ export async function updateCopyGlobalSettings(
 ): Promise<CopyGlobalSettingsDto> {
   const supabase = createAdminClient();
   const row: Record<string, unknown> = { id: true, updated_by: actorUserId };
-  if (patch.liveCopyEnabled !== undefined) row.live_copy_enabled = patch.liveCopyEnabled;
-  if (patch.emergencyStopEnabled !== undefined) row.emergency_stop_enabled = patch.emergencyStopEnabled;
+  if (patch.liveCopyEnabled !== undefined)
+    row.live_copy_enabled = patch.liveCopyEnabled;
+  if (patch.emergencyStopEnabled !== undefined)
+    row.emergency_stop_enabled = patch.emergencyStopEnabled;
   if (patch.copyEnabled !== undefined) row.copy_enabled = patch.copyEnabled;
-  if (patch.maxDailyLossPercent !== undefined) row.max_daily_loss_percent = patch.maxDailyLossPercent;
-  if (patch.maxDrawdownPercent !== undefined) row.max_drawdown_percent = patch.maxDrawdownPercent;
-  if (patch.maxCopiedOpenPositions !== undefined) row.max_copied_open_positions = patch.maxCopiedOpenPositions;
+  if (patch.maxDailyLossPercent !== undefined)
+    row.max_daily_loss_percent = patch.maxDailyLossPercent;
+  if (patch.maxDrawdownPercent !== undefined)
+    row.max_drawdown_percent = patch.maxDrawdownPercent;
+  if (patch.maxCopiedOpenPositions !== undefined)
+    row.max_copied_open_positions = patch.maxCopiedOpenPositions;
   if (patch.maxLotSize !== undefined) row.max_lot_size = patch.maxLotSize;
-  if (patch.maxSlippagePoints !== undefined) row.max_slippage_points = patch.maxSlippagePoints;
-  if (patch.pauseOnDisconnect !== undefined) row.pause_on_disconnect = patch.pauseOnDisconnect;
+  if (patch.maxSlippagePoints !== undefined)
+    row.max_slippage_points = patch.maxSlippagePoints;
+  if (patch.pauseOnDisconnect !== undefined)
+    row.pause_on_disconnect = patch.pauseOnDisconnect;
 
-  const { error } = await supabase.from("copy_global_settings").upsert(row, { onConflict: "id" });
-  if (error) throw new Error(`Failed to update copy settings: ${error.message}`);
+  const { error } = await supabase
+    .from("copy_global_settings")
+    .upsert(row, { onConflict: "id" });
+  if (error)
+    throw new Error(`Failed to update copy settings: ${error.message}`);
 
   await writeAuditLog({
     actorUserId,
@@ -196,9 +269,16 @@ function mapAccountRule(row: {
     tradingAccountId: row.trading_account_id,
     accountName: row.trading_accounts?.account_name ?? null,
     copyEnabled: row.copy_enabled,
-    maxDailyLossPercent: row.max_daily_loss_percent == null ? null : Number(row.max_daily_loss_percent),
-    maxDrawdownPercent: row.max_drawdown_percent == null ? null : Number(row.max_drawdown_percent),
-    maxCopiedLots: row.max_copied_lots == null ? null : Number(row.max_copied_lots),
+    maxDailyLossPercent:
+      row.max_daily_loss_percent == null
+        ? null
+        : Number(row.max_daily_loss_percent),
+    maxDrawdownPercent:
+      row.max_drawdown_percent == null
+        ? null
+        : Number(row.max_drawdown_percent),
+    maxCopiedLots:
+      row.max_copied_lots == null ? null : Number(row.max_copied_lots),
     maxOpenCopiedPositions: row.max_open_copied_positions,
     stopAfterLosses: row.stop_after_losses,
     symbolAllowlist: row.symbol_allowlist,
@@ -208,17 +288,30 @@ function mapAccountRule(row: {
   };
 }
 
-export async function getCopyAccountRule(accountId: string): Promise<CopyAccountRuleDto> {
+export async function getCopyAccountRule(
+  accountId: string,
+): Promise<CopyAccountRuleDto> {
   const supabase = createAdminClient();
   const [{ data: rule }, { data: account }] = await Promise.all([
     supabase
       .from("copy_account_rules")
-      .select("trading_account_id, copy_enabled, max_daily_loss_percent, max_drawdown_percent, max_copied_lots, max_open_copied_positions, stop_after_losses, symbol_allowlist, symbol_blocklist, paused_at, updated_at, trading_accounts(account_name)")
+      .select(
+        "trading_account_id, copy_enabled, max_daily_loss_percent, max_drawdown_percent, max_copied_lots, max_open_copied_positions, stop_after_losses, symbol_allowlist, symbol_blocklist, paused_at, updated_at, trading_accounts(account_name)",
+      )
       .eq("trading_account_id", accountId)
       .maybeSingle(),
-    supabase.from("trading_accounts").select("id, account_name").eq("id", accountId).maybeSingle(),
+    supabase
+      .from("trading_accounts")
+      .select("id, account_name")
+      .eq("id", accountId)
+      .maybeSingle(),
   ]);
-  if (!account) throw new CopyError(COPY_ERROR.FOLLOWER_NOT_FOUND, "Trading account not found", 404);
+  if (!account)
+    throw new CopyError(
+      COPY_ERROR.FOLLOWER_NOT_FOUND,
+      "Trading account not found",
+      404,
+    );
   if (rule) return mapAccountRule(rule as Parameters<typeof mapAccountRule>[0]);
   return {
     tradingAccountId: accountId,
@@ -238,7 +331,10 @@ export async function getCopyAccountRule(accountId: string): Promise<CopyAccount
 
 export async function upsertCopyAccountRule(
   accountId: string,
-  input: Omit<CopyAccountRuleDto, "tradingAccountId" | "accountName" | "pausedAt" | "updatedAt">,
+  input: Omit<
+    CopyAccountRuleDto,
+    "tradingAccountId" | "accountName" | "pausedAt" | "updatedAt"
+  >,
   actorUserId: string,
 ): Promise<CopyAccountRuleDto> {
   const supabase = createAdminClient();
@@ -258,7 +354,8 @@ export async function upsertCopyAccountRule(
     },
     { onConflict: "trading_account_id" },
   );
-  if (error) throw new Error(`Failed to save copy account rules: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to save copy account rules: ${error.message}`);
   await writeAuditLog({
     actorUserId,
     action: "COPY_ACCOUNT_RULES_CHANGED",
@@ -269,14 +366,19 @@ export async function upsertCopyAccountRule(
   return getCopyAccountRule(accountId);
 }
 
-export async function listCopyRuleEvents(limit = 50): Promise<CopyRuleEventDto[]> {
+export async function listCopyRuleEvents(
+  limit = 50,
+): Promise<CopyRuleEventDto[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("copy_rule_events")
-    .select("id, scope, rule_code, reason, trading_account_id, strategy_id, master_event_id, mode, created_at")
+    .select(
+      "id, scope, rule_code, reason, trading_account_id, strategy_id, master_event_id, mode, created_at",
+    )
     .order("created_at", { ascending: false })
     .limit(Math.min(Math.max(limit, 1), 200));
-  if (error) throw new Error(`Failed to load copy rule events: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to load copy rule events: ${error.message}`);
   return (data ?? []).map((row) => ({
     id: row.id,
     scope: row.scope as "GLOBAL" | "ACCOUNT",
@@ -338,7 +440,8 @@ function mapStrategy(
     liveEnabled: row.live_enabled,
     riskMultiplier: Number(row.risk_multiplier),
     defaultScalingMode: row.default_scaling_mode,
-    maxFollowerLot: row.max_follower_lot === null ? null : Number(row.max_follower_lot),
+    maxFollowerLot:
+      row.max_follower_lot === null ? null : Number(row.max_follower_lot),
     maxOpenCopiedTrades: row.max_open_copied_trades,
     symbolAllowlist: row.symbol_allowlist,
     symbolBlocklist: row.symbol_blocklist,
@@ -385,30 +488,56 @@ export async function listCopyStrategies(): Promise<CopyStrategyDto[]> {
   const strategyIds = strategies.map((s) => s.id);
 
   const [{ data: accounts }, { data: followers }] = await Promise.all([
-    supabase.from("trading_accounts").select("id, account_name").in("id", masterIds),
-    supabase.from("copy_strategy_followers").select("strategy_id").in("strategy_id", strategyIds),
+    supabase
+      .from("trading_accounts")
+      .select("id, account_name")
+      .in("id", masterIds),
+    supabase
+      .from("copy_strategy_followers")
+      .select("strategy_id")
+      .in("strategy_id", strategyIds),
   ]);
 
-  const nameByAccount = new Map((accounts ?? []).map((a) => [a.id, a.account_name as string]));
+  const nameByAccount = new Map(
+    (accounts ?? []).map((a) => [a.id, a.account_name as string]),
+  );
   const followerCount = new Map<string, number>();
   for (const f of followers ?? []) {
-    followerCount.set(f.strategy_id, (followerCount.get(f.strategy_id) ?? 0) + 1);
+    followerCount.set(
+      f.strategy_id,
+      (followerCount.get(f.strategy_id) ?? 0) + 1,
+    );
   }
 
   return strategies.map((s) =>
-    mapStrategy(s, nameByAccount.get(s.master_account_id) ?? null, followerCount.get(s.id) ?? 0),
+    mapStrategy(
+      s,
+      nameByAccount.get(s.master_account_id) ?? null,
+      followerCount.get(s.id) ?? 0,
+    ),
   );
 }
 
 async function getStrategyRow(strategyId: string): Promise<StrategyRow> {
   const supabase = createAdminClient();
-  const { data } = await supabase.from("copy_strategies").select(STRATEGY_COLS).eq("id", strategyId).maybeSingle();
-  if (!data) throw new CopyError(COPY_ERROR.COPY_STRATEGY_NOT_FOUND, "Strategy not found", 404);
+  const { data } = await supabase
+    .from("copy_strategies")
+    .select(STRATEGY_COLS)
+    .eq("id", strategyId)
+    .maybeSingle();
+  if (!data)
+    throw new CopyError(
+      COPY_ERROR.COPY_STRATEGY_NOT_FOUND,
+      "Strategy not found",
+      404,
+    );
   return data as StrategyRow;
 }
 
 async function getStrategyRowCached(strategyId: string): Promise<StrategyRow> {
-  return getRuntimeCached(strategyRuntimeCache, strategyId, () => getStrategyRow(strategyId));
+  return getRuntimeCached(strategyRuntimeCache, strategyId, () =>
+    getStrategyRow(strategyId),
+  );
 }
 
 export async function createCopyStrategy(
@@ -437,7 +566,12 @@ export async function createCopyStrategy(
     .eq("user_id", actorUserId)
     .eq("account_usage", "COPY_MASTER")
     .maybeSingle();
-  if (!master) throw new CopyError(COPY_ERROR.MASTER_ACCOUNT_NOT_FOUND, "Select a copy-master account connected by this admin.", 404);
+  if (!master)
+    throw new CopyError(
+      COPY_ERROR.MASTER_ACCOUNT_NOT_FOUND,
+      "Select a copy-master account connected by this admin.",
+      404,
+    );
 
   const { data, error } = await supabase
     .from("copy_strategies")
@@ -461,7 +595,8 @@ export async function createCopyStrategy(
     })
     .select(STRATEGY_COLS)
     .single();
-  if (error || !data) throw new Error(`Failed to create strategy: ${error?.message}`);
+  if (error || !data)
+    throw new Error(`Failed to create strategy: ${error?.message}`);
 
   await writeAuditLog({
     actorUserId,
@@ -470,7 +605,11 @@ export async function createCopyStrategy(
     entityId: data.id,
     metadata: { name: input.name, masterAccountId: input.masterAccountId },
   });
-  return mapStrategy(data as StrategyRow, (master.account_name as string) ?? null, 0);
+  return mapStrategy(
+    data as StrategyRow,
+    (master.account_name as string) ?? null,
+    0,
+  );
 }
 
 export async function updateCopyStrategy(
@@ -511,10 +650,17 @@ export async function updateCopyStrategy(
     .select(STRATEGY_COLS)
     .maybeSingle();
   if (error) throw new Error(`Failed to update strategy: ${error.message}`);
-  if (!data) throw new CopyError(COPY_ERROR.COPY_STRATEGY_NOT_FOUND, "Strategy not found", 404);
+  if (!data)
+    throw new CopyError(
+      COPY_ERROR.COPY_STRATEGY_NOT_FOUND,
+      "Strategy not found",
+      404,
+    );
   const updatedStrategy = data as StrategyRow;
 
-  const billingProductUpdates: PromiseLike<{ error: { message: string } | null }>[] = [];
+  const billingProductUpdates: PromiseLike<{
+    error: { message: string } | null;
+  }>[] = [];
   if (updatedStrategy.standard_billing_product_id) {
     billingProductUpdates.push(
       supabase
@@ -541,7 +687,9 @@ export async function updateCopyStrategy(
     const results = await Promise.all(billingProductUpdates);
     const billingError = results.find((result) => result.error)?.error;
     if (billingError) {
-      throw new Error(`Strategy pricing changed, but billing products could not be updated: ${billingError.message}`);
+      throw new Error(
+        `Strategy pricing changed, but billing products could not be updated: ${billingError.message}`,
+      );
     }
   }
 
@@ -550,7 +698,11 @@ export async function updateCopyStrategy(
     action: "COPY_STRATEGY_UPDATED",
     entityType: "copy_strategy",
     entityId: strategyId,
-    metadata: { fields: Object.keys(row), liveEnabled: patch.liveEnabled, mode: patch.mode },
+    metadata: {
+      fields: Object.keys(row),
+      liveEnabled: patch.liveEnabled,
+      mode: patch.mode,
+    },
   });
 
   const { data: master } = await supabase
@@ -558,7 +710,11 @@ export async function updateCopyStrategy(
     .select("account_name")
     .eq("id", updatedStrategy.master_account_id)
     .maybeSingle();
-  return mapStrategy(updatedStrategy, (master?.account_name as string) ?? null, 0);
+  return mapStrategy(
+    updatedStrategy,
+    (master?.account_name as string) ?? null,
+    0,
+  );
 }
 
 export async function deleteCopyStrategy(
@@ -588,8 +744,12 @@ export async function deleteCopyStrategy(
       .select("id", { count: "exact", head: true })
       .eq("copy_strategy_id", strategyId),
   ]);
-  if (followerError) throw new Error(`Failed to inspect strategy followers: ${followerError.message}`);
-  if (orderError) throw new Error(`Failed to inspect strategy orders: ${orderError.message}`);
+  if (followerError)
+    throw new Error(
+      `Failed to inspect strategy followers: ${followerError.message}`,
+    );
+  if (orderError)
+    throw new Error(`Failed to inspect strategy orders: ${orderError.message}`);
   if ((followerCount ?? 0) > 0 || (orderCount ?? 0) > 0) {
     throw new CopyError(
       COPY_ERROR.VALIDATION_ERROR,
@@ -598,7 +758,10 @@ export async function deleteCopyStrategy(
     );
   }
 
-  const { error } = await supabase.from("copy_strategies").delete().eq("id", strategyId);
+  const { error } = await supabase
+    .from("copy_strategies")
+    .delete()
+    .eq("id", strategyId);
   if (error) throw new Error(`Failed to delete strategy: ${error.message}`);
 
   await writeAuditLog({
@@ -666,7 +829,9 @@ export async function monitorMasterAccount(
 
   const { data: masterTrades } = await supabase
     .from("trades")
-    .select("id, symbol, side, status, volume, open_price, close_price, opened_at, closed_at")
+    .select(
+      "id, symbol, side, status, volume, open_price, close_price, opened_at, closed_at",
+    )
     .eq("trading_account_id", strategy.master_account_id)
     .order("opened_at", { ascending: false })
     .limit(200);
@@ -715,7 +880,8 @@ export async function monitorMasterAccount(
     const { error } = await supabase
       .from("copy_master_events")
       .upsert(newEvents, { onConflict: "dedupe_key", ignoreDuplicates: true });
-    if (error) throw new Error(`Failed to record master events: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to record master events: ${error.message}`);
   }
 
   await writeAuditLog({
@@ -728,7 +894,9 @@ export async function monitorMasterAccount(
   return { detected: newEvents.length };
 }
 
-export async function listMasterEvents(strategyId: string): Promise<MasterEventDto[]> {
+export async function listMasterEvents(
+  strategyId: string,
+): Promise<MasterEventDto[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("copy_master_events")
@@ -763,8 +931,12 @@ async function getSnapshot(accountId: string): Promise<SnapshotLite | null> {
   };
 }
 
-async function getSnapshotCached(accountId: string): Promise<SnapshotLite | null> {
-  return getRuntimeCached(snapshotRuntimeCache, accountId, () => getSnapshot(accountId));
+async function getSnapshotCached(
+  accountId: string,
+): Promise<SnapshotLite | null> {
+  return getRuntimeCached(snapshotRuntimeCache, accountId, () =>
+    getSnapshot(accountId),
+  );
 }
 
 interface FollowerRow {
@@ -810,27 +982,41 @@ async function loadActiveFollowers(strategyId: string): Promise<FollowerRow[]> {
 }
 
 function followerScalingMode(follower: FollowerRow): ScalingMode | null {
-  return (
-    (follower.copy_mode ? copyModeToScalingMode(follower.copy_mode) : null)
-    ?? follower.scaling_mode
-    ?? null
-  ) as ScalingMode | null;
+  return ((follower.copy_mode
+    ? copyModeToScalingMode(follower.copy_mode)
+    : null) ??
+    follower.scaling_mode ??
+    null) as ScalingMode | null;
 }
 
-function followerMaxLot(follower: FollowerRow, strategy: StrategyRow, scalingMode: ScalingMode): number | null {
+function followerMaxLot(
+  follower: FollowerRow,
+  strategy: StrategyRow,
+  scalingMode: ScalingMode,
+): number | null {
   if (follower.max_lot !== null) return Number(follower.max_lot);
-  if (scalingMode === "FIXED_LOT" || scalingMode === "FIXED_MULTIPLIER") return null;
-  return strategy.max_follower_lot === null ? null : Number(strategy.max_follower_lot);
+  if (scalingMode === "FIXED_LOT" || scalingMode === "FIXED_MULTIPLIER")
+    return null;
+  return strategy.max_follower_lot === null
+    ? null
+    : Number(strategy.max_follower_lot);
 }
 
 function followerLotMultiplier(follower: FollowerRow): number | null {
+  const scalingMode = followerScalingMode(follower);
+  if (scalingMode !== "FIXED_MULTIPLIER") return null;
   if (follower.lot_multiplier !== null) return Number(follower.lot_multiplier);
-  if (follower.risk_multiplier !== null) return Number(follower.risk_multiplier);
+  if (follower.risk_multiplier !== null)
+    return Number(follower.risk_multiplier);
   return null;
 }
 
 function followerRiskMultiplier(follower: FollowerRow): number | null {
-  if (follower.risk_multiplier !== null) return Number(follower.risk_multiplier);
+  const scalingMode = followerScalingMode(follower);
+  if (scalingMode === "RISK_PERCENT") return null;
+  if (scalingMode !== "EQUITY_PROPORTIONAL") return null;
+  if (follower.risk_multiplier !== null)
+    return Number(follower.risk_multiplier);
   return null;
 }
 
@@ -842,7 +1028,9 @@ async function loadRiskSymbolSpecifications(
 ): Promise<Parameters<typeof calculateFollowerLot>[0]["symbolSpecifications"]> {
   if (scalingMode !== "RISK_PERCENT") return null;
   if (!adapter.fetchSymbolSpecifications) return null;
-  const specs = await adapter.fetchSymbolSpecifications(accountId, symbol).catch(() => null);
+  const specs = await adapter
+    .fetchSymbolSpecifications(accountId, symbol)
+    .catch(() => null);
   if (!specs) return null;
   return {
     tickSize: specs.tickSize,
@@ -862,7 +1050,10 @@ function addWarmSymbol(target: Set<string>, symbol: string | null | undefined) {
   if (normalized) target.add(normalized);
 }
 
-function riskSpecificationWarmSymbols(follower: FollowerRow, strategy: StrategyRow): string[] {
+function riskSpecificationWarmSymbols(
+  follower: FollowerRow,
+  strategy: StrategyRow,
+): string[] {
   if (followerScalingMode(follower) !== "RISK_PERCENT") return [];
   const symbols = new Set<string>();
   for (const symbol of strategy.symbol_allowlist ?? []) {
@@ -871,7 +1062,9 @@ function riskSpecificationWarmSymbols(follower: FollowerRow, strategy: StrategyR
   for (const symbol of follower.symbol_allowlist ?? []) {
     addWarmSymbol(symbols, mapFollowerSymbol(symbol, follower.symbol_mapping));
   }
-  for (const [source, mapped] of Object.entries(follower.symbol_mapping ?? {})) {
+  for (const [source, mapped] of Object.entries(
+    follower.symbol_mapping ?? {},
+  )) {
     addWarmSymbol(symbols, mapped);
     addWarmSymbol(symbols, source);
   }
@@ -884,8 +1077,12 @@ function getStrategyHotRuntime(strategyId: string): StrategyHotRuntime | null {
   return cached.value;
 }
 
-async function loadActiveFollowersCached(strategyId: string): Promise<FollowerRow[]> {
-  return getRuntimeCached(followersRuntimeCache, strategyId, () => loadActiveFollowers(strategyId));
+async function loadActiveFollowersCached(
+  strategyId: string,
+): Promise<FollowerRow[]> {
+  return getRuntimeCached(followersRuntimeCache, strategyId, () =>
+    loadActiveFollowers(strategyId),
+  );
 }
 
 export async function warmCopyStrategyAccounts(
@@ -904,7 +1101,10 @@ export async function warmCopyStrategyAccounts(
     getCopyGlobalSettingsCached(),
     getSnapshotCached(masterAccountId).catch(() => null),
   ]);
-  const accountIds = [masterAccountId, ...followers.map((follower) => follower.follower_account_id)];
+  const accountIds = [
+    masterAccountId,
+    ...followers.map((follower) => follower.follower_account_id),
+  ];
   const followerRuntimeEntries = await Promise.all(
     followers.slice(0, 250).map(async (follower) => {
       const accountId = follower.follower_account_id;
@@ -941,9 +1141,16 @@ export async function warmCopyStrategyAccounts(
       })),
     );
     await Promise.all(
-      riskSpecWarmups.slice(0, 100).map(({ accountId, symbol }) =>
-        loadRiskSymbolSpecifications(adapter, accountId, symbol, "RISK_PERCENT").catch(() => null),
-      ),
+      riskSpecWarmups
+        .slice(0, 100)
+        .map(({ accountId, symbol }) =>
+          loadRiskSymbolSpecifications(
+            adapter,
+            accountId,
+            symbol,
+            "RISK_PERCENT",
+          ).catch(() => null),
+        ),
     );
   }
   strategyHotRuntimeCache.set(strategyId, {
@@ -963,12 +1170,16 @@ export async function warmCopyStrategyAccounts(
 
 type AccountRuleRuntime = Awaited<ReturnType<typeof getCopyAccountRule>>;
 
-async function loadAccountRuleMap(accountIds: string[]): Promise<Map<string, AccountRuleRuntime>> {
+async function loadAccountRuleMap(
+  accountIds: string[],
+): Promise<Map<string, AccountRuleRuntime>> {
   if (accountIds.length === 0) return new Map();
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("copy_account_rules")
-    .select("trading_account_id, copy_enabled, max_daily_loss_percent, max_drawdown_percent, max_copied_lots, max_open_copied_positions, stop_after_losses, symbol_allowlist, symbol_blocklist, paused_at, updated_at")
+    .select(
+      "trading_account_id, copy_enabled, max_daily_loss_percent, max_drawdown_percent, max_copied_lots, max_open_copied_positions, stop_after_losses, symbol_allowlist, symbol_blocklist, paused_at, updated_at",
+    )
     .in("trading_account_id", accountIds);
   return new Map(
     (data ?? []).map((row) => [
@@ -978,24 +1189,39 @@ async function loadAccountRuleMap(accountIds: string[]): Promise<Map<string, Acc
   );
 }
 
-async function loadAccountRuleMapCached(accountIds: string[]): Promise<Map<string, AccountRuleRuntime>> {
+async function loadAccountRuleMapCached(
+  accountIds: string[],
+): Promise<Map<string, AccountRuleRuntime>> {
   const key = [...new Set(accountIds)].sort().join(",");
-  return getRuntimeCached(accountRulesRuntimeCache, key, () => loadAccountRuleMap(accountIds));
+  return getRuntimeCached(accountRulesRuntimeCache, key, () =>
+    loadAccountRuleMap(accountIds),
+  );
 }
 
-async function loadAccountStatusMap(accountIds: string[]): Promise<Map<string, string>> {
+async function loadAccountStatusMap(
+  accountIds: string[],
+): Promise<Map<string, string>> {
   if (accountIds.length === 0) return new Map();
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("trading_accounts")
     .select("id, status")
     .in("id", accountIds);
-  return new Map((data ?? []).map((account) => [account.id as string, account.status as string]));
+  return new Map(
+    (data ?? []).map((account) => [
+      account.id as string,
+      account.status as string,
+    ]),
+  );
 }
 
-async function loadAccountStatusMapCached(accountIds: string[]): Promise<Map<string, string>> {
+async function loadAccountStatusMapCached(
+  accountIds: string[],
+): Promise<Map<string, string>> {
   const key = [...new Set(accountIds)].sort().join(",");
-  return getRuntimeCached(accountStatusRuntimeCache, key, () => loadAccountStatusMap(accountIds));
+  return getRuntimeCached(accountStatusRuntimeCache, key, () =>
+    loadAccountStatusMap(accountIds),
+  );
 }
 
 interface AccountRiskRuntime {
@@ -1005,7 +1231,10 @@ interface AccountRiskRuntime {
   consecutiveLosses: number;
 }
 
-async function loadAccountRiskRuntime(accountId: string, mode: "SIMULATION" | "LIVE"): Promise<AccountRiskRuntime> {
+async function loadAccountRiskRuntime(
+  accountId: string,
+  mode: "SIMULATION" | "LIVE",
+): Promise<AccountRiskRuntime> {
   const supabase = createAdminClient();
   const today = new Date();
   today.setUTCHours(0, 0, 0, 0);
@@ -1030,7 +1259,9 @@ async function loadAccountRiskRuntime(accountId: string, mode: "SIMULATION" | "L
   const trades = tradesResult.data ?? [];
   const dailyLoss = Math.abs(
     trades
-      .filter((trade) => trade.closed_at && trade.closed_at >= today.toISOString())
+      .filter(
+        (trade) => trade.closed_at && trade.closed_at >= today.toISOString(),
+      )
       .reduce((sum, trade) => sum + Math.min(0, Number(trade.profit)), 0),
   );
   let consecutiveLosses = 0;
@@ -1038,27 +1269,46 @@ async function loadAccountRiskRuntime(accountId: string, mode: "SIMULATION" | "L
     if (Number(trade.profit) >= 0) break;
     consecutiveLosses++;
   }
-  const opens = (logsResult.data ?? []).filter((log) => log.action === "OPEN").length;
-  const closes = (logsResult.data ?? []).filter((log) => log.action === "CLOSE").length;
+  const opens = (logsResult.data ?? []).filter(
+    (log) => log.action === "OPEN",
+  ).length;
+  const closes = (logsResult.data ?? []).filter(
+    (log) => log.action === "CLOSE",
+  ).length;
   return {
     currentDailyLossPercent:
-      snapshot && snapshot.balance > 0 ? (dailyLoss / snapshot.balance) * 100 : 0,
+      snapshot && snapshot.balance > 0
+        ? (dailyLoss / snapshot.balance) * 100
+        : 0,
     currentDrawdownPercent: snapshot?.drawdownPercent ?? 0,
     openCopiedTrades: Math.max(0, opens - closes),
     consecutiveLosses,
   };
 }
 
-async function loadAccountRiskRuntimeCached(accountId: string, mode: "SIMULATION" | "LIVE"): Promise<AccountRiskRuntime> {
-  return getRuntimeCached(accountRiskRuntimeCache, `${mode}:${accountId}`, () => loadAccountRiskRuntime(accountId, mode));
+async function loadAccountRiskRuntimeCached(
+  accountId: string,
+  mode: "SIMULATION" | "LIVE",
+): Promise<AccountRiskRuntime> {
+  return getRuntimeCached(accountRiskRuntimeCache, `${mode}:${accountId}`, () =>
+    loadAccountRiskRuntime(accountId, mode),
+  );
 }
 
-async function getRiskEnforcementStateCached(accountId: string): Promise<Awaited<ReturnType<typeof getRiskEnforcementState>>> {
-  return getRuntimeCached(generalRiskRuntimeCache, accountId, () => getRiskEnforcementState(accountId));
+async function getRiskEnforcementStateCached(
+  accountId: string,
+): Promise<Awaited<ReturnType<typeof getRiskEnforcementState>>> {
+  return getRuntimeCached(generalRiskRuntimeCache, accountId, () =>
+    getRiskEnforcementState(accountId),
+  );
 }
 
-function lowestRuntimeLimit(...values: Array<number | null | undefined>): number | null {
-  const numbers = values.filter((value): value is number => typeof value === "number");
+function lowestRuntimeLimit(
+  ...values: Array<number | null | undefined>
+): number | null {
+  const numbers = values.filter(
+    (value): value is number => typeof value === "number",
+  );
   return numbers.length > 0 ? Math.min(...numbers) : null;
 }
 
@@ -1070,7 +1320,12 @@ function buildRuleEvent(params: {
   followerId: string;
   mode: "SIMULATION" | "LIVE";
 }): Record<string, unknown> | null {
-  if (params.eligibility.eligible || !params.eligibility.ruleCode || !params.eligibility.reason) return null;
+  if (
+    params.eligibility.eligible ||
+    !params.eligibility.ruleCode ||
+    !params.eligibility.reason
+  )
+    return null;
   return {
     scope: params.eligibility.scope ?? "ACCOUNT",
     rule_code: params.eligibility.ruleCode,
@@ -1110,17 +1365,21 @@ interface SimResult {
   failed: number;
 }
 
-async function simulateOneEvent(eventRow: {
-  id: string;
-  strategy_id: string;
-  event_type: "OPEN" | "CLOSE" | "MODIFY";
-  symbol: string;
-  side: string | null;
-  volume: number | string | null;
-  open_price: number | string | null;
-  stop_loss: number | string | null;
-  event_time: string;
-}, strategy: StrategyRow, settings: CopyGlobalSettingsDto): Promise<SimResult> {
+async function simulateOneEvent(
+  eventRow: {
+    id: string;
+    strategy_id: string;
+    event_type: "OPEN" | "CLOSE" | "MODIFY";
+    symbol: string;
+    side: string | null;
+    volume: number | string | null;
+    open_price: number | string | null;
+    stop_loss: number | string | null;
+    event_time: string;
+  },
+  strategy: StrategyRow,
+  settings: CopyGlobalSettingsDto,
+): Promise<SimResult> {
   const supabase = createAdminClient();
   const adapter = createBrokerAdapter();
   const followers = await loadActiveFollowers(strategy.id);
@@ -1137,7 +1396,9 @@ async function simulateOneEvent(eventRow: {
     .from("trading_accounts")
     .select("id, status")
     .in("id", accountIds);
-  const statusByAccount = new Map((accountRows ?? []).map((a) => [a.id, a.status as string]));
+  const statusByAccount = new Map(
+    (accountRows ?? []).map((a) => [a.id, a.status as string]),
+  );
 
   const logs: Record<string, unknown>[] = [];
   const ruleEvents: Record<string, unknown>[] = [];
@@ -1145,10 +1406,14 @@ async function simulateOneEvent(eventRow: {
   for (const f of followers) {
     const followerSymbol = mapFollowerSymbol(eventRow.symbol, f.symbol_mapping);
     const followerSide = reverseFollowerSide(eventRow.side, f.reverse_copy);
-    const accountStatus = statusByAccount.get(f.follower_account_id) ?? "DISCONNECTED";
+    const accountStatus =
+      statusByAccount.get(f.follower_account_id) ?? "DISCONNECTED";
     const followerSnap = await getSnapshot(f.follower_account_id);
     const accountRule = accountRules.get(f.follower_account_id);
-    const risk = await loadAccountRiskRuntime(f.follower_account_id, "SIMULATION");
+    const risk = await loadAccountRiskRuntime(
+      f.follower_account_id,
+      "SIMULATION",
+    );
 
     const elig = evaluateFollowerEligibility({
       globalEmergencyStop: settings.emergencyStopEnabled || f.emergency_stop,
@@ -1162,14 +1427,25 @@ async function simulateOneEvent(eventRow: {
       // Execution can still use a mapped broker-specific follower symbol
       // such as EURUSD+ after this eligibility gate passes.
       symbol: eventRow.symbol,
-      symbolAllowlist: accountRule?.symbolAllowlist ?? f.symbol_allowlist ?? strategy.symbol_allowlist,
-      symbolBlocklist: accountRule?.symbolBlocklist ?? f.symbol_blocklist ?? strategy.symbol_blocklist,
+      symbolAllowlist:
+        accountRule?.symbolAllowlist ??
+        f.symbol_allowlist ??
+        strategy.symbol_allowlist,
+      symbolBlocklist:
+        accountRule?.symbolBlocklist ??
+        f.symbol_blocklist ??
+        strategy.symbol_blocklist,
       openCopiedTrades: risk.openCopiedTrades,
-      maxOpenTrades: lowestRuntimeLimit(f.max_open_trades, accountRule?.maxOpenCopiedPositions),
+      maxOpenTrades: lowestRuntimeLimit(
+        f.max_open_trades,
+        accountRule?.maxOpenCopiedPositions,
+      ),
       globalMaxOpenTrades: settings.maxCopiedOpenPositions,
       currentDailyLossPercent: risk.currentDailyLossPercent,
       maxDailyLossPercent: lowestRuntimeLimit(
-        f.max_daily_loss_percent === null ? null : Number(f.max_daily_loss_percent),
+        f.max_daily_loss_percent === null
+          ? null
+          : Number(f.max_daily_loss_percent),
         accountRule?.maxDailyLossPercent,
       ),
       globalMaxDailyLossPercent: settings.maxDailyLossPercent,
@@ -1193,21 +1469,38 @@ async function simulateOneEvent(eventRow: {
       side: followerSide,
     };
 
-    if (f.copy_new_trades_only && new Date(eventRow.event_time) < new Date(f.created_at)) {
+    if (
+      f.copy_new_trades_only &&
+      new Date(eventRow.event_time) < new Date(f.created_at)
+    ) {
       logs.push({
         ...baseLog,
         action: "SKIPPED",
         status: "SKIPPED",
         error_code: COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
-        error_message: "Trade predates this follower setup; new trades only is enabled.",
+        error_message:
+          "Trade predates this follower setup; new trades only is enabled.",
       });
       result.skipped++;
       continue;
     }
 
     if (!elig.eligible) {
-      logs.push({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.FOLLOWER_NOT_ELIGIBLE, error_message: elig.reason });
-      const ruleEvent = buildRuleEvent({ eligibility: elig, accountId: f.follower_account_id, strategyId: strategy.id, masterEventId: eventRow.id, followerId: f.id, mode: "SIMULATION" });
+      logs.push({
+        ...baseLog,
+        action: "SKIPPED",
+        status: "SKIPPED",
+        error_code: COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
+        error_message: elig.reason,
+      });
+      const ruleEvent = buildRuleEvent({
+        eligibility: elig,
+        accountId: f.follower_account_id,
+        strategyId: strategy.id,
+        masterEventId: eventRow.id,
+        followerId: f.id,
+        mode: "SIMULATION",
+      });
       if (ruleEvent) ruleEvents.push(ruleEvent);
       result.skipped++;
       continue;
@@ -1220,16 +1513,23 @@ async function simulateOneEvent(eventRow: {
         action: "SKIPPED",
         status: "SKIPPED",
         error_code: COPY_ERROR.COPY_INVALID_LOT,
-        error_message: "Copy sizing mode not configured. Save follower copy settings before live copying.",
+        error_message:
+          "Copy sizing mode not configured. Save follower copy settings before live copying.",
         calculated_lot: 0,
       });
       result.skipped++;
       continue;
     }
-    const symbolSpecifications = await loadRiskSymbolSpecifications(adapter, f.follower_account_id, followerSymbol, scalingMode);
+    const symbolSpecifications = await loadRiskSymbolSpecifications(
+      adapter,
+      f.follower_account_id,
+      followerSymbol,
+      scalingMode,
+    );
     const lot = calculateFollowerLot({
       masterLot,
-      entryPrice: eventRow.open_price === null ? null : Number(eventRow.open_price),
+      entryPrice:
+        eventRow.open_price === null ? null : Number(eventRow.open_price),
       stopLoss: eventRow.stop_loss === null ? null : Number(eventRow.stop_loss),
       masterEquity: masterSnap?.equity ?? null,
       masterBalance: masterSnap?.balance ?? null,
@@ -1246,7 +1546,14 @@ async function simulateOneEvent(eventRow: {
     });
 
     if (lot.lot <= 0) {
-      logs.push({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.COPY_INVALID_LOT, error_message: lot.reason, calculated_lot: 0 });
+      logs.push({
+        ...baseLog,
+        action: "SKIPPED",
+        status: "SKIPPED",
+        error_code: COPY_ERROR.COPY_INVALID_LOT,
+        error_message: lot.reason,
+        calculated_lot: 0,
+      });
       result.skipped++;
       continue;
     }
@@ -1266,21 +1573,41 @@ async function simulateOneEvent(eventRow: {
       maxSlippagePoints: settings.maxSlippagePoints,
     });
     if (!lotEligibility.eligible) {
-      logs.push({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.COPY_RISK_BLOCKED, error_message: lotEligibility.reason, calculated_lot: lot.lot });
-      const ruleEvent = buildRuleEvent({ eligibility: lotEligibility, accountId: f.follower_account_id, strategyId: strategy.id, masterEventId: eventRow.id, followerId: f.id, mode: "SIMULATION" });
+      logs.push({
+        ...baseLog,
+        action: "SKIPPED",
+        status: "SKIPPED",
+        error_code: COPY_ERROR.COPY_RISK_BLOCKED,
+        error_message: lotEligibility.reason,
+        calculated_lot: lot.lot,
+      });
+      const ruleEvent = buildRuleEvent({
+        eligibility: lotEligibility,
+        accountId: f.follower_account_id,
+        strategyId: strategy.id,
+        masterEventId: eventRow.id,
+        followerId: f.id,
+        mode: "SIMULATION",
+      });
       if (ruleEvent) ruleEvents.push(ruleEvent);
       result.skipped++;
       continue;
     }
 
-    logs.push({ ...baseLog, action: eventRow.event_type, status: "SUCCESS", calculated_lot: lot.lot });
+    logs.push({
+      ...baseLog,
+      action: eventRow.event_type,
+      status: "SUCCESS",
+      calculated_lot: lot.lot,
+    });
     result.success++;
   }
 
   result.simulated = logs.length;
   if (logs.length > 0) {
     const { error } = await supabase.from("copy_execution_logs").insert(logs);
-    if (error) throw new Error(`Failed to write simulation logs: ${error.message}`);
+    if (error)
+      throw new Error(`Failed to write simulation logs: ${error.message}`);
   }
   if (ruleEvents.length > 0) {
     await supabase.from("copy_rule_events").insert(ruleEvents);
@@ -1288,18 +1615,32 @@ async function simulateOneEvent(eventRow: {
   return result;
 }
 
-export async function simulateCopyForEvent(eventId: string, actorUserId: string | null): Promise<SimResult> {
+export async function simulateCopyForEvent(
+  eventId: string,
+  actorUserId: string | null,
+): Promise<SimResult> {
   const supabase = createAdminClient();
   const { data: ev } = await supabase
     .from("copy_master_events")
-    .select("id, strategy_id, event_type, master_trade_id, symbol, side, volume, previous_volume, open_price, stop_loss, take_profit, event_time")
+    .select(
+      "id, strategy_id, event_type, master_trade_id, symbol, side, volume, previous_volume, open_price, stop_loss, take_profit, event_time",
+    )
     .eq("id", eventId)
     .maybeSingle();
-  if (!ev) throw new CopyError(COPY_ERROR.COPY_DUPLICATE_EVENT, "Master event not found", 404);
+  if (!ev)
+    throw new CopyError(
+      COPY_ERROR.COPY_DUPLICATE_EVENT,
+      "Master event not found",
+      404,
+    );
 
   const strategy = await getStrategyRow(ev.strategy_id);
   const settings = await getCopyGlobalSettings();
-  const result = await simulateOneEvent(ev as Parameters<typeof simulateOneEvent>[0], strategy, settings);
+  const result = await simulateOneEvent(
+    ev as Parameters<typeof simulateOneEvent>[0],
+    strategy,
+    settings,
+  );
 
   await writeAuditLog({
     actorUserId,
@@ -1311,7 +1652,10 @@ export async function simulateCopyForEvent(eventId: string, actorUserId: string 
   return result;
 }
 
-export async function simulateStrategy(strategyId: string, actorUserId: string | null): Promise<SimResult> {
+export async function simulateStrategy(
+  strategyId: string,
+  actorUserId: string | null,
+): Promise<SimResult> {
   const strategy = await getStrategyRow(strategyId);
   const settings = await getCopyGlobalSettings();
   const supabase = createAdminClient();
@@ -1319,7 +1663,9 @@ export async function simulateStrategy(strategyId: string, actorUserId: string |
   // Simulate only events that have no SIMULATION log yet (avoid piling duplicates).
   const { data: events } = await supabase
     .from("copy_master_events")
-    .select("id, strategy_id, event_type, symbol, side, volume, open_price, stop_loss, event_time")
+    .select(
+      "id, strategy_id, event_type, symbol, side, volume, open_price, stop_loss, event_time",
+    )
     .eq("strategy_id", strategyId)
     .order("created_at", { ascending: false })
     .limit(100);
@@ -1330,12 +1676,18 @@ export async function simulateStrategy(strategyId: string, actorUserId: string |
     .eq("strategy_id", strategyId)
     .eq("mode", "SIMULATION")
     .limit(10000);
-  const simmedSet = new Set((simmed ?? []).map((l) => l.master_event_id as string));
+  const simmedSet = new Set(
+    (simmed ?? []).map((l) => l.master_event_id as string),
+  );
 
   const total: SimResult = { simulated: 0, success: 0, skipped: 0, failed: 0 };
   for (const ev of events ?? []) {
     if (simmedSet.has(ev.id)) continue;
-    const r = await simulateOneEvent(ev as Parameters<typeof simulateOneEvent>[0], strategy, settings);
+    const r = await simulateOneEvent(
+      ev as Parameters<typeof simulateOneEvent>[0],
+      strategy,
+      settings,
+    );
     total.simulated += r.simulated;
     total.success += r.success;
     total.skipped += r.skipped;
@@ -1373,7 +1725,9 @@ function mapLog(row: {
   created_at: string;
   copy_strategies: { name: string } | Array<{ name: string }> | null;
 }): CopyLogDto {
-  const strategy = Array.isArray(row.copy_strategies) ? row.copy_strategies[0] : row.copy_strategies;
+  const strategy = Array.isArray(row.copy_strategies)
+    ? row.copy_strategies[0]
+    : row.copy_strategies;
   return {
     id: row.id,
     strategyId: row.strategy_id,
@@ -1384,7 +1738,8 @@ function mapLog(row: {
     mode: row.mode,
     action: row.action,
     status: row.status,
-    calculatedLot: row.calculated_lot === null ? null : Number(row.calculated_lot),
+    calculatedLot:
+      row.calculated_lot === null ? null : Number(row.calculated_lot),
     executedLot: row.executed_lot === null ? null : Number(row.executed_lot),
     symbol: row.symbol,
     side: row.side,
@@ -1398,9 +1753,15 @@ function mapLog(row: {
 const LOG_COLS =
   "id, strategy_id, master_event_id, follower_account_id, trader_id, mode, action, status, calculated_lot, executed_lot, symbol, side, broker_order_id, error_code, error_message, created_at, copy_strategies(name)";
 
-export async function listCopyLogs(filters?: { strategyId?: string }): Promise<CopyLogDto[]> {
+export async function listCopyLogs(filters?: {
+  strategyId?: string;
+}): Promise<CopyLogDto[]> {
   const supabase = createAdminClient();
-  let query = supabase.from("copy_execution_logs").select(LOG_COLS).order("created_at", { ascending: false }).limit(500);
+  let query = supabase
+    .from("copy_execution_logs")
+    .select(LOG_COLS)
+    .order("created_at", { ascending: false })
+    .limit(500);
   if (filters?.strategyId) query = query.eq("strategy_id", filters.strategyId);
   const { data, error } = await query;
   if (error) throw new Error(`Failed to fetch copy logs: ${error.message}`);
@@ -1431,7 +1792,11 @@ export type LinkedEvent = {
   event_time: string;
 };
 
-async function inParallelBatches<T>(items: T[], size: number, task: (item: T) => Promise<void>) {
+async function inParallelBatches<T>(
+  items: T[],
+  size: number,
+  task: (item: T) => Promise<void>,
+) {
   for (let index = 0; index < items.length; index += size) {
     await Promise.all(items.slice(index, index + size).map(task));
   }
@@ -1441,23 +1806,37 @@ function followerExecutionBatchSize(): number {
   const fallback = getBrokerProviderId() === "api2trade" ? "24" : "8";
   return Math.max(
     1,
-    Number.parseInt(process.env.WSA_COPY_FOLLOWER_BATCH_SIZE ?? fallback, 10) || Number(fallback),
+    Number.parseInt(process.env.WSA_COPY_FOLLOWER_BATCH_SIZE ?? fallback, 10) ||
+      Number(fallback),
   );
 }
 
-async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapter, startedAt = Date.now()): Promise<ExecSummary> {
+async function executeLinkedCloseOrModify(
+  ev: LinkedEvent,
+  adapter: BrokerAdapter,
+  startedAt = Date.now(),
+): Promise<ExecSummary> {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("copy_trade_links")
-    .select("id, follower_id, follower_account_id, trader_id, follower_position_id, symbol, side, copied_volume, status")
+    .select(
+      "id, follower_id, follower_account_id, trader_id, follower_position_id, symbol, side, copied_volume, status",
+    )
     .eq("strategy_id", ev.strategy_id)
     .eq("master_trade_id", ev.master_trade_id)
     .eq("status", "OPEN")
     .limit(5000);
   const links = data ?? [];
-  const mappedLinks = links.filter((link) => Boolean(link.follower_position_id));
+  const mappedLinks = links.filter((link) =>
+    Boolean(link.follower_position_id),
+  );
   const unmappedLinks = links.filter((link) => !link.follower_position_id);
-  const summary: ExecSummary = { attempted: mappedLinks.length, success: 0, failed: 0, skipped: 0 };
+  const summary: ExecSummary = {
+    attempted: mappedLinks.length,
+    success: 0,
+    failed: 0,
+    skipped: 0,
+  };
 
   if (links.length === 0) {
     await supabase.from("copy_execution_logs").insert({
@@ -1471,7 +1850,8 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
       symbol: ev.symbol,
       side: ev.side,
       error_code: COPY_ERROR.COPY_MAPPING_NOT_FOUND,
-      error_message: "No copied trade mapping ticket found for this master trade; close/modify skipped.",
+      error_message:
+        "No copied trade mapping ticket found for this master trade; close/modify skipped.",
     });
     summary.skipped = 1;
     logCopyTiming(ev.id, "linked event skipped", startedAt, {
@@ -1482,25 +1862,32 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
   }
 
   if (unmappedLinks.length > 0) {
-    await supabase.from("copy_execution_logs").insert(unmappedLinks.map((link) => ({
-      strategy_id: ev.strategy_id,
-      master_event_id: ev.id,
-      follower_account_id: link.follower_account_id,
-      trader_id: link.trader_id,
-      mode: "LIVE",
-      action: "SKIPPED",
-      status: "SKIPPED",
-      symbol: link.symbol,
-      side: link.side,
-      error_code: COPY_ERROR.COPY_MAPPING_NOT_FOUND,
-      error_message: "Copied trade mapping exists but has no follower broker ticket; close/modify skipped.",
-    })));
+    await supabase.from("copy_execution_logs").insert(
+      unmappedLinks.map((link) => ({
+        strategy_id: ev.strategy_id,
+        master_event_id: ev.id,
+        follower_account_id: link.follower_account_id,
+        trader_id: link.trader_id,
+        mode: "LIVE",
+        action: "SKIPPED",
+        status: "SKIPPED",
+        symbol: link.symbol,
+        side: link.side,
+        error_code: COPY_ERROR.COPY_MAPPING_NOT_FOUND,
+        error_message:
+          "Copied trade mapping exists but has no follower broker ticket; close/modify skipped.",
+      })),
+    );
     summary.skipped += unmappedLinks.length;
   }
 
-  const hotPathWarmup = getBrokerProviderId() !== "api2trade" || process.env.WSA_COPY_HOT_PATH_WARMUP === "true";
+  const hotPathWarmup =
+    getBrokerProviderId() !== "api2trade" ||
+    process.env.WSA_COPY_HOT_PATH_WARMUP === "true";
   if (hotPathWarmup) {
-    await adapter.warmAccounts?.(mappedLinks.map((link) => link.follower_account_id));
+    await adapter.warmAccounts?.(
+      mappedLinks.map((link) => link.follower_account_id),
+    );
   }
   logCopyTiming(ev.id, "linked positions loaded", startedAt, {
     type: ev.event_type,
@@ -1512,169 +1899,333 @@ async function executeLinkedCloseOrModify(ev: LinkedEvent, adapter: BrokerAdapte
 
   const previousVolume = Number(ev.previous_volume ?? ev.volume ?? 0);
   const currentVolume = Number(ev.volume ?? previousVolume);
-  if (ev.event_type === "MODIFY" && previousVolume > 0 && currentVolume > previousVolume) {
+  if (
+    ev.event_type === "MODIFY" &&
+    previousVolume > 0 &&
+    currentVolume > previousVolume
+  ) {
     const byFollower = new Map<string, typeof mappedLinks>();
     for (const link of mappedLinks) {
       const group = byFollower.get(link.follower_account_id) ?? [];
       group.push(link);
       byFollower.set(link.follower_account_id, group);
     }
-    await inParallelBatches([...byFollower.values()], followerExecutionBatchSize(), async (group) => {
-      const first = group[0];
-      const additionalVolume = group.reduce((sum, link) => sum + Number(link.copied_volume), 0)
-        * ((currentVolume - previousVolume) / previousVolume);
-      if (additionalVolume <= 0) return;
-      const { data: existing } = await supabase.from("copy_trade_links").select("id, status").eq("source_event_id", ev.id).eq("follower_account_id", first.follower_account_id).maybeSingle();
-      if (existing && existing.status !== "FAILED") return;
-      let linkId = existing?.id as string | undefined;
-      if (!linkId) {
-        const { data: reservation, error } = await supabase.from("copy_trade_links").insert({
-          strategy_id: ev.strategy_id,
-          follower_id: first.follower_id,
-          follower_account_id: first.follower_account_id,
-          trader_id: first.trader_id,
-          master_trade_id: ev.master_trade_id,
-          source_event_id: ev.id,
-          symbol: first.symbol,
-          side: first.side,
-          copied_volume: additionalVolume,
-          status: "PENDING",
-        }).select("id").single();
-        if (error || !reservation) throw new Error(`Scale-in reservation failed: ${error?.message}`);
-        linkId = reservation.id;
-      }
-      try {
-        const result = await withBrokerExecutionSlot(() => adapter.openTrade({
-            accountId: first.follower_account_id,
-            symbol: first.symbol,
-            side: first.side === "SELL" ? "SELL" : "BUY",
-            volume: additionalVolume,
-            stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
-            takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
-            comment: `wsa:scale:${ev.strategy_id.slice(0, 8)}`,
-          }));
-        await supabase.from("copy_trade_links").update({
-          status: "OPEN",
-          follower_position_id: result.brokerPositionId ?? result.brokerOrderId ?? null,
-          follower_order_id: result.brokerOrderId ?? null,
-          copied_volume: result.executedVolume ?? additionalVolume,
-          opened_at: new Date().toISOString(),
-        }).eq("id", linkId);
-      } catch (error) {
-        const message = (error instanceof Error ? error.message : "Scale-in failed").slice(0, 400);
-        await supabase.from("copy_trade_links").update({ status: "FAILED", error_code: COPY_ERROR.COPY_PROVIDER_ERROR, error_message: message }).eq("id", linkId);
-        throw error;
-      }
-    });
+    await inParallelBatches(
+      [...byFollower.values()],
+      followerExecutionBatchSize(),
+      async (group) => {
+        const first = group[0];
+        const additionalVolume =
+          group.reduce((sum, link) => sum + Number(link.copied_volume), 0) *
+          ((currentVolume - previousVolume) / previousVolume);
+        if (additionalVolume <= 0) return;
+        const { data: existing } = await supabase
+          .from("copy_trade_links")
+          .select("id, status")
+          .eq("source_event_id", ev.id)
+          .eq("follower_account_id", first.follower_account_id)
+          .maybeSingle();
+        if (existing && existing.status !== "FAILED") return;
+        let linkId = existing?.id as string | undefined;
+        if (!linkId) {
+          const { data: reservation, error } = await supabase
+            .from("copy_trade_links")
+            .insert({
+              strategy_id: ev.strategy_id,
+              follower_id: first.follower_id,
+              follower_account_id: first.follower_account_id,
+              trader_id: first.trader_id,
+              master_trade_id: ev.master_trade_id,
+              source_event_id: ev.id,
+              symbol: first.symbol,
+              side: first.side,
+              copied_volume: additionalVolume,
+              status: "PENDING",
+            })
+            .select("id")
+            .single();
+          if (error || !reservation)
+            throw new Error(`Scale-in reservation failed: ${error?.message}`);
+          linkId = reservation.id;
+        }
+        try {
+          const result = await withBrokerExecutionSlot(() =>
+            adapter.openTrade({
+              accountId: first.follower_account_id,
+              symbol: first.symbol,
+              side: first.side === "SELL" ? "SELL" : "BUY",
+              volume: additionalVolume,
+              stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
+              takeProfit:
+                ev.take_profit === null ? null : Number(ev.take_profit),
+              comment: `wsa:scale:${ev.strategy_id.slice(0, 8)}`,
+            }),
+          );
+          await supabase
+            .from("copy_trade_links")
+            .update({
+              status: "OPEN",
+              follower_position_id:
+                result.brokerPositionId ?? result.brokerOrderId ?? null,
+              follower_order_id: result.brokerOrderId ?? null,
+              copied_volume: result.executedVolume ?? additionalVolume,
+              opened_at: new Date().toISOString(),
+            })
+            .eq("id", linkId);
+        } catch (error) {
+          const message = (
+            error instanceof Error ? error.message : "Scale-in failed"
+          ).slice(0, 400);
+          await supabase
+            .from("copy_trade_links")
+            .update({
+              status: "FAILED",
+              error_code: COPY_ERROR.COPY_PROVIDER_ERROR,
+              error_message: message,
+            })
+            .eq("id", linkId);
+          throw error;
+        }
+      },
+    );
   }
 
   if (ev.event_type === "CLOSE" && mappedLinks.length > 0) {
     const { error: closingError } = await supabase
       .from("copy_trade_links")
       .update({ status: "CLOSING" })
-      .in("id", mappedLinks.map((link) => link.id))
+      .in(
+        "id",
+        mappedLinks.map((link) => link.id),
+      )
       .eq("status", "OPEN");
     if (closingError) {
-      throw new Error(`Copied trades could not be reserved for close: ${closingError.message}`);
+      throw new Error(
+        `Copied trades could not be reserved for close: ${closingError.message}`,
+      );
     }
   }
 
-  await inParallelBatches(mappedLinks, followerExecutionBatchSize(), async (link) => {
-    const baseLog = {
-      strategy_id: ev.strategy_id,
-      master_event_id: ev.id,
-      follower_account_id: link.follower_account_id,
-      trader_id: link.trader_id,
-      mode: "LIVE" as const,
-      symbol: link.symbol,
-      side: link.side,
-    };
-    try {
-      if (ev.event_type === "CLOSE") {
-        const brokerStartedAt = Date.now();
-        const result = await withBrokerExecutionSlot(() => adapter.closeTrade({
-            accountId: link.follower_account_id,
-            brokerPositionId: link.follower_position_id,
-            comment: `wsa:close:${ev.strategy_id.slice(0, 8)}`,
-          }));
-        logCopyTiming(ev.id, "follower close broker response", startedAt, {
-          followerAccountId: link.follower_account_id,
-          brokerMs: Date.now() - brokerStartedAt,
-        });
-        await Promise.all([
-          supabase.from("copy_trade_links").update({ status: "CLOSED", closed_at: new Date().toISOString(), error_code: null, error_message: null }).eq("id", link.id),
-          supabase.from("copy_execution_logs").insert({ ...baseLog, action: "CLOSE", status: "SUCCESS", executed_lot: Number(link.copied_volume), broker_order_id: result.brokerOrderId ?? null, raw_response: result.rawResponse ?? null }),
-        ]);
-      } else {
-        if (previousVolume > 0 && currentVolume < previousVolume) {
-          const amount = Number(link.copied_volume) * ((previousVolume - currentVolume) / previousVolume);
-          if (amount > 0) {
-            await withBrokerExecutionSlot(() => adapter.closeTrade({ accountId: link.follower_account_id, brokerPositionId: link.follower_position_id, volume: amount, comment: `wsa:partial:${ev.strategy_id.slice(0, 8)}` }));
-            await supabase.from("copy_trade_links").update({ copied_volume: Math.max(0, Number(link.copied_volume) - amount) }).eq("id", link.id);
+  await inParallelBatches(
+    mappedLinks,
+    followerExecutionBatchSize(),
+    async (link) => {
+      const baseLog = {
+        strategy_id: ev.strategy_id,
+        master_event_id: ev.id,
+        follower_account_id: link.follower_account_id,
+        trader_id: link.trader_id,
+        mode: "LIVE" as const,
+        symbol: link.symbol,
+        side: link.side,
+      };
+      try {
+        if (ev.event_type === "CLOSE") {
+          const brokerStartedAt = Date.now();
+          const result = await withBrokerExecutionSlot(() =>
+            adapter.closeTrade({
+              accountId: link.follower_account_id,
+              brokerPositionId: link.follower_position_id,
+              comment: `wsa:close:${ev.strategy_id.slice(0, 8)}`,
+            }),
+          );
+          logCopyTiming(ev.id, "follower close broker response", startedAt, {
+            followerAccountId: link.follower_account_id,
+            brokerMs: Date.now() - brokerStartedAt,
+          });
+          await Promise.all([
+            supabase
+              .from("copy_trade_links")
+              .update({
+                status: "CLOSED",
+                closed_at: new Date().toISOString(),
+                error_code: null,
+                error_message: null,
+              })
+              .eq("id", link.id),
+            supabase
+              .from("copy_execution_logs")
+              .insert({
+                ...baseLog,
+                action: "CLOSE",
+                status: "SUCCESS",
+                executed_lot: Number(link.copied_volume),
+                broker_order_id: result.brokerOrderId ?? null,
+                raw_response: result.rawResponse ?? null,
+              }),
+          ]);
+        } else {
+          if (previousVolume > 0 && currentVolume < previousVolume) {
+            const amount =
+              Number(link.copied_volume) *
+              ((previousVolume - currentVolume) / previousVolume);
+            if (amount > 0) {
+              await withBrokerExecutionSlot(() =>
+                adapter.closeTrade({
+                  accountId: link.follower_account_id,
+                  brokerPositionId: link.follower_position_id,
+                  volume: amount,
+                  comment: `wsa:partial:${ev.strategy_id.slice(0, 8)}`,
+                }),
+              );
+              await supabase
+                .from("copy_trade_links")
+                .update({
+                  copied_volume: Math.max(
+                    0,
+                    Number(link.copied_volume) - amount,
+                  ),
+                })
+                .eq("id", link.id);
+            }
           }
+          const result = await withBrokerExecutionSlot(() =>
+            adapter.modifyTrade({
+              accountId: link.follower_account_id,
+              brokerPositionId: link.follower_position_id,
+              stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
+              takeProfit:
+                ev.take_profit === null ? null : Number(ev.take_profit),
+            }),
+          );
+          await supabase
+            .from("copy_execution_logs")
+            .insert({
+              ...baseLog,
+              action: "MODIFY",
+              status: "SUCCESS",
+              broker_order_id: result.brokerOrderId ?? null,
+              raw_response: result.rawResponse ?? null,
+            });
         }
-        const result = await withBrokerExecutionSlot(() => adapter.modifyTrade({
-            accountId: link.follower_account_id,
-            brokerPositionId: link.follower_position_id,
-            stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
-            takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
-          }));
-        await supabase.from("copy_execution_logs").insert({ ...baseLog, action: "MODIFY", status: "SUCCESS", broker_order_id: result.brokerOrderId ?? null, raw_response: result.rawResponse ?? null });
+        summary.success++;
+      } catch (error) {
+        const code =
+          error instanceof BrokerExecutionError
+            ? error.code
+            : COPY_ERROR.COPY_PROVIDER_ERROR;
+        const message = (
+          error instanceof Error ? error.message : "Broker execution failed"
+        ).slice(0, 400);
+        await Promise.all([
+          supabase
+            .from("copy_trade_links")
+            .update({
+              status: ev.event_type === "CLOSE" ? "OPEN" : link.status,
+              error_code: code,
+              error_message: message,
+            })
+            .eq("id", link.id),
+          supabase
+            .from("copy_execution_logs")
+            .insert({
+              ...baseLog,
+              action: ev.event_type,
+              status: "FAILED",
+              error_code: code,
+              error_message: message,
+            }),
+        ]);
+        summary.failed++;
       }
-      summary.success++;
-    } catch (error) {
-      const code = error instanceof BrokerExecutionError ? error.code : COPY_ERROR.COPY_PROVIDER_ERROR;
-      const message = (error instanceof Error ? error.message : "Broker execution failed").slice(0, 400);
-      await Promise.all([
-        supabase.from("copy_trade_links").update({ status: ev.event_type === "CLOSE" ? "OPEN" : link.status, error_code: code, error_message: message }).eq("id", link.id),
-        supabase.from("copy_execution_logs").insert({ ...baseLog, action: ev.event_type, status: "FAILED", error_code: code, error_message: message }),
-      ]);
-      summary.failed++;
-    }
-  });
+    },
+  );
   logCopyTiming(ev.id, "linked event complete", startedAt, summary);
   return summary;
 }
 
-export async function closeAllStrategyPositions(strategyId: string): Promise<ExecSummary> {
+export async function closeAllStrategyPositions(
+  strategyId: string,
+): Promise<ExecSummary> {
   const supabase = createAdminClient();
   const adapter = createBrokerAdapter();
   if (!adapter.executionAvailable()) {
-    throw new CopyError(COPY_ERROR.COPY_EXECUTION_NOT_CONFIGURED, "Live broker execution is disabled.", 501);
+    throw new CopyError(
+      COPY_ERROR.COPY_EXECUTION_NOT_CONFIGURED,
+      "Live broker execution is disabled.",
+      501,
+    );
   }
   const [{ data: strategy }, { data: links }] = await Promise.all([
-    supabase.from("copy_strategies").select("id, master_account_id").eq("id", strategyId).maybeSingle(),
-    supabase.from("copy_trade_links").select("master_trade_id, symbol, side").eq("strategy_id", strategyId).eq("status", "OPEN").limit(5000),
+    supabase
+      .from("copy_strategies")
+      .select("id, master_account_id")
+      .eq("id", strategyId)
+      .maybeSingle(),
+    supabase
+      .from("copy_trade_links")
+      .select("master_trade_id, symbol, side")
+      .eq("strategy_id", strategyId)
+      .eq("status", "OPEN")
+      .limit(5000),
   ]);
-  if (!strategy) throw new CopyError(COPY_ERROR.COPY_STRATEGY_NOT_FOUND, "Strategy not found", 404);
+  if (!strategy)
+    throw new CopyError(
+      COPY_ERROR.COPY_STRATEGY_NOT_FOUND,
+      "Strategy not found",
+      404,
+    );
 
-  const unique = new Map((links ?? []).map((link) => [link.master_trade_id as string, link]));
-  const total: ExecSummary = { attempted: 0, success: 0, failed: 0, skipped: 0 };
+  const unique = new Map(
+    (links ?? []).map((link) => [link.master_trade_id as string, link]),
+  );
+  const total: ExecSummary = {
+    attempted: 0,
+    success: 0,
+    failed: 0,
+    skipped: 0,
+  };
   for (const [masterTradeId, link] of unique) {
     const dedupeKey = `${strategyId}:${masterTradeId}:ARCHIVE_CLOSE`;
-    const { data: event, error } = await supabase.from("copy_master_events").upsert({
-      strategy_id: strategyId,
-      master_account_id: strategy.master_account_id,
-      event_type: "CLOSE",
-      master_trade_id: masterTradeId,
-      symbol: link.symbol,
-      side: link.side,
-      event_time: new Date().toISOString(),
-      dedupe_key: dedupeKey,
-      source: "WSA_ENGINE",
-      raw_payload: { reason: "STRATEGY_ARCHIVED" },
-    }, { onConflict: "dedupe_key" }).select("id, strategy_id, event_type, master_trade_id, symbol, side, volume, previous_volume, open_price, stop_loss, take_profit, event_time").single();
-    if (error || !event) throw new Error(`Could not queue strategy close: ${error?.message}`);
-    const result = await executeLinkedCloseOrModify(event as LinkedEvent, adapter);
+    const { data: event, error } = await supabase
+      .from("copy_master_events")
+      .upsert(
+        {
+          strategy_id: strategyId,
+          master_account_id: strategy.master_account_id,
+          event_type: "CLOSE",
+          master_trade_id: masterTradeId,
+          symbol: link.symbol,
+          side: link.side,
+          event_time: new Date().toISOString(),
+          dedupe_key: dedupeKey,
+          source: "WSA_ENGINE",
+          raw_payload: { reason: "STRATEGY_ARCHIVED" },
+        },
+        { onConflict: "dedupe_key" },
+      )
+      .select(
+        "id, strategy_id, event_type, master_trade_id, symbol, side, volume, previous_volume, open_price, stop_loss, take_profit, event_time",
+      )
+      .single();
+    if (error || !event)
+      throw new Error(`Could not queue strategy close: ${error?.message}`);
+    const result = await executeLinkedCloseOrModify(
+      event as LinkedEvent,
+      adapter,
+    );
     total.attempted += result.attempted;
     total.success += result.success;
     total.failed += result.failed;
     total.skipped += result.skipped;
   }
   if (total.failed === 0) {
-    await supabase.from("copy_strategies").update({ status: "ARCHIVED", engine_status: "ARCHIVED", engine_error: null }).eq("id", strategyId);
+    await supabase
+      .from("copy_strategies")
+      .update({
+        status: "ARCHIVED",
+        engine_status: "ARCHIVED",
+        engine_error: null,
+      })
+      .eq("id", strategyId);
   } else {
-    await supabase.from("copy_strategies").update({ engine_status: "ERROR", engine_error: `${total.failed} follower position(s) could not be closed.` }).eq("id", strategyId);
+    await supabase
+      .from("copy_strategies")
+      .update({
+        engine_status: "ERROR",
+        engine_error: `${total.failed} follower position(s) could not be closed.`,
+      })
+      .eq("id", strategyId);
   }
   return total;
 }
@@ -1686,14 +2237,24 @@ export async function executeCopyForEvent(
 ): Promise<ExecSummary> {
   const startedAt = startedAtOverride ?? Date.now();
   const supabase = createAdminClient();
-  const ev = typeof eventId === "string"
-    ? (await supabase
-        .from("copy_master_events")
-        .select("id, strategy_id, event_type, master_trade_id, symbol, side, volume, previous_volume, open_price, stop_loss, take_profit, event_time")
-        .eq("id", eventId)
-        .maybeSingle()).data
-    : eventId;
-  if (!ev) throw new CopyError(COPY_ERROR.COPY_DUPLICATE_EVENT, "Master event not found", 404);
+  const ev =
+    typeof eventId === "string"
+      ? (
+          await supabase
+            .from("copy_master_events")
+            .select(
+              "id, strategy_id, event_type, master_trade_id, symbol, side, volume, previous_volume, open_price, stop_loss, take_profit, event_time",
+            )
+            .eq("id", eventId)
+            .maybeSingle()
+        ).data
+      : eventId;
+  if (!ev)
+    throw new CopyError(
+      COPY_ERROR.COPY_DUPLICATE_EVENT,
+      "Master event not found",
+      404,
+    );
   logCopyTiming(ev.id, "master event loaded", startedAt, {
     type: ev.event_type,
     symbol: ev.symbol,
@@ -1735,13 +2296,25 @@ export async function executeCopyForEvent(
       masterEventId: ev.id,
       mode: "LIVE",
     });
-    throw new CopyError(COPY_ERROR.COPY_EMERGENCY_STOP, "Emergency stop is enabled — live copy blocked.", 423);
+    throw new CopyError(
+      COPY_ERROR.COPY_EMERGENCY_STOP,
+      "Emergency stop is enabled — live copy blocked.",
+      423,
+    );
   }
   if (!settings.liveCopyEnabled) {
-    throw new CopyError(COPY_ERROR.COPY_LIVE_DISABLED, "Global live copy is disabled.", 403);
+    throw new CopyError(
+      COPY_ERROR.COPY_LIVE_DISABLED,
+      "Global live copy is disabled.",
+      403,
+    );
   }
   if (strategy.mode !== "LIVE" || !strategy.live_enabled) {
-    throw new CopyError(COPY_ERROR.COPY_LIVE_DISABLED, "This strategy is not live-enabled.", 403);
+    throw new CopyError(
+      COPY_ERROR.COPY_LIVE_DISABLED,
+      "This strategy is not live-enabled.",
+      403,
+    );
   }
 
   void writeAuditLog({
@@ -1767,24 +2340,40 @@ export async function executeCopyForEvent(
   // OPEN creates the durable master-to-follower position mapping. CLOSE and
   // MODIFY reuse that mapping to operate on the follower's broker position.
   if (ev.event_type !== "OPEN") {
-    logCopyTiming(ev.id, "close/modify routing", startedAt, { type: ev.event_type });
+    logCopyTiming(ev.id, "close/modify routing", startedAt, {
+      type: ev.event_type,
+    });
     return executeLinkedCloseOrModify(ev as LinkedEvent, adapter, startedAt);
   }
 
-  const summary: ExecSummary = { attempted: 0, success: 0, failed: 0, skipped: 0 };
+  const summary: ExecSummary = {
+    attempted: 0,
+    success: 0,
+    failed: 0,
+    skipped: 0,
+  };
   if (followers.length === 0) return summary;
-  logCopyTiming(ev.id, "followers loaded", startedAt, { followers: followers.length });
+  logCopyTiming(ev.id, "followers loaded", startedAt, {
+    followers: followers.length,
+  });
 
   const masterLot = ev.volume === null ? 0 : Number(ev.volume);
   const accountIds = followers.map((f) => f.follower_account_id);
-  const [masterSnap, accountRules, statusByAccount] = usingHotRuntime && hotRuntime
-    ? [hotRuntime.masterSnap, hotRuntime.accountRules, hotRuntime.statusByAccount]
-    : await Promise.all([
-        getSnapshotCached(strategy.master_account_id),
-        loadAccountRuleMapCached(accountIds),
-        loadAccountStatusMapCached(accountIds),
-      ]);
-  const hotPathWarmup = getBrokerProviderId() !== "api2trade" || process.env.WSA_COPY_HOT_PATH_WARMUP === "true";
+  const [masterSnap, accountRules, statusByAccount] =
+    usingHotRuntime && hotRuntime
+      ? [
+          hotRuntime.masterSnap,
+          hotRuntime.accountRules,
+          hotRuntime.statusByAccount,
+        ]
+      : await Promise.all([
+          getSnapshotCached(strategy.master_account_id),
+          loadAccountRuleMapCached(accountIds),
+          loadAccountStatusMapCached(accountIds),
+        ]);
+  const hotPathWarmup =
+    getBrokerProviderId() !== "api2trade" ||
+    process.env.WSA_COPY_HOT_PATH_WARMUP === "true";
   if (hotPathWarmup) {
     await adapter.warmAccounts?.([strategy.master_account_id, ...accountIds]);
   }
@@ -1799,8 +2388,12 @@ export async function executeCopyForEvent(
     f: Awaited<ReturnType<typeof loadActiveFollowers>>[number],
   ) => {
     const followerStartedAt = Date.now();
-    const symbolCandidates = followerSymbolCandidates(ev.symbol, f.symbol_mapping);
-    const followerSymbol = symbolCandidates[0] ?? mapFollowerSymbol(ev.symbol, f.symbol_mapping);
+    const symbolCandidates = followerSymbolCandidates(
+      ev.symbol,
+      f.symbol_mapping,
+    );
+    const followerSymbol =
+      symbolCandidates[0] ?? mapFollowerSymbol(ev.symbol, f.symbol_mapping);
     const followerSide = reverseFollowerSide(ev.side, f.reverse_copy);
     const baseLog = {
       strategy_id: strategy.id,
@@ -1812,32 +2405,44 @@ export async function executeCopyForEvent(
       side: followerSide,
     };
 
-    if (f.copy_new_trades_only && new Date(ev.event_time) < new Date(f.created_at)) {
+    if (
+      f.copy_new_trades_only &&
+      new Date(ev.event_time) < new Date(f.created_at)
+    ) {
       await supabase.from("copy_execution_logs").insert({
         ...baseLog,
         action: "SKIPPED",
         status: "SKIPPED",
         error_code: COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
-        error_message: "Trade predates this follower setup; new trades only is enabled.",
+        error_message:
+          "Trade predates this follower setup; new trades only is enabled.",
       });
       summary.skipped++;
       return;
     }
 
-    const accountStatus = statusByAccount.get(f.follower_account_id) ?? "DISCONNECTED";
+    const accountStatus =
+      statusByAccount.get(f.follower_account_id) ?? "DISCONNECTED";
     const accountRule = accountRules.get(f.follower_account_id);
-    const hotFollowerRuntime = hotRuntime?.followerRuntimeByAccount.get(f.follower_account_id);
+    const hotFollowerRuntime = hotRuntime?.followerRuntimeByAccount.get(
+      f.follower_account_id,
+    );
     const [generalRiskState, risk, followerSnap] = hotFollowerRuntime
-      ? [hotFollowerRuntime.generalRiskState, hotFollowerRuntime.risk, hotFollowerRuntime.snapshot]
+      ? [
+          hotFollowerRuntime.generalRiskState,
+          hotFollowerRuntime.risk,
+          hotFollowerRuntime.snapshot,
+        ]
       : await Promise.all([
           getRiskEnforcementStateCached(f.follower_account_id),
           loadAccountRiskRuntimeCached(f.follower_account_id, "LIVE"),
           getSnapshotCached(f.follower_account_id),
         ]);
     if (generalRiskState?.blockedNewTrades) {
-      const reason = generalRiskState.breachedRules.length > 0
-        ? `General risk rule blocked new copied trades: ${generalRiskState.breachedRules.map((rule) => rule.name).join(", ")}.`
-        : "General risk controls blocked new copied trades.";
+      const reason =
+        generalRiskState.breachedRules.length > 0
+          ? `General risk rule blocked new copied trades: ${generalRiskState.breachedRules.map((rule) => rule.name).join(", ")}.`
+          : "General risk controls blocked new copied trades.";
       await Promise.all([
         supabase.from("copy_execution_logs").insert({
           ...baseLog,
@@ -1876,14 +2481,25 @@ export async function executeCopyForEvent(
       // Execution can still use a mapped broker-specific follower symbol
       // such as EURUSD+ after this eligibility gate passes.
       symbol: ev.symbol,
-      symbolAllowlist: accountRule?.symbolAllowlist ?? f.symbol_allowlist ?? strategy.symbol_allowlist,
-      symbolBlocklist: accountRule?.symbolBlocklist ?? f.symbol_blocklist ?? strategy.symbol_blocklist,
+      symbolAllowlist:
+        accountRule?.symbolAllowlist ??
+        f.symbol_allowlist ??
+        strategy.symbol_allowlist,
+      symbolBlocklist:
+        accountRule?.symbolBlocklist ??
+        f.symbol_blocklist ??
+        strategy.symbol_blocklist,
       openCopiedTrades: risk.openCopiedTrades,
-      maxOpenTrades: lowestRuntimeLimit(f.max_open_trades, accountRule?.maxOpenCopiedPositions),
+      maxOpenTrades: lowestRuntimeLimit(
+        f.max_open_trades,
+        accountRule?.maxOpenCopiedPositions,
+      ),
       globalMaxOpenTrades: settings.maxCopiedOpenPositions,
       currentDailyLossPercent: risk.currentDailyLossPercent,
       maxDailyLossPercent: lowestRuntimeLimit(
-        f.max_daily_loss_percent === null ? null : Number(f.max_daily_loss_percent),
+        f.max_daily_loss_percent === null
+          ? null
+          : Number(f.max_daily_loss_percent),
         accountRule?.maxDailyLossPercent,
       ),
       globalMaxDailyLossPercent: settings.maxDailyLossPercent,
@@ -1913,8 +2529,23 @@ export async function executeCopyForEvent(
           eligibilityMessage = `Max open copied trades reached. This master ${followerSide} is a new hedged position, not a close. Close the original master position to close its follower copy.`;
         }
       }
-      await supabase.from("copy_execution_logs").insert({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.FOLLOWER_NOT_ELIGIBLE, error_message: eligibilityMessage });
-      const ruleEvent = buildRuleEvent({ eligibility: elig, accountId: f.follower_account_id, strategyId: strategy.id, masterEventId: ev.id, followerId: f.id, mode: "LIVE" });
+      await supabase
+        .from("copy_execution_logs")
+        .insert({
+          ...baseLog,
+          action: "SKIPPED",
+          status: "SKIPPED",
+          error_code: COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
+          error_message: eligibilityMessage,
+        });
+      const ruleEvent = buildRuleEvent({
+        eligibility: elig,
+        accountId: f.follower_account_id,
+        strategyId: strategy.id,
+        masterEventId: ev.id,
+        followerId: f.id,
+        mode: "LIVE",
+      });
       if (ruleEvent) await supabase.from("copy_rule_events").insert(ruleEvent);
       summary.skipped++;
       return;
@@ -1927,13 +2558,19 @@ export async function executeCopyForEvent(
         action: "SKIPPED",
         status: "SKIPPED",
         error_code: COPY_ERROR.COPY_INVALID_LOT,
-        error_message: "Copy sizing mode not configured. Save follower copy settings before live copying.",
+        error_message:
+          "Copy sizing mode not configured. Save follower copy settings before live copying.",
         calculated_lot: 0,
       });
       summary.skipped++;
       return;
     }
-    const symbolSpecifications = await loadRiskSymbolSpecifications(adapter, f.follower_account_id, followerSymbol, scalingMode);
+    const symbolSpecifications = await loadRiskSymbolSpecifications(
+      adapter,
+      f.follower_account_id,
+      followerSymbol,
+      scalingMode,
+    );
     const lot = calculateFollowerLot({
       masterLot,
       entryPrice: ev.open_price === null ? null : Number(ev.open_price),
@@ -1952,7 +2589,16 @@ export async function executeCopyForEvent(
       symbolSpecifications,
     });
     if (lot.lot <= 0) {
-      await supabase.from("copy_execution_logs").insert({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.COPY_INVALID_LOT, error_message: lot.reason, calculated_lot: 0 });
+      await supabase
+        .from("copy_execution_logs")
+        .insert({
+          ...baseLog,
+          action: "SKIPPED",
+          status: "SKIPPED",
+          error_code: COPY_ERROR.COPY_INVALID_LOT,
+          error_message: lot.reason,
+          calculated_lot: 0,
+        });
       summary.skipped++;
       return;
     }
@@ -1973,8 +2619,24 @@ export async function executeCopyForEvent(
       enforceSlippageAvailability: true,
     });
     if (!lotEligibility.eligible) {
-      await supabase.from("copy_execution_logs").insert({ ...baseLog, action: "SKIPPED", status: "SKIPPED", error_code: COPY_ERROR.COPY_RISK_BLOCKED, error_message: lotEligibility.reason, calculated_lot: lot.lot });
-      const ruleEvent = buildRuleEvent({ eligibility: lotEligibility, accountId: f.follower_account_id, strategyId: strategy.id, masterEventId: ev.id, followerId: f.id, mode: "LIVE" });
+      await supabase
+        .from("copy_execution_logs")
+        .insert({
+          ...baseLog,
+          action: "SKIPPED",
+          status: "SKIPPED",
+          error_code: COPY_ERROR.COPY_RISK_BLOCKED,
+          error_message: lotEligibility.reason,
+          calculated_lot: lot.lot,
+        });
+      const ruleEvent = buildRuleEvent({
+        eligibility: lotEligibility,
+        accountId: f.follower_account_id,
+        strategyId: strategy.id,
+        masterEventId: ev.id,
+        followerId: f.id,
+        mode: "LIVE",
+      });
       if (ruleEvent) await supabase.from("copy_rule_events").insert(ruleEvent);
       summary.skipped++;
       return;
@@ -1984,18 +2646,22 @@ export async function executeCopyForEvent(
     //    failure does not abort the others. ──
     summary.attempted++;
     try {
-      const { data: reserved, error: reserveError } = await supabase.from("copy_trade_links").insert({
-        strategy_id: strategy.id,
-        follower_id: f.id,
-        follower_account_id: f.follower_account_id,
-        trader_id: f.trader_id,
-        master_trade_id: ev.master_trade_id,
-        source_event_id: ev.id,
-        symbol: followerSymbol,
-        side: followerSide === "SELL" ? "SELL" : "BUY",
-        copied_volume: lot.lot,
-        status: "PENDING",
-      }).select("id").single();
+      const { data: reserved, error: reserveError } = await supabase
+        .from("copy_trade_links")
+        .insert({
+          strategy_id: strategy.id,
+          follower_id: f.id,
+          follower_account_id: f.follower_account_id,
+          trader_id: f.trader_id,
+          master_trade_id: ev.master_trade_id,
+          source_event_id: ev.id,
+          symbol: followerSymbol,
+          side: followerSide === "SELL" ? "SELL" : "BUY",
+          copied_volume: lot.lot,
+          status: "PENDING",
+        })
+        .select("id")
+        .single();
 
       let linkId = reserved?.id as string | undefined;
       if (reserveError || !linkId) {
@@ -2013,7 +2679,10 @@ export async function executeCopyForEvent(
           return;
         }
         linkId = existing.id as string;
-        await supabase.from("copy_trade_links").update({ status: "PENDING", error_code: null, error_message: null }).eq("id", linkId);
+        await supabase
+          .from("copy_trade_links")
+          .update({ status: "PENDING", error_code: null, error_message: null })
+          .eq("id", linkId);
       }
       logCopyTiming(ev.id, "follower broker submit", startedAt, {
         followerAccountId: f.follower_account_id,
@@ -2028,29 +2697,36 @@ export async function executeCopyForEvent(
         followerPrepMs: Date.now() - followerStartedAt,
         ultraFast: false,
       });
-      markExecutionPriority([strategy.master_account_id, f.follower_account_id]);
+      markExecutionPriority([
+        strategy.master_account_id,
+        f.follower_account_id,
+      ]);
       const brokerStartedAt = Date.now();
       let executedSymbol = followerSymbol;
       let result = null as Awaited<ReturnType<typeof adapter.openTrade>> | null;
       let lastOpenError: unknown = null;
       for (const candidateSymbol of symbolCandidates) {
         try {
-          result = await withBrokerExecutionSlot(() => adapter.openTrade({
+          result = await withBrokerExecutionSlot(() =>
+            adapter.openTrade({
               accountId: f.follower_account_id,
               symbol: candidateSymbol,
               side: followerSide === "SELL" ? "SELL" : "BUY",
               volume: lot.lot,
               stopLoss: ev.stop_loss === null ? null : Number(ev.stop_loss),
-              takeProfit: ev.take_profit === null ? null : Number(ev.take_profit),
+              takeProfit:
+                ev.take_profit === null ? null : Number(ev.take_profit),
               slippage: settings.maxSlippagePoints,
               comment: `wsa:${strategy.id.slice(0, 8)}`,
-            }));
+            }),
+          );
           executedSymbol = candidateSymbol;
           break;
         } catch (candidateError) {
           lastOpenError = candidateError;
-          const retryable = candidateError instanceof BrokerExecutionError
-            && candidateError.code === BROKER_EXEC_ERROR.PROVIDER_ERROR;
+          const retryable =
+            candidateError instanceof BrokerExecutionError &&
+            candidateError.code === BROKER_EXEC_ERROR.PROVIDER_ERROR;
           if (!retryable) throw candidateError;
           logCopyTiming(ev.id, "follower broker symbol failed", startedAt, {
             followerAccountId: f.follower_account_id,
@@ -2066,19 +2742,29 @@ export async function executeCopyForEvent(
         symbol: executedSymbol,
         brokerMs: Date.now() - brokerStartedAt,
       });
-      markExecutionPriority([strategy.master_account_id, f.follower_account_id]);
-      const linkWrite = supabase.from("copy_trade_links").update({
+      markExecutionPriority([
+        strategy.master_account_id,
+        f.follower_account_id,
+      ]);
+      const linkWrite = supabase
+        .from("copy_trade_links")
+        .update({
           status: "OPEN",
           symbol: executedSymbol,
-          follower_position_id: result.brokerPositionId ?? result.brokerOrderId ?? null,
+          follower_position_id:
+            result.brokerPositionId ?? result.brokerOrderId ?? null,
           follower_order_id: result.brokerOrderId ?? null,
           copied_volume: result.executedVolume ?? lot.lot,
           opened_at: new Date().toISOString(),
           error_code: null,
           error_message: null,
-        }).eq("id", linkId);
+        })
+        .eq("id", linkId);
       const { error: linkError } = await linkWrite;
-      if (linkError) throw new Error(`Copied trade could not be linked: ${linkError.message}`);
+      if (linkError)
+        throw new Error(
+          `Copied trade could not be linked: ${linkError.message}`,
+        );
       void Promise.allSettled([
         supabase.from("copy_execution_logs").insert({
           ...baseLog,
@@ -2095,7 +2781,12 @@ export async function executeCopyForEvent(
           userId: f.trader_id,
           operation: "OPEN_TRADE",
           status: "SUCCESS",
-          safeMetadata: { strategyId: strategy.id, symbol: executedSymbol, sourceSymbol: ev.symbol, lot: lot.lot },
+          safeMetadata: {
+            strategyId: strategy.id,
+            symbol: executedSymbol,
+            sourceSymbol: ev.symbol,
+            lot: lot.lot,
+          },
         }),
       ]);
       summary.success++;
@@ -2104,9 +2795,18 @@ export async function executeCopyForEvent(
         totalFollowerMs: Date.now() - followerStartedAt,
       });
     } catch (err) {
-      const code = err instanceof BrokerExecutionError ? err.code : COPY_ERROR.COPY_PROVIDER_ERROR;
-      const message = (err instanceof Error ? err.message : "Broker execution failed").slice(0, 400);
-      await supabase.from("copy_trade_links").update({ status: "FAILED", error_code: code, error_message: message }).eq("source_event_id", ev.id).eq("follower_account_id", f.follower_account_id);
+      const code =
+        err instanceof BrokerExecutionError
+          ? err.code
+          : COPY_ERROR.COPY_PROVIDER_ERROR;
+      const message = (
+        err instanceof Error ? err.message : "Broker execution failed"
+      ).slice(0, 400);
+      await supabase
+        .from("copy_trade_links")
+        .update({ status: "FAILED", error_code: code, error_message: message })
+        .eq("source_event_id", ev.id)
+        .eq("follower_account_id", f.follower_account_id);
       void Promise.allSettled([
         supabase.from("copy_execution_logs").insert({
           ...baseLog,
@@ -2141,23 +2841,35 @@ export async function executeCopyForEvent(
     followers: followers.length,
     platformDelayMs: 0,
   });
-  await inParallelBatches(followers, followerExecutionBatchSize(), executeFollower);
+  await inParallelBatches(
+    followers,
+    followerExecutionBatchSize(),
+    executeFollower,
+  );
 
   logCopyTiming(ev.id, "copy event complete", startedAt, summary);
   return summary;
 }
 
 /** Admin-triggered retry of a FAILED live log. Re-runs the gated execution path. */
-export async function retryCopyExecution(logId: string, actorUserId: string | null): Promise<ExecSummary> {
+export async function retryCopyExecution(
+  logId: string,
+  actorUserId: string | null,
+): Promise<ExecSummary> {
   const supabase = createAdminClient();
   const { data: log } = await supabase
     .from("copy_execution_logs")
     .select("id, master_event_id, mode, status")
     .eq("id", logId)
     .maybeSingle();
-  if (!log) throw new CopyError(COPY_ERROR.COPY_DUPLICATE_EVENT, "Log not found", 404);
+  if (!log)
+    throw new CopyError(COPY_ERROR.COPY_DUPLICATE_EVENT, "Log not found", 404);
   if (log.mode !== "LIVE" || log.status !== "FAILED") {
-    throw new CopyError(COPY_ERROR.VALIDATION_ERROR, "Only failed live executions can be retried.", 400);
+    throw new CopyError(
+      COPY_ERROR.VALIDATION_ERROR,
+      "Only failed live executions can be retried.",
+      400,
+    );
   }
   // Re-runs all gates; today this surfaces COPY_EXECUTION_NOT_CONFIGURED.
   return executeCopyForEvent(log.master_event_id, actorUserId);
@@ -2184,11 +2896,15 @@ export interface TraderStrategyDto {
   engineStatus: "LIVE";
 }
 
-export async function listActiveStrategiesForTrader(): Promise<TraderStrategyDto[]> {
+export async function listActiveStrategiesForTrader(): Promise<
+  TraderStrategyDto[]
+> {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("copy_strategies")
-    .select("id, name, description, mode, risk_multiplier, default_scaling_mode, monthly_price, standard_monthly_price, premium_monthly_price, standard_billing_product_id, premium_billing_product_id, standard_delay_ms, premium_delay_ms, currency, engine_status, billing_product_id")
+    .select(
+      "id, name, description, mode, risk_multiplier, default_scaling_mode, monthly_price, standard_monthly_price, premium_monthly_price, standard_billing_product_id, premium_billing_product_id, standard_delay_ms, premium_delay_ms, currency, engine_status, billing_product_id",
+    )
     .eq("status", "ACTIVE")
     .eq("live_enabled", true)
     .eq("engine_status", "LIVE")
@@ -2216,7 +2932,9 @@ export async function listActiveStrategiesForTrader(): Promise<TraderStrategyDto
   }));
 }
 
-export async function listMySubscriptions(traderUserId: string): Promise<CopyFollowerDto[]> {
+export async function listMySubscriptions(
+  traderUserId: string,
+): Promise<CopyFollowerDto[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("copy_strategy_followers")
@@ -2228,11 +2946,15 @@ export async function listMySubscriptions(traderUserId: string): Promise<CopyFol
     .limit(500);
   if (error) throw new Error(`Failed to fetch subscriptions: ${error.message}`);
 
-  type SubscriptionRow = (typeof data)[number] & { tier?: "NORMAL" | "PREMIUM" | null };
+  type SubscriptionRow = (typeof data)[number] & {
+    tier?: "NORMAL" | "PREMIUM" | null;
+  };
 
   return ((data ?? []) as SubscriptionRow[]).map((r) => {
-    const strat = (r as { copy_strategies?: { name?: string } }).copy_strategies;
-    const acct = (r as { trading_accounts?: { account_name?: string } }).trading_accounts;
+    const strat = (r as { copy_strategies?: { name?: string } })
+      .copy_strategies;
+    const acct = (r as { trading_accounts?: { account_name?: string } })
+      .trading_accounts;
     return {
       id: r.id,
       strategyId: r.strategy_id,
@@ -2242,17 +2964,23 @@ export async function listMySubscriptions(traderUserId: string): Promise<CopyFol
       traderId: r.trader_id,
       status: r.status,
       scalingMode: r.scaling_mode,
-      riskMultiplier: r.risk_multiplier === null ? null : Number(r.risk_multiplier),
+      riskMultiplier:
+        r.risk_multiplier === null ? null : Number(r.risk_multiplier),
       fixedLot: r.fixed_lot === null ? null : Number(r.fixed_lot),
       maxLot: r.max_lot === null ? null : Number(r.max_lot),
       copyEnabled: r.copy_enabled ?? true,
       copyMode: r.copy_mode ?? scalingModeToCopyMode(r.scaling_mode),
-      lotMultiplier: r.lot_multiplier === null ? null : Number(r.lot_multiplier),
+      lotMultiplier:
+        r.lot_multiplier === null ? null : Number(r.lot_multiplier),
       riskPercent: r.risk_percent === null ? null : Number(r.risk_percent),
       minLot: r.min_lot === null ? null : Number(r.min_lot),
       maxOpenTrades: r.max_open_trades ?? null,
-      maxDailyLossPercent: r.max_daily_loss_percent === null ? null : Number(r.max_daily_loss_percent),
-      maxDrawdownPercent: r.max_drawdown_percent === null ? null : Number(r.max_drawdown_percent),
+      maxDailyLossPercent:
+        r.max_daily_loss_percent === null
+          ? null
+          : Number(r.max_daily_loss_percent),
+      maxDrawdownPercent:
+        r.max_drawdown_percent === null ? null : Number(r.max_drawdown_percent),
       allowedSymbols: r.symbol_allowlist ?? null,
       blockedSymbols: r.symbol_blocklist ?? null,
       symbolMapping: (r.symbol_mapping as Record<string, string> | null) ?? {},
@@ -2290,10 +3018,24 @@ export async function followStrategy(
     .select("id, status, live_enabled, engine_status")
     .eq("id", strategyId)
     .maybeSingle();
-  if (!strat) throw new CopyError(COPY_ERROR.COPY_STRATEGY_NOT_FOUND, "Strategy not found", 404);
-  if (strat.status !== "ACTIVE") throw new CopyError(COPY_ERROR.COPY_STRATEGY_NOT_FOUND, "Strategy is not active", 400);
+  if (!strat)
+    throw new CopyError(
+      COPY_ERROR.COPY_STRATEGY_NOT_FOUND,
+      "Strategy not found",
+      404,
+    );
+  if (strat.status !== "ACTIVE")
+    throw new CopyError(
+      COPY_ERROR.COPY_STRATEGY_NOT_FOUND,
+      "Strategy is not active",
+      400,
+    );
   if (!strat.live_enabled || strat.engine_status !== "LIVE") {
-    throw new CopyError(COPY_ERROR.COPY_EXECUTION_NOT_CONFIGURED, "This strategy is not live on the WSA engine.", 409);
+    throw new CopyError(
+      COPY_ERROR.COPY_EXECUTION_NOT_CONFIGURED,
+      "This strategy is not live on the WSA engine.",
+      409,
+    );
   }
 
   // Follower account must belong to this trader.
@@ -2303,19 +3045,37 @@ export async function followStrategy(
     .eq("id", input.followerAccountId)
     .eq("user_id", traderUserId)
     .maybeSingle();
-  if (!account) throw new CopyError(COPY_ERROR.FORBIDDEN, "Account not found or not yours", 403);
-  if (account.account_usage !== "TRADER" || account.status !== "CONNECTED" || !account.provider_account_id) {
-    throw new CopyError(COPY_ERROR.FOLLOWER_NOT_ELIGIBLE, "Connect and synchronize this trading account before following live strategies.", 409);
+  if (!account)
+    throw new CopyError(
+      COPY_ERROR.FORBIDDEN,
+      "Account not found or not yours",
+      403,
+    );
+  if (
+    account.account_usage !== "TRADER" ||
+    account.status !== "CONNECTED" ||
+    !account.provider_account_id
+  ) {
+    throw new CopyError(
+      COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
+      "Connect and synchronize this trading account before following live strategies.",
+      409,
+    );
   }
 
-  const followerColumns = "id, strategy_id, follower_account_id, trader_id, status, tier, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, risk_percent, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at";
-  const { data: existingFollower, error: existingFollowerError } = await supabase
-    .from("copy_strategy_followers")
-    .select("id")
-    .eq("strategy_id", strategyId)
-    .eq("follower_account_id", input.followerAccountId)
-    .maybeSingle();
-  if (existingFollowerError) throw new Error(`Failed to check follower settings: ${existingFollowerError.message}`);
+  const followerColumns =
+    "id, strategy_id, follower_account_id, trader_id, status, tier, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, risk_percent, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at";
+  const { data: existingFollower, error: existingFollowerError } =
+    await supabase
+      .from("copy_strategy_followers")
+      .select("id")
+      .eq("strategy_id", strategyId)
+      .eq("follower_account_id", input.followerAccountId)
+      .maybeSingle();
+  if (existingFollowerError)
+    throw new Error(
+      `Failed to check follower settings: ${existingFollowerError.message}`,
+    );
 
   const followerQuery = existingFollower
     ? supabase
@@ -2330,9 +3090,7 @@ export async function followStrategy(
           engine_synced_at: new Date().toISOString(),
         })
         .eq("id", existingFollower.id)
-    : supabase
-        .from("copy_strategy_followers")
-        .insert({
+    : supabase.from("copy_strategy_followers").insert({
         strategy_id: strategyId,
         follower_account_id: input.followerAccountId,
         trader_id: traderUserId,
@@ -2355,12 +3113,11 @@ export async function followStrategy(
         engine_status: "PAUSED",
         engine_error: "Copy settings must be saved before live copying starts.",
         engine_synced_at: new Date().toISOString(),
-        });
+      });
 
-  const { data, error } = await followerQuery
-    .select(followerColumns)
-    .single();
-  if (error || !data) throw new Error(`Failed to follow strategy: ${error?.message}`);
+  const { data, error } = await followerQuery.select(followerColumns).single();
+  if (error || !data)
+    throw new Error(`Failed to follow strategy: ${error?.message}`);
 
   await writeAuditLog({
     actorUserId: traderUserId,
@@ -2379,17 +3136,25 @@ export async function followStrategy(
     traderId: data.trader_id,
     status: data.status,
     scalingMode: data.scaling_mode,
-    riskMultiplier: data.risk_multiplier === null ? null : Number(data.risk_multiplier),
+    riskMultiplier:
+      data.risk_multiplier === null ? null : Number(data.risk_multiplier),
     fixedLot: data.fixed_lot === null ? null : Number(data.fixed_lot),
     maxLot: data.max_lot === null ? null : Number(data.max_lot),
     copyEnabled: data.copy_enabled ?? true,
     copyMode: data.copy_mode ?? scalingModeToCopyMode(data.scaling_mode),
-    lotMultiplier: data.lot_multiplier === null ? null : Number(data.lot_multiplier),
+    lotMultiplier:
+      data.lot_multiplier === null ? null : Number(data.lot_multiplier),
     riskPercent: data.risk_percent === null ? null : Number(data.risk_percent),
     minLot: data.min_lot === null ? null : Number(data.min_lot),
     maxOpenTrades: data.max_open_trades ?? null,
-    maxDailyLossPercent: data.max_daily_loss_percent === null ? null : Number(data.max_daily_loss_percent),
-    maxDrawdownPercent: data.max_drawdown_percent === null ? null : Number(data.max_drawdown_percent),
+    maxDailyLossPercent:
+      data.max_daily_loss_percent === null
+        ? null
+        : Number(data.max_daily_loss_percent),
+    maxDrawdownPercent:
+      data.max_drawdown_percent === null
+        ? null
+        : Number(data.max_drawdown_percent),
     allowedSymbols: data.symbol_allowlist ?? null,
     blockedSymbols: data.symbol_blocklist ?? null,
     symbolMapping: (data.symbol_mapping as Record<string, string> | null) ?? {},
@@ -2409,7 +3174,12 @@ export async function followStrategy(
 export async function updateMySubscription(
   traderUserId: string,
   subscriptionId: string,
-  patch: { status?: "ACTIVE" | "PAUSED" | "REVOKED"; riskMultiplier?: number; maxLot?: number | null; scalingMode?: ScalingMode },
+  patch: {
+    status?: "ACTIVE" | "PAUSED" | "REVOKED";
+    riskMultiplier?: number;
+    maxLot?: number | null;
+    scalingMode?: ScalingMode;
+  },
 ): Promise<void> {
   const supabase = createAdminClient();
   const { data: sub } = await supabase
@@ -2417,26 +3187,44 @@ export async function updateMySubscription(
     .select("id, trader_id, strategy_id, follower_account_id")
     .eq("id", subscriptionId)
     .maybeSingle();
-  if (!sub) throw new CopyError(COPY_ERROR.FOLLOWER_NOT_FOUND, "Subscription not found", 404);
-  if (sub.trader_id !== traderUserId) throw new CopyError(COPY_ERROR.FORBIDDEN, "Not your subscription", 403);
+  if (!sub)
+    throw new CopyError(
+      COPY_ERROR.FOLLOWER_NOT_FOUND,
+      "Subscription not found",
+      404,
+    );
+  if (sub.trader_id !== traderUserId)
+    throw new CopyError(COPY_ERROR.FORBIDDEN, "Not your subscription", 403);
 
   const row: Record<string, unknown> = {};
   if (patch.status !== undefined) {
     row.status = patch.status;
     row.paused_at = patch.status === "PAUSED" ? new Date().toISOString() : null;
   }
-  if (patch.riskMultiplier !== undefined) row.risk_multiplier = patch.riskMultiplier;
+  if (patch.riskMultiplier !== undefined)
+    row.risk_multiplier = patch.riskMultiplier;
   if (patch.maxLot !== undefined) row.max_lot = patch.maxLot;
   if (patch.scalingMode !== undefined) row.scaling_mode = patch.scalingMode;
 
-  const { error } = await supabase.from("copy_strategy_followers").update(row).eq("id", subscriptionId);
+  const { error } = await supabase
+    .from("copy_strategy_followers")
+    .update(row)
+    .eq("id", subscriptionId);
   if (error) throw new Error(`Failed to update subscription: ${error.message}`);
 
-  await supabase.from("copy_strategy_followers").update({
-    engine_status: patch.status === "REVOKED" ? "REMOVED" : patch.status === "PAUSED" ? "PAUSED" : "LIVE",
-    engine_error: null,
-    engine_synced_at: new Date().toISOString(),
-  }).eq("id", subscriptionId);
+  await supabase
+    .from("copy_strategy_followers")
+    .update({
+      engine_status:
+        patch.status === "REVOKED"
+          ? "REMOVED"
+          : patch.status === "PAUSED"
+            ? "PAUSED"
+            : "LIVE",
+      engine_error: null,
+      engine_synced_at: new Date().toISOString(),
+    })
+    .eq("id", subscriptionId);
 
   await writeAuditLog({
     actorUserId: traderUserId,
@@ -2475,18 +3263,28 @@ export async function updateMyFollowerSettings(
   const supabase = createAdminClient();
   const { data: subscription } = await supabase
     .from("copy_strategy_followers")
-    .select("id, trader_id, follower_account_id, fixed_lot, lot_multiplier, risk_multiplier, risk_percent")
+    .select(
+      "id, trader_id, follower_account_id, fixed_lot, lot_multiplier, risk_multiplier, risk_percent",
+    )
     .eq("id", subscriptionId)
     .maybeSingle();
-  if (!subscription) throw new CopyError(COPY_ERROR.FOLLOWER_NOT_FOUND, "Subscription not found", 404);
+  if (!subscription)
+    throw new CopyError(
+      COPY_ERROR.FOLLOWER_NOT_FOUND,
+      "Subscription not found",
+      404,
+    );
   if (subscription.trader_id !== traderUserId) {
     throw new CopyError(COPY_ERROR.FORBIDDEN, "Not your subscription", 403);
   }
   const scalingMode = copyModeToScalingMode(settings.copyMode);
   const fixedLot = settings.copyMode === "FIXED_LOT" ? settings.fixedLot : null;
-  const lotMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null;
-  const riskMultiplier = settings.copyMode === "LOT_MULTIPLIER" || settings.copyMode === "RISK_PERCENT" ? settings.lotMultiplier : null;
-  const riskPercent = settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null;
+  const lotMultiplier =
+    settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null;
+  const riskMultiplier =
+    settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null;
+  const riskPercent =
+    settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null;
   const { data: updated, error } = await supabase
     .from("copy_strategy_followers")
     .update({
@@ -2516,11 +3314,15 @@ export async function updateMyFollowerSettings(
       "id, strategy_id, follower_account_id, trader_id, status, tier, scaling_mode, risk_multiplier, fixed_lot, max_lot, min_lot, copy_enabled, copy_mode, lot_multiplier, risk_percent, max_open_trades, max_daily_loss_percent, max_drawdown_percent, symbol_allowlist, symbol_blocklist, symbol_mapping, copy_new_trades_only, reverse_copy, pause_on_disconnect, emergency_stop, engine_status, engine_error, engine_synced_at, consent_accepted_at, created_at",
     )
     .single();
-  if (error) throw new Error(`Failed to update follower settings: ${error.message}`);
-  await supabase.from("copy_strategy_followers").update({
-    engine_error: null,
-    engine_synced_at: new Date().toISOString(),
-  }).eq("id", subscriptionId);
+  if (error)
+    throw new Error(`Failed to update follower settings: ${error.message}`);
+  await supabase
+    .from("copy_strategy_followers")
+    .update({
+      engine_error: null,
+      engine_synced_at: new Date().toISOString(),
+    })
+    .eq("id", subscriptionId);
   await writeAuditLog({
     actorUserId: traderUserId,
     action: "COPY_FOLLOWER_CHANGED",
@@ -2542,20 +3344,30 @@ export async function updateMyFollowerSettings(
     traderId: updated.trader_id,
     status: updated.status,
     scalingMode: updated.scaling_mode,
-    riskMultiplier: updated.risk_multiplier === null ? null : Number(updated.risk_multiplier),
+    riskMultiplier:
+      updated.risk_multiplier === null ? null : Number(updated.risk_multiplier),
     fixedLot: updated.fixed_lot === null ? null : Number(updated.fixed_lot),
     maxLot: updated.max_lot === null ? null : Number(updated.max_lot),
     copyEnabled: updated.copy_enabled ?? true,
     copyMode: updated.copy_mode ?? scalingModeToCopyMode(updated.scaling_mode),
-    lotMultiplier: updated.lot_multiplier === null ? null : Number(updated.lot_multiplier),
-    riskPercent: updated.risk_percent === null ? null : Number(updated.risk_percent),
+    lotMultiplier:
+      updated.lot_multiplier === null ? null : Number(updated.lot_multiplier),
+    riskPercent:
+      updated.risk_percent === null ? null : Number(updated.risk_percent),
     minLot: updated.min_lot === null ? null : Number(updated.min_lot),
     maxOpenTrades: updated.max_open_trades ?? null,
-    maxDailyLossPercent: updated.max_daily_loss_percent === null ? null : Number(updated.max_daily_loss_percent),
-    maxDrawdownPercent: updated.max_drawdown_percent === null ? null : Number(updated.max_drawdown_percent),
+    maxDailyLossPercent:
+      updated.max_daily_loss_percent === null
+        ? null
+        : Number(updated.max_daily_loss_percent),
+    maxDrawdownPercent:
+      updated.max_drawdown_percent === null
+        ? null
+        : Number(updated.max_drawdown_percent),
     allowedSymbols: updated.symbol_allowlist ?? null,
     blockedSymbols: updated.symbol_blocklist ?? null,
-    symbolMapping: (updated.symbol_mapping as Record<string, string> | null) ?? {},
+    symbolMapping:
+      (updated.symbol_mapping as Record<string, string> | null) ?? {},
     copyNewTradesOnly: updated.copy_new_trades_only ?? true,
     reverseCopy: updated.reverse_copy ?? false,
     pauseOnDisconnect: updated.pause_on_disconnect ?? true,
@@ -2569,7 +3381,9 @@ export async function updateMyFollowerSettings(
   };
 }
 
-export async function listTraderCopyLogs(traderUserId: string): Promise<CopyLogDto[]> {
+export async function listTraderCopyLogs(
+  traderUserId: string,
+): Promise<CopyLogDto[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("copy_execution_logs")
