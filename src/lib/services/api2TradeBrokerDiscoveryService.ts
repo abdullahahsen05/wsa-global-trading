@@ -63,6 +63,11 @@ function stableId(value: string): string {
     .replace(/^-|-$/g, "") || "broker";
 }
 
+function isInternalBrokerLabel(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  return normalized === "wsa global" || normalized === "wsa" || normalized === "aurix";
+}
+
 function pickString(record: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
     const value = record[key];
@@ -107,7 +112,7 @@ async function loadWorkspaceBrokerRecommendations(params: {
   const byName = new Map<string, Api2TradeBrokerSearchResult>();
   for (const row of data ?? []) {
     const name = String(row.broker_name ?? "").trim();
-    if (!name) continue;
+    if (!name || isInternalBrokerLabel(name)) continue;
     const key = name.toLowerCase();
     const serverName = String(row.broker_server ?? "").trim();
     const platform = row.broker_platform === "MT4" || row.broker_platform === "MT5"
