@@ -1,6 +1,65 @@
 import type { EquityPoint } from "@/lib/domain/types";
-import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import { formatMoney } from "@/lib/utils/format";
+
+type ChartCoordinate = {
+  x: number;
+  y: number;
+};
+
+function toActualSmoothPath(points: ChartCoordinate[]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  if (points.length === 2)
+    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
+
+  const [first, second] = points;
+  const commands = [
+    `M ${first.x} ${first.y}`,
+    `Q ${first.x} ${first.y} ${(first.x + second.x) / 2} ${(first.y + second.y) / 2}`,
+  ];
+
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    commands.push(`T ${(current.x + next.x) / 2} ${(current.y + next.y) / 2}`);
+  }
+
+  const last = points[points.length - 1];
+  commands.push(`T ${last.x} ${last.y}`);
+  return commands.join(" ");
+}
+
+function toActualAreaPath(
+  points: ChartCoordinate[],
+  baselineY: number,
+): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) {
+    const point = points[0];
+    return `M ${point.x} ${baselineY} L ${point.x} ${point.y} L ${point.x} ${baselineY} Z`;
+  }
+
+  const line = toActualSmoothPath(points);
+  const first = points[0];
+  const last = points[points.length - 1];
+  return `${line} L ${last.x} ${baselineY} L ${first.x} ${baselineY} Z`;
+}
+
+function compactMoney(amount: number, currency: string): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(amount);
+}
+
+function compactDate(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(value));
+}
 
 export function EquityCurve({
   data,
@@ -43,20 +102,42 @@ function EquityCurvePanel({
 
   const width = 900;
   const height = 235;
-  const padding = 14;
+  const padding = {
+    top: 16,
+    right: 22,
+    bottom: 28,
+    left: 68,
+  };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
   const values = data.map((point) => point.equity);
-  const min = Math.min(...values) - 300;
-  const max = Math.max(...values) + 300;
+  const actualMin = Math.min(...values);
+  const actualMax = Math.max(...values);
+  const actualRange = actualMax - actualMin;
+  const buffer =
+    actualRange > 0
+      ? actualRange * 0.1
+      : Math.max(Math.abs(actualMax) * 0.002, 100);
+  const min = actualMin - buffer;
+  const max = actualMax + buffer;
   const range = max - min || 1;
   const points = data.map((point, index) => {
-    const x = padding + (index / Math.max(data.length - 1, 1)) * (width - padding * 2);
-    const y = height - padding - ((point.equity - min) / range) * (height - padding * 2);
+    const x = padding.left + (index / Math.max(data.length - 1, 1)) * plotWidth;
+    const y = padding.top + ((max - point.equity) / range) * plotHeight;
     return { x, y, point };
   });
   const curvePoints = points.map(({ x, y }) => ({ x, y }));
-  const linePath = toSmoothPath(curvePoints);
-  const areaPath = toSmoothAreaPath(curvePoints, height - padding);
+  const linePath = toActualSmoothPath(curvePoints);
+  const areaPath = toActualAreaPath(curvePoints, height - padding.bottom);
   const latest = data[data.length - 1];
+  const axisTicks = Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4;
+    const value = max - range * ratio;
+    const y = padding.top + plotHeight * ratio;
+    return { value, y };
+  });
+  const firstPoint = data[0];
+  const latestCoordinate = points[points.length - 1];
 
   return (
     <div className="h-72 rounded-[4px] border border-line bg-panel p-5">
@@ -81,17 +162,35 @@ function EquityCurvePanel({
             <stop offset="100%" stopColor="#21d19f" stopOpacity="0" />
           </linearGradient>
         </defs>
-        {[0.25, 0.5, 0.75].map((ratio) => (
-          <line
-            key={ratio}
-            x1={padding}
-            x2={width - padding}
-            y1={height * ratio}
-            y2={height * ratio}
-            stroke="#1d3832"
-            strokeWidth="1"
-          />
+        {axisTicks.map((tick) => (
+          <g key={tick.y}>
+            <line
+              x1={padding.left}
+              x2={width - padding.right}
+              y1={tick.y}
+              y2={tick.y}
+              stroke="#1d3832"
+              strokeDasharray="4 8"
+              strokeWidth="1"
+            />
+            <text
+              x={padding.left - 12}
+              y={tick.y + 4}
+              textAnchor="end"
+              className="fill-muted text-[11px]"
+            >
+              {compactMoney(tick.value, currency)}
+            </text>
+          </g>
         ))}
+        <line
+          x1={padding.left}
+          x2={width - padding.right}
+          y1={height - padding.bottom}
+          y2={height - padding.bottom}
+          stroke="#23302b"
+          strokeWidth="1"
+        />
         <path d={areaPath} fill="url(#equitySvgGradient)" />
         <path
           d={linePath}
@@ -101,6 +200,30 @@ function EquityCurvePanel({
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+        <circle
+          cx={latestCoordinate.x}
+          cy={latestCoordinate.y}
+          r="5"
+          fill="#050807"
+          stroke="#21d19f"
+          strokeWidth="3"
+        />
+        <text
+          x={padding.left}
+          y={height - 7}
+          textAnchor="start"
+          className="fill-muted text-[11px]"
+        >
+          {compactDate(firstPoint.capturedAt)}
+        </text>
+        <text
+          x={width - padding.right}
+          y={height - 7}
+          textAnchor="end"
+          className="fill-muted text-[11px]"
+        >
+          {compactDate(latest.capturedAt)}
+        </text>
       </svg>
     </div>
   );

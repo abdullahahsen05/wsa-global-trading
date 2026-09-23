@@ -18,6 +18,7 @@ type SnapshotRow = {
   trading_account_id: string;
   balance: number | string;
   equity: number | string;
+  drawdown_percent?: number | string | null;
   captured_at: string;
 };
 
@@ -27,7 +28,9 @@ export function getAnalyticsPeriodStart(
 ): Date | null {
   if (period === "ALL_TIME") return null;
   if (period === "DAILY") {
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    return new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+    );
   }
   if (period === "MONTHLY") {
     return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -35,7 +38,10 @@ export function getAnalyticsPeriodStart(
   return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 }
 
-export function mapScopedEquityCurve(rows: SnapshotRow[], aggregate: boolean): EquityPoint[] {
+export function mapScopedEquityCurve(
+  rows: SnapshotRow[],
+  aggregate: boolean,
+): EquityPoint[] {
   if (!aggregate) {
     return [...rows].reverse().map((row) => ({
       capturedAt: row.captured_at,
@@ -77,16 +83,21 @@ async function getScopedAccountIds(
   role: UserRole,
 ): Promise<string[]> {
   const supabase = isAdmin(role) ? createAdminClient() : await createClient();
-  let query = supabase.from("trading_accounts").select("id").eq("status", "CONNECTED");
+  let query = supabase
+    .from("trading_accounts")
+    .select("id")
+    .eq("status", "CONNECTED");
 
   if (!isAdmin(role)) query = query.eq("user_id", userId);
   if (accountId !== "ALL") query = query.eq("id", accountId);
 
   const { data, error } = await query;
-  if (error) throw new Error(`Failed to scope analytics accounts: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to scope analytics accounts: ${error.message}`);
 
   const accountIds = (data ?? []).map((account) => account.id as string);
-  if (accountId !== "ALL" && accountIds.length !== 1) throw new AnalyticsAccessError();
+  if (accountId !== "ALL" && accountIds.length !== 1)
+    throw new AnalyticsAccessError();
   return accountIds;
 }
 
@@ -107,7 +118,42 @@ async function loadScopedEquityCurve(
   if (start) query = query.gte("captured_at", start.toISOString());
   const { data, error } = await query;
   if (error) throw new Error(`Failed to fetch equity curve: ${error.message}`);
-  return mapScopedEquityCurve((data ?? []) as SnapshotRow[], accountIds.length > 1);
+  return mapScopedEquityCurve(
+    (data ?? []) as SnapshotRow[],
+    accountIds.length > 1,
+  );
+}
+
+async function loadScopedSnapshotDrawdown(
+  accountIds: string[],
+  period: AnalyticsPeriod,
+): Promise<number> {
+  if (accountIds.length === 0) return 0;
+  const supabase = createAdminClient();
+  const start = getAnalyticsPeriodStart(period);
+  let query = supabase
+    .from("account_snapshots")
+    .select("drawdown_percent")
+    .in("trading_account_id", accountIds)
+    .order("captured_at", { ascending: false })
+    .limit(10_000);
+
+  if (start) query = query.gte("captured_at", start.toISOString());
+
+  const { data, error } = await query;
+  if (error)
+    throw new Error(
+      `Failed to fetch live drawdown snapshots: ${error.message}`,
+    );
+
+  return Number(
+    Math.max(
+      0,
+      ...(data ?? [])
+        .map((row) => Number(row.drawdown_percent ?? 0))
+        .filter(Number.isFinite),
+    ).toFixed(2),
+  );
 }
 
 export async function getAnalyticsSummary(
@@ -134,16 +180,29 @@ export async function getAnalyticsSummary(
     .limit(10_000);
 
   if (start) tradeQuery = tradeQuery.gte("closed_at", start.toISOString());
-  const [tradeResult, equityCurve] = await Promise.all([
-    tradeQuery,
-    loadScopedEquityCurve(accountIds, period),
-  ]);
+  const [tradeResult, equityCurve, snapshotDrawdownPercent] = await Promise.all(
+    [
+      tradeQuery,
+      loadScopedEquityCurve(accountIds, period),
+      loadScopedSnapshotDrawdown(accountIds, period),
+    ],
+  );
   if (tradeResult.error) {
     throw new Error(`Failed to fetch trades: ${tradeResult.error.message}`);
   }
 
+  const summary = buildAnalyticsSummary(
+    accountId,
+    (tradeResult.data ?? []).map(mapTradeToDto),
+    equityCurve,
+  );
+
   return {
-    ...buildAnalyticsSummary(accountId, (tradeResult.data ?? []).map(mapTradeToDto), equityCurve),
+    ...summary,
+    maxDrawdownPercent: Math.max(
+      summary.maxDrawdownPercent,
+      snapshotDrawdownPercent,
+    ),
     period,
   };
 }
