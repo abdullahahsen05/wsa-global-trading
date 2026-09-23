@@ -15,7 +15,7 @@ export async function expireStaleTradingAccounts(): Promise<number> {
   const supabase = createAdminClient();
   const { data: accounts, error } = await supabase
     .from("trading_accounts")
-    .select("id, status, broker_server, broker_platform, last_synced_at")
+    .select("id, status, broker_server, broker_platform, provider_account_id, last_synced_at")
     .in("status", ["CONNECTED", "RESTRICTED"])
     .limit(2_000);
   if (error) throw new Error(`Trading account lifecycle scan failed: ${error.message}`);
@@ -41,6 +41,7 @@ export async function expireStaleTradingAccounts(): Promise<number> {
       snapshotCapturedAt: snapshotByAccount.get(account.id) ?? null,
       serverName: account.broker_server,
       platform: account.broker_platform,
+      providerAccountId: account.provider_account_id,
     });
     if (resolved === account.status) continue;
 
@@ -48,7 +49,7 @@ export async function expireStaleTradingAccounts(): Promise<number> {
       ? `No successful broker activity for ${ACCOUNT_INACTIVITY_DAYS} days. Reconnect the account to resume live data and trading.`
       : resolved === "PENDING"
         ? "Broker connection details are incomplete. Complete account setup before connecting."
-        : "Broker setup is incomplete. Run account sync to finish the connection.";
+        : "Broker connection is provisioning. Run account sync to finish the first live-data refresh.";
     const { error: updateError } = await supabase
       .from("trading_accounts")
       .update({ status: resolved, sync_error: syncError })

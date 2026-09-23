@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Plus, Trash2, X } from "lucide-react";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DataTable,
@@ -95,6 +96,8 @@ export default function AccountsPage() {
 }
 
 function AccountsContent() {
+  const searchParams = useSearchParams();
+  const handledRouteActionRef = useRef("");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [connectOpen, setConnectOpen] = useState(false);
@@ -183,6 +186,51 @@ function AccountsContent() {
     setIsSubmitting(false);
     setErrorMessage("");
   };
+
+  const openConnectionDialog = (account?: TraderAccountSummary | null) => {
+    setSuccessMessage("");
+    setErrorMessage("");
+    setConnectOpen(true);
+
+    if (!account) {
+      resetDialog();
+      return;
+    }
+
+    setPendingAccountId(account.accountId);
+    setPendingBrokerName(account.brokerName);
+    setSetupBrokerName(account.brokerName);
+    setSelectedPlatform(account.platform ?? "MT5");
+    setSelectedServerOption(account.serverName ?? "");
+    setServerSearchDraft(account.serverName ?? account.brokerName);
+    setServerSearchQuery(account.serverName ?? account.brokerName);
+    setStep("credentials");
+  };
+
+  useEffect(() => {
+    if (!tradingAccounts.length) return;
+    const routeActionKey = searchParams.toString();
+    if (!routeActionKey || handledRouteActionRef.current === routeActionKey) return;
+    let timer: number | undefined;
+    if (searchParams.get("connect") === "1") {
+      handledRouteActionRef.current = routeActionKey;
+      timer = window.setTimeout(() => openConnectionDialog(null), 0);
+      return () => {
+        if (timer) window.clearTimeout(timer);
+      };
+    }
+    const setupAccountId = searchParams.get("setup");
+    if (!setupAccountId) return;
+    const account = tradingAccounts.find((item) => item.accountId === setupAccountId);
+    if (account) {
+      handledRouteActionRef.current = routeActionKey;
+      timer = window.setTimeout(() => openConnectionDialog(account), 0);
+    }
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, tradingAccounts]);
 
   // ── Step 1: create the trading account record ─────────────────────────────
   const handleSetup = async (event: FormEvent<HTMLFormElement>) => {
@@ -376,7 +424,7 @@ function AccountsContent() {
             }}
           >
             <Dialog.Trigger asChild>
-              <PrimaryButton type="button">
+              <PrimaryButton type="button" onClick={() => openConnectionDialog(null)}>
                 <Plus className="mr-2 inline-block h-4 w-4" />
                 Connect account
               </PrimaryButton>
@@ -746,7 +794,13 @@ function AccountsContent() {
               </span>,
               <div key="action" className="flex flex-wrap items-center justify-end gap-2">
                 <Link
-                  href={`/accounts/${account.accountId}`}
+                  href={
+                    account.status === "PENDING" ||
+                    account.status === "INACTIVE" ||
+                    account.status === "DISCONNECTED"
+                      ? `/accounts?setup=${account.accountId}`
+                      : `/accounts/${account.accountId}`
+                  }
                   className="btn-dark inline-flex h-9 items-center whitespace-nowrap px-3 text-xs font-semibold text-accent"
                 >
                   {accountActionLabel(account)}

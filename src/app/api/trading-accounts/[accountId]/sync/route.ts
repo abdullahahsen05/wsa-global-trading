@@ -3,9 +3,11 @@ import { requireAuth, assertCanAccessAccount, AuthError } from "@/lib/auth/sessi
 import { syncTradingAccount } from "@/lib/services/brokerSyncService";
 import { getDecryptedCredentials } from "@/lib/services/brokerCredentialService";
 import {
+  api2TradeUsesDashboardAccounts,
   brokerProviderConfigured,
   getBrokerProviderLabel,
 } from "@/lib/broker/provider";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(
   _req: Request,
@@ -21,14 +23,24 @@ export async function POST(
 
     await assertCanAccessAccount(accountId);
 
-    // Guard: credentials must be stored before sync can run
+    // Guard: credentials must be stored before sync can run, except for
+    // provider-dashboard accounts that already have a provider account id.
     const creds = await getDecryptedCredentials(accountId);
     if (!creds) {
-      return jsonFail(
-        "BROKER_CREDENTIALS_NOT_FOUND",
-        "No broker credentials stored for this account. Store credentials first.",
-        404,
-      );
+      const supabase = createAdminClient();
+      const { data: account } = await supabase
+        .from("trading_accounts")
+        .select("provider_account_id")
+        .eq("id", accountId)
+        .maybeSingle();
+      const providerLinked = api2TradeUsesDashboardAccounts() && Boolean(account?.provider_account_id);
+      if (!providerLinked) {
+        return jsonFail(
+          "BROKER_CREDENTIALS_NOT_FOUND",
+          "No broker credentials stored for this account. Store credentials first.",
+          404,
+        );
+      }
     }
 
     const providerLabel = getBrokerProviderLabel();

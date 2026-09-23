@@ -26,19 +26,27 @@ export function resolveAccountLifecycleStatus(input: {
   snapshotCapturedAt?: string | null;
   serverName?: string | null;
   platform?: string | null;
+  providerAccountId?: string | null;
   now?: number;
 }): AccountStatus {
   if (input.status !== "CONNECTED" && input.status !== "RESTRICTED") {
     return input.status;
   }
 
-  if (!input.serverName || !input.platform) {
-    return "PENDING";
-  }
-
   const lastActivity = validTime(
     latestAccountActivityAt(input.lastSyncedAt, input.snapshotCapturedAt),
   );
+
+  // Broker server/platform are operational metadata used for display and
+  // credential re-entry. Older accounts can have a provider account and
+  // successful sync history while one of these display fields is missing.
+  // Do not demote those live accounts to PENDING; that removes them from
+  // selectors and makes the trader workspace look disconnected.
+  if (!input.serverName || !input.platform) {
+    if (lastActivity !== null) return input.status;
+    return input.providerAccountId ? "SYNCING" : "PENDING";
+  }
+
   if (lastActivity === null) {
     return "SYNCING";
   }

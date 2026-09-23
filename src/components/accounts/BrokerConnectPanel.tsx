@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, X } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { GhostButton, Panel, PrimaryButton, StatusPill } from "@/components/app/WorkspaceUI";
 import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocompleteField";
 
@@ -185,10 +185,46 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
     onError: (err: Error) => setNotice({ type: "error", text: err.message }),
   });
 
+  const syncMutation = useMutation({
+    mutationFn: () =>
+      apiFetch<SyncResult>(`/api/trading-accounts/${accountId}/sync`, {
+        method: "POST",
+      }),
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["broker-cred-status", accountId] });
+      void queryClient.invalidateQueries({ queryKey: ["broker-connection-status", accountId] });
+      void queryClient.invalidateQueries({ queryKey: ["trading-accounts"] });
+      statusPollCount.current = 0;
+      setNotice({
+        type: data.status === "CONNECTED" ? "success" : "info",
+        text:
+          data.message ??
+          (data.status === "CONNECTED"
+            ? `Account synced. ${data.tradesUpserted} trade${data.tradesUpserted === 1 ? "" : "s"} updated.`
+            : "Sync started. Status checks will continue automatically."),
+      });
+    },
+    onError: (err: Error) => setNotice({ type: "error", text: err.message }),
+  });
+
   const busy =
     storeMutation.isPending ||
+    syncMutation.isPending ||
     serversQuery.isFetching ||
     connectionStatusQuery.isFetching;
+
+  function openCredentialForm() {
+    setNotice(null);
+    setFormOpen(true);
+    setForm((current) => ({
+      ...current,
+      platform: credStatus?.platform ?? current.platform,
+      brokerName: credStatus?.brokerName ?? current.brokerName,
+      server: credStatus?.serverName ?? "",
+      customServer: "",
+    }));
+    setServerSearchQuery(credStatus?.brokerName ?? "");
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -305,13 +341,25 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         </div>
       ) : null}
 
-      {!(credStatus?.credentialsStored || credStatus?.providerAccountId) ? (
-        <div className="mt-4">
-        <GhostButton type="button" onClick={() => { setFormOpen((o) => !o); setNotice(null); }}>
-          Add broker connection
+      <div className="mt-4 flex flex-wrap gap-3">
+        <GhostButton type="button" onClick={openCredentialForm}>
+          {credStatus?.credentialsStored || credStatus?.providerAccountId
+            ? "Update credentials"
+            : "Add broker connection"}
         </GhostButton>
-        </div>
-      ) : null}
+        {credStatus?.credentialsStored || credStatus?.providerAccountId ? (
+          <PrimaryButton
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setNotice(null);
+              syncMutation.mutate();
+            }}
+          >
+            {syncMutation.isPending ? "Syncing…" : "Sync account"}
+          </PrimaryButton>
+        ) : null}
+      </div>
 
       {formOpen ? (
         <form onSubmit={handleSubmit} className="mt-5 grid gap-4 border-t border-line pt-5">

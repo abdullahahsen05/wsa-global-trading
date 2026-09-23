@@ -955,7 +955,7 @@ function TraderDashboardContent() {
             </p>
           </div>
           <Link
-            href="/accounts"
+            href="/accounts?connect=1"
             className="rounded-[4px] bg-accent px-6 py-2.5 text-sm font-semibold text-background transition hover:opacity-90"
           >
             Connect account

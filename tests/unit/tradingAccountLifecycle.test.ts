@@ -32,12 +32,24 @@ function account(
 }
 
 describe("trading account lifecycle", () => {
-  it("keeps incomplete account information pending", () => {
+  it("keeps active accounts live when old rows are missing display metadata", () => {
     expect(resolveAccountLifecycleStatus({
       status: "CONNECTED",
       lastSyncedAt: "2026-07-24T00:00:00.000Z",
       serverName: null,
       platform: "MT5",
+      now,
+    })).toBe("CONNECTED");
+  });
+
+  it("keeps genuinely incomplete setup pending", () => {
+    expect(resolveAccountLifecycleStatus({
+      status: "CONNECTED",
+      lastSyncedAt: null,
+      snapshotCapturedAt: null,
+      serverName: null,
+      platform: "MT5",
+      providerAccountId: null,
       now,
     })).toBe("PENDING");
   });

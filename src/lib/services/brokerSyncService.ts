@@ -941,6 +941,23 @@ export async function syncTradingAccount(
   // 3. Resolve platform — use stored value, fall back to MT5 for modern brokers
   // Old credentials without `platform` field will have undefined here; default to mt5.
   const platform: 'mt4' | 'mt5' = effectiveCredentials.platform ?? 'mt5';
+  const metadataPatch: Record<string, string> = {};
+  if (!account.broker_server && effectiveCredentials.server?.trim()) {
+    metadataPatch.broker_server = effectiveCredentials.server.trim();
+  }
+  const normalizedStoredPlatform = account.broker_platform?.trim().toLowerCase();
+  if (normalizedStoredPlatform !== platform) {
+    metadataPatch.broker_platform = platform.toUpperCase();
+  }
+  if (!account.broker_name && effectiveCredentials.brokerName?.trim()) {
+    metadataPatch.broker_name = effectiveCredentials.brokerName.trim();
+  }
+  if (Object.keys(metadataPatch).length > 0) {
+    await supabase
+      .from('trading_accounts')
+      .update(metadataPatch)
+      .eq('id', accountId);
+  }
   if (!brokerProviderConfigured()) {
     return {
       accountId,
@@ -1058,6 +1075,7 @@ export async function getBrokerConnectionStatus(
     snapshotCapturedAt: snapshot?.captured_at ?? null,
     serverName: account.broker_server,
     platform: account.broker_platform,
+    providerAccountId: account.provider_account_id,
   });
   const activeProvider = getBrokerProviderId();
 

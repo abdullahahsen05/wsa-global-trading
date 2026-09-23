@@ -53,8 +53,10 @@ export async function GET(
           snapshotCapturedAt: snapshotRow.data?.captured_at ?? null,
           serverName: accountRow.data.broker_server,
           platform: accountRow.data.broker_platform,
+          providerAccountId: accountRow.data.provider_account_id,
         })
       : null;
+    const normalizedPlatform = accountRow.data?.broker_platform?.trim().toUpperCase() ?? null;
 
     return jsonOk({
       accountId,
@@ -67,7 +69,7 @@ export async function GET(
       brokerName: accountRow.data?.broker_name ?? "WSA GLOBAL",
       brokerProviderId: accountRow.data?.broker_provider_id ?? null,
       serverName: accountRow.data?.broker_server ?? null,
-      platform: accountRow.data?.broker_platform ?? null,
+      platform: normalizedPlatform === "MT4" || normalizedPlatform === "MT5" ? normalizedPlatform : null,
     });
   } catch (err) {
     if (err instanceof AuthError) return jsonFail(err.code, err.message, err.statusCode);
