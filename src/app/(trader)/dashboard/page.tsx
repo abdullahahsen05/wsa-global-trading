@@ -67,14 +67,15 @@ function normalizePercentSeriesPoints(
   values: number[],
   width: number,
   height: number,
-  padding: number,
+  paddingX: number,
+  paddingY: number,
   domain: { min: number; max: number },
 ): ChartMetricPoint[] {
   if (values.length === 0) return [];
   const range = domain.max - domain.min || 1;
   return values.map((value, index) => {
-    const x = padding + (index / Math.max(values.length - 1, 1)) * (width - padding * 2);
-    const y = height - padding - ((value - domain.min) / range) * (height - padding * 2);
+    const x = paddingX + (index / Math.max(values.length - 1, 1)) * (width - paddingX * 2);
+    const y = height - paddingY - ((value - domain.min) / range) * (height - paddingY * 2);
     return { x, y };
   });
 }
@@ -97,6 +98,28 @@ function formatGrowthPercent(value: number): string {
   return formatPercent(value);
 }
 
+function formatAxisPercent(value: number): string {
+  if (!Number.isFinite(value)) return "—";
+  if (Math.abs(value) < 0.01) return "0%";
+  if (Math.abs(value) < 1) return `${value.toFixed(2)}%`;
+  return `${value.toFixed(1)}%`;
+}
+
+function formatCompactMoneyAmount(amount: number, currency: string): string {
+  const normalized = normalizeMoneyAmount(amount);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+    notation: Math.abs(normalized) >= 1000 ? "compact" : "standard",
+    maximumFractionDigits: Math.abs(normalized) >= 1000 ? 1 : 2,
+  }).format(normalized).replace(".0", "");
+}
+
+function formatShortDate(value: string | null | undefined): string {
+  if (!value) return "";
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "2-digit" });
+}
+
 function buildDashboardPnlSeries(trades: TradeDto[], fallbackValue: number): number[] {
   const closed = [...trades]
     .filter((trade) => trade.status === "CLOSED")
@@ -114,6 +137,22 @@ function buildDashboardPnlSeries(trades: TradeDto[], fallbackValue: number): num
     running += normalizeMoneyAmount(trade.profit.amount);
     return running;
   })];
+}
+
+function chartDateLabels(equityCurve: EquityPoint[], trades: TradeDto[]): { start: string; end: string } {
+  const dates = [
+    ...equityCurve.map((point) => point.capturedAt),
+    ...trades.map((trade) => trade.closedAt ?? trade.openedAt),
+  ]
+    .map((value) => new Date(value).getTime())
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+
+  if (dates.length === 0) return { start: "", end: "" };
+  return {
+    start: formatShortDate(new Date(dates[0]).toISOString()),
+    end: formatShortDate(new Date(dates[dates.length - 1]).toISOString()),
+  };
 }
 
 function buildDashboardVolumeSeries(trades: TradeDto[]): number[] {
@@ -148,8 +187,9 @@ function TraderPerformanceChart({
     volume: true,
   });
   const width = 1120;
-  const height = 360;
-  const padding = 34;
+  const height = 390;
+  const paddingX = 76;
+  const paddingY = 42;
   const equityValues = equityCurve.length > 0
     ? equityCurve.map((point) => point.equity)
     : [currentEquity * 0.997, currentEquity];
@@ -165,12 +205,18 @@ function TraderPerformanceChart({
   const equityGrowthValues = equityValues.map((value) => (startingEquity > 0 ? ((value - startingEquity) / startingEquity) * 100 : 0));
   const pnlGrowthValues = pnlValues.map((value) => (profitBaseEquity > 0 ? (value / profitBaseEquity) * 100 : 0));
   const percentDomain = buildPercentDomain(equityGrowthValues, pnlGrowthValues);
-  const equityPoints = normalizePercentSeriesPoints(equityGrowthValues, width, height, padding, percentDomain);
-  const pnlPoints = normalizePercentSeriesPoints(pnlGrowthValues, width, height, padding, percentDomain);
+  const equityPoints = normalizePercentSeriesPoints(equityGrowthValues, width, height, paddingX, paddingY, percentDomain);
+  const pnlPoints = normalizePercentSeriesPoints(pnlGrowthValues, width, height, paddingX, paddingY, percentDomain);
   const equityPath = toSmoothPath(equityPoints);
-  const equityArea = toSmoothAreaPath(equityPoints, height - padding);
+  const equityArea = toSmoothAreaPath(equityPoints, height - paddingY);
   const pnlPath = toSmoothPath(pnlPoints);
   const maxVolume = Math.max(...volumeValues, 1);
+  const dateLabels = chartDateLabels(equityCurve, trades);
+  const axisTicks = [1, 0.75, 0.5, 0.25, 0];
+  const domainValueAt = (ratio: number) => percentDomain.min + (percentDomain.max - percentDomain.min) * ratio;
+  const moneyValueAt = (ratio: number) => (domainValueAt(ratio) / 100) * profitBaseEquity;
+  const latestEquityGrowth = equityGrowthValues.at(-1) ?? growthPercent;
+  const latestPnlGrowth = pnlGrowthValues.at(-1) ?? growthPercent;
   const toggleSeries = (series: keyof typeof visibleSeries) => {
     setVisibleSeries((current) => {
       const next = { ...current, [series]: !current[series] };
@@ -208,7 +254,7 @@ function TraderPerformanceChart({
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Performance analytics</p>
           <h2 className="mt-2 text-lg font-semibold text-foreground">Account performance curve</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Curved equity, closed P&L, and traded volume from {accountName}. This replaces the dashboard TradingView widget with account analytics.
+            MT5-synced equity growth, closed P&L, and traded volume from {accountName}, shown with percentage and money scales.
           </p>
         </div>
         <div className="grid grid-cols-2 overflow-hidden rounded-[4px] border border-line bg-background text-right sm:grid-cols-4">
@@ -231,7 +277,7 @@ function TraderPerformanceChart({
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,207,0,0.12),transparent_34%),radial-gradient(circle_at_75%_70%,rgba(33,209,159,0.12),transparent_30%)]" />
           <svg
             viewBox={`0 0 ${width} ${height}`}
-            className="relative h-[360px] w-full"
+            className="relative h-[390px] w-full"
             role="img"
             aria-label="Trader dashboard performance chart"
           >
@@ -245,26 +291,45 @@ function TraderPerformanceChart({
                 <stop offset="100%" stopColor="#ffef8a" />
               </linearGradient>
             </defs>
-            {[0.2, 0.4, 0.6, 0.8].map((ratio) => (
-              <line
-                key={ratio}
-                x1={padding}
-                x2={width - padding}
-                y1={height * ratio}
-                y2={height * ratio}
-                stroke="rgba(255,255,255,0.08)"
-                strokeDasharray="7 10"
-              />
-            ))}
+            <line x1={paddingX} x2={paddingX} y1={paddingY} y2={height - paddingY} stroke="rgba(255,255,255,0.12)" />
+            <line x1={width - paddingX} x2={width - paddingX} y1={paddingY} y2={height - paddingY} stroke="rgba(255,255,255,0.12)" />
+            <line x1={paddingX} x2={width - paddingX} y1={height - paddingY} y2={height - paddingY} stroke="rgba(255,255,255,0.12)" />
+            {axisTicks.map((ratio) => {
+              const y = height - paddingY - ratio * (height - paddingY * 2);
+              return (
+                <g key={ratio}>
+                  <line
+                    x1={paddingX}
+                    x2={width - paddingX}
+                    y1={y}
+                    y2={y}
+                    stroke="rgba(255,255,255,0.08)"
+                    strokeDasharray="7 10"
+                  />
+                  <text x={paddingX - 12} y={y + 4} textAnchor="end" className="fill-muted text-[10px] font-semibold tabular-nums">
+                    {formatAxisPercent(domainValueAt(ratio))}
+                  </text>
+                  <text x={width - paddingX + 12} y={y + 4} textAnchor="start" className="fill-muted text-[10px] font-semibold tabular-nums">
+                    {formatCompactMoneyAmount(moneyValueAt(ratio), currency)}
+                  </text>
+                </g>
+              );
+            })}
+            <text x={paddingX} y={24} textAnchor="start" className="fill-accent-2 text-[10px] font-bold uppercase tracking-[0.16em]">
+              Growth %
+            </text>
+            <text x={width - paddingX} y={24} textAnchor="end" className="fill-accent text-[10px] font-bold uppercase tracking-[0.16em]">
+              Closed P&L
+            </text>
             {visibleSeries.volume ? volumeValues.map((volume, index) => {
-              const barWidth = Math.max(8, (width - padding * 2) / Math.max(volumeValues.length, 1) - 10);
-              const x = padding + (index / Math.max(volumeValues.length - 1, 1)) * (width - padding * 2) - barWidth / 2;
+              const barWidth = Math.max(8, (width - paddingX * 2) / Math.max(volumeValues.length, 1) - 10);
+              const x = paddingX + (index / Math.max(volumeValues.length - 1, 1)) * (width - paddingX * 2) - barWidth / 2;
               const barHeight = Math.max(8, (volume / maxVolume) * 84);
               return (
                 <rect
                   key={`${volume}-${index}`}
                   x={x}
-                  y={height - padding - barHeight}
+                  y={height - paddingY - barHeight}
                   width={barWidth}
                   height={barHeight}
                   rx="4"
@@ -303,6 +368,29 @@ function TraderPerformanceChart({
                 stroke="#21d19f"
                 strokeWidth="3"
               />
+            ) : null}
+            {visibleSeries.pnl && pnlPoints.at(-1) ? (
+              <g>
+                <circle cx={pnlPoints.at(-1)!.x} cy={pnlPoints.at(-1)!.y} r="4" fill="#ffcf00" />
+                <text x={Math.min(pnlPoints.at(-1)!.x + 12, width - paddingX - 90)} y={pnlPoints.at(-1)!.y - 10} className="fill-accent text-[11px] font-bold tabular-nums">
+                  {formatMoney({ amount: latestPnl, currency })} / {formatGrowthPercent(latestPnlGrowth)}
+                </text>
+              </g>
+            ) : null}
+            {visibleSeries.equity && equityPoints.at(-1) ? (
+              <text x={Math.min(equityPoints.at(-1)!.x + 12, width - paddingX - 86)} y={equityPoints.at(-1)!.y + 20} className="fill-accent-2 text-[11px] font-bold tabular-nums">
+                {formatGrowthPercent(latestEquityGrowth)}
+              </text>
+            ) : null}
+            {dateLabels.start ? (
+              <text x={paddingX} y={height - 14} textAnchor="start" className="fill-muted text-[10px] font-semibold tabular-nums">
+                {dateLabels.start}
+              </text>
+            ) : null}
+            {dateLabels.end ? (
+              <text x={width - paddingX} y={height - 14} textAnchor="end" className="fill-muted text-[10px] font-semibold tabular-nums">
+                {dateLabels.end}
+              </text>
             ) : null}
           </svg>
         </div>
