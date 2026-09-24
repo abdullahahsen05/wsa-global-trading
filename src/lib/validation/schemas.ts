@@ -16,7 +16,7 @@ export const brokerConnectionSchema = z
       .transform((value) => value.toUpperCase() as "MT4" | "MT5")
       .default("MT5"),
     login: z.string().trim().max(50).default(""),
-    password: z.string().max(200).default(""),
+    password: z.string().trim().max(200).default(""),
     server: z.string().trim().max(100).default(""),
     brokerProviderId: z.string().uuid("Broker provider is invalid").optional(),
     brokerName: z.string().trim().min(2, "Broker name is required").max(100).optional(),

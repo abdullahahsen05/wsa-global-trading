@@ -212,6 +212,10 @@ function sanitizeMessage(msg: string, creds: BrokerCredentialPayload): string {
   return s.slice(0, 500);
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -793,7 +797,19 @@ async function runApi2TradeSync(params: {
         .eq('id', accountId);
     }
 
-    const health = await adapter.verifyConnection(accountId);
+    const initialConnectAttempts = Math.max(
+      1,
+      Number.parseInt(process.env.API2TRADE_INITIAL_CONNECT_ATTEMPTS ?? '5', 10) || 5,
+    );
+    const initialConnectDelayMs = Math.max(
+      500,
+      Number.parseInt(process.env.API2TRADE_INITIAL_CONNECT_DELAY_MS ?? '2500', 10) || 2500,
+    );
+    let health = await adapter.verifyConnection(accountId);
+    for (let attempt = 1; !health.ok && attempt < initialConnectAttempts; attempt += 1) {
+      await delay(initialConnectDelayMs);
+      health = await adapter.verifyConnection(accountId);
+    }
     if (!health.ok) {
       const message = health.message || 'The broker account is not connected yet.';
       const preservedConnectedStatus = await markFailed(supabase, accountId, message, previousStatus);

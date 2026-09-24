@@ -97,7 +97,9 @@ export function MasterAccountConnectDialog({
     const selectedServer = servers.data?.servers.find((item) => item.serverName === serverSelection);
     const server = serverSelection === CUSTOM ? customServer.trim() : serverSelection;
 
-    if (!accountLabel.trim() || !brokerName.trim() || !login.trim() || !password || !server) {
+    const normalizedPassword = password.trim();
+
+    if (!accountLabel.trim() || !brokerName.trim() || !login.trim() || !normalizedPassword || !server) {
       setError("Account label, broker name, server, login, and password are required.");
       return;
     }
@@ -123,7 +125,7 @@ export function MasterAccountConnectDialog({
           body: JSON.stringify({
             platform,
             login: login.trim(),
-            password,
+            password: normalizedPassword,
             server,
             brokerName: brokerName.trim() || selectedServer?.brokerName,
             useCustomBrokerServer: true,

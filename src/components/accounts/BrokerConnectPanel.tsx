@@ -150,7 +150,7 @@ export function BrokerConnectPanel({ accountId }: { accountId: string }) {
         body: JSON.stringify({
           platform: form.platform,
           login: form.login.trim(),
-          password: form.password,
+          password: form.password.trim(),
           server: form.server === CUSTOM_SERVER_OPTION
             ? form.customServer.trim()
             : form.server.trim(),

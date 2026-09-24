@@ -288,7 +288,7 @@ function AccountsContent() {
     const form = event.currentTarget;
     const formData = new FormData(form);
     const login = (formData.get("login") as string)?.trim();
-    const password = formData.get("password") as string;
+    const password = (formData.get("password") as string)?.trim();
     const serverSelection = (formData.get("serverSelection") as string)?.trim();
     const customServer = (formData.get("customServer") as string)?.trim();
     const server = serverSelection === CUSTOM_SERVER_OPTION
