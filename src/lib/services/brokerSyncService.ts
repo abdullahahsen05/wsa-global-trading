@@ -1009,18 +1009,11 @@ export async function syncTradingAccount(
     actorUserId,
     credentials: effectiveCredentials,
     platform,
-    existingProviderAccountId: activeProvider === 'api2trade'
-      ? usableApi2TradeProviderAccountId(account.provider_account_id ?? null)
-      : account.provider_account_id ?? null,
+    existingProviderAccountId: usableApi2TradeProviderAccountId(account.provider_account_id ?? null),
     preserveRestricted: account.status === 'RESTRICTED',
     previousStatus: account.status,
   };
-  const result = activeProvider === 'api2trade'
-    ? await runApi2TradeSync(commonSyncParams)
-    : await runMetaApiSync({
-        ...commonSyncParams,
-        token: process.env.METAAPI_TOKEN!,
-      });
+  const result = await runApi2TradeSync(commonSyncParams);
 
 
   // ── Post-sync: risk evaluation and notifications ──────────────────────────
@@ -1094,121 +1087,48 @@ export async function getBrokerConnectionStatus(
     platform: account.broker_platform,
     providerAccountId: account.provider_account_id,
   });
-  const activeProvider = getBrokerProviderId();
-
-  if (activeProvider === 'api2trade') {
-    if (!account.provider_account_id || !brokerProviderConfigured()) {
-      return {
-        accountId,
-        status: effectiveLocalStatus,
-        providerState: account.provider_account_id ? 'CONFIG_MISSING' : null,
-        providerConnectionStatus: null,
-        providerReady: false,
-        lastSyncedAt: account.last_synced_at,
-        message: account.provider_account_id
-          ? 'Connection status is unavailable because the provider is not configured.'
-          : effectiveLocalStatus === 'PENDING'
-            ? 'Account setup is incomplete. Add broker credentials to start the connection.'
-            : 'The broker account has not been provisioned yet.',
-      };
-    }
-    const adapter = createBrokerAdapter();
-    const health = await adapter.verifyConnection(accountId);
-    const synchronized = effectiveLocalStatus === 'CONNECTED' || effectiveLocalStatus === 'RESTRICTED';
-    const status = health.ok
-      ? effectiveLocalStatus === 'INACTIVE'
-        ? 'INACTIVE'
-        : synchronized
-          ? effectiveLocalStatus
-          : 'SYNCING'
-      : effectiveLocalStatus === 'DISCONNECTED' || effectiveLocalStatus === 'INACTIVE'
-        ? effectiveLocalStatus
-        : 'SYNCING';
-    return {
-      accountId,
-      status,
-      providerState: health.ok ? 'READY' : 'CONNECTING',
-      providerConnectionStatus: health.ok ? 'CONNECTED' : 'UNKNOWN',
-      providerReady: health.ok,
-      lastSyncedAt: account.last_synced_at,
-      message: status === 'INACTIVE'
-        ? 'This account has had no successful broker activity for 10 days. Re-enter or confirm the credentials, then sync it to reconnect.'
-        : health.ok
-          ? synchronized
-            ? 'The broker connection is active and the account has synchronized.'
-            : 'The broker connection is active, but the first account-data sync has not completed. Run Sync account to finish connecting.'
-          : health.message,
-    };
-  }
-
-  const token = process.env.METAAPI_TOKEN;
-
-  if (!account.provider_account_id || !token) {
+  if (!account.provider_account_id || !brokerProviderConfigured()) {
     return {
       accountId,
       status: effectiveLocalStatus,
-      providerState: null,
+      providerState: account.provider_account_id ? 'CONFIG_MISSING' : null,
       providerConnectionStatus: null,
       providerReady: false,
       lastSyncedAt: account.last_synced_at,
       message: account.provider_account_id
-        ? 'Broker connection status is unavailable because the provider is not configured.'
+        ? 'Connection status is unavailable because API2Trade is not configured.'
         : effectiveLocalStatus === 'PENDING'
-          ? 'Account setup is incomplete. Add broker credentials to start the connection.'
-          : 'The broker connection has not been provisioned yet.',
+          ? 'Account setup is incomplete. Add broker credentials to start the API2Trade connection.'
+          : 'The API2Trade account has not been provisioned yet.',
     };
   }
-
-  const MetaApi = await loadMetaApi();
-  const api = new MetaApi(token);
-  try {
-    const providerAccount = await api.metatraderAccountApi.getAccount(account.provider_account_id);
-    const providerState = providerAccount.state ?? null;
-    const providerConnectionStatus = providerAccount.connectionStatus ?? null;
-    const providerReady = providerState === 'DEPLOYED' && providerConnectionStatus === 'CONNECTED';
-
-    const synchronized = effectiveLocalStatus === 'CONNECTED' || effectiveLocalStatus === 'RESTRICTED';
-    const status = providerReady
-      ? effectiveLocalStatus === 'INACTIVE'
-        ? 'INACTIVE'
-        : synchronized
-          ? effectiveLocalStatus
-          : 'SYNCING'
-      : effectiveLocalStatus === 'DISCONNECTED' || effectiveLocalStatus === 'INACTIVE'
+  const adapter = createBrokerAdapter();
+  const health = await adapter.verifyConnection(accountId);
+  const synchronized = effectiveLocalStatus === 'CONNECTED' || effectiveLocalStatus === 'RESTRICTED';
+  const status = health.ok
+    ? effectiveLocalStatus === 'INACTIVE'
+      ? 'INACTIVE'
+      : synchronized
         ? effectiveLocalStatus
-        : 'SYNCING';
-    return {
-      accountId,
-      status,
-      providerState,
-      providerConnectionStatus,
-      providerReady,
-      lastSyncedAt: account.last_synced_at,
-      message: status === 'INACTIVE'
-        ? 'This account has had no successful broker activity for 10 days. Re-enter or confirm the credentials, then sync it to reconnect.'
-        : providerReady
+        : 'SYNCING'
+    : effectiveLocalStatus === 'DISCONNECTED' || effectiveLocalStatus === 'INACTIVE'
+      ? effectiveLocalStatus
+      : 'SYNCING';
+  return {
+    accountId,
+    status,
+    providerState: health.ok ? 'READY' : 'CONNECTING',
+    providerConnectionStatus: health.ok ? 'CONNECTED' : 'UNKNOWN',
+    providerReady: health.ok,
+    lastSyncedAt: account.last_synced_at,
+    message: status === 'INACTIVE'
+      ? 'This account has had no successful API2Trade activity for 10 days. Re-enter or confirm the credentials, then sync it to reconnect.'
+      : health.ok
         ? synchronized
-          ? 'Broker connection is active and the account has synchronized.'
-          : 'Broker connection is active, but the first account-data sync has not completed. Run Sync account to finish connecting.'
-        : 'Broker connection is still starting for this account. No action is required yet.',
-    };
-  } catch (providerError) {
-    const safeMessage = (providerError instanceof Error ? providerError.message : 'Provider status lookup failed.')
-      .replace(/password[^,\s]*/gi, '[redacted]')
-      .replace(/login[^,\s]*/gi, '[redacted]')
-      .slice(0, 300);
-    return {
-      accountId,
-      status: effectiveLocalStatus,
-      providerState: null,
-      providerConnectionStatus: null,
-      providerReady: false,
-      lastSyncedAt: account.last_synced_at,
-      message: safeMessage,
-    };
-  } finally {
-    try { api.close(); } catch { /* ignore */ }
-  }
+          ? 'The API2Trade broker connection is active and the account has synchronized.'
+          : 'The API2Trade broker connection is active, but the first account-data sync has not completed. Run Sync account to finish connecting.'
+        : health.message,
+  };
 }
 
 export async function refreshAccountTrades(

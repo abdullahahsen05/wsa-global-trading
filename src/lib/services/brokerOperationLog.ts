@@ -39,7 +39,7 @@ export async function logBrokerOperation(params: {
       account_id: params.accountId,
       user_id: params.userId ?? null,
       operation: params.operation,
-      provider: params.provider ?? "metaapi",
+      provider: params.provider ?? "api2trade",
       status: params.status,
       error_code: params.errorCode ?? null,
       error_message: params.errorMessage ? params.errorMessage.slice(0, 500) : null,

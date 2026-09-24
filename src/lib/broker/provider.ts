@@ -5,7 +5,7 @@ if (typeof window !== "undefined") {
 import { Api2TradeBrokerAdapter } from "./Api2TradeBrokerAdapter";
 import type { BrokerAdapter } from "./BrokerAdapter";
 
-export type BrokerProviderId = "metaapi" | "api2trade";
+export type BrokerProviderId = "api2trade";
 
 export function getBrokerProviderId(): BrokerProviderId {
   return "api2trade";

@@ -93,7 +93,7 @@ export async function getDecryptedCredentials(
     password: secret.password,
     server: secret.server,
     platform: secret.platform,
-    provider: (cred.provider as string) ?? "metaapi",
+    provider: (cred.provider as string) ?? "api2trade",
     brokerName: (account?.broker_name as string) ?? undefined,
   };
 }
@@ -157,7 +157,7 @@ export async function storeBrokerCredentials(
   if (error) throw new Error(`Failed to store broker credentials: ${error.message}`);
 }
 
-/** Returns the stored provider account id (MetaAPI account id) for an account, if any. */
+/** Returns the stored API2Trade account id for an account, if any. */
 export async function getProviderAccountId(accountId: string): Promise<string | null> {
   const supabase = createAdminClient();
   const { data } = await supabase

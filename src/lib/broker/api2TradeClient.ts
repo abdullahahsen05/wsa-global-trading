@@ -203,9 +203,14 @@ function isProviderErrorRecord(record: Record<string, unknown>): boolean {
   const code = String(record.code ?? "").trim().toUpperCase();
   const message = String(record.message ?? "").trim();
   if (!code && !message) return false;
-  if (code && ["OK", "DONE", "SUCCESS", "CONNECTED"].includes(code)) return false;
+  if (
+    /client with id .*not found|invalid[_ -]?account|invalid[_ -]?token|not authorized|unauthorized|forbidden|server .*not found|connection failed|failed|error/i
+      .test(message)
+  ) {
+    return true;
+  }
   if (code && /ERROR|INVALID|NOT_FOUND|UNAUTHORIZED|FORBIDDEN|FAILED|FAIL/.test(code)) return true;
-  if (/client with id .*not found|invalid[_ -]?token|not authorized|unauthorized|forbidden/i.test(message)) return true;
+  if (code && ["OK", "DONE", "SUCCESS", "CONNECTED"].includes(code)) return false;
   return false;
 }
 
@@ -335,6 +340,7 @@ export class Api2TradeClient {
     if (!response.ok) {
       throw new Error(publicApi2TradeError(`Broker service request failed (${response.status}): ${bodyText}`));
     }
+    assertNoProviderError(bodyText, endpoint);
     if (options?.expectText) return bodyText as T;
     if (!bodyText.trim()) return null as T;
     try {
@@ -379,22 +385,13 @@ export class Api2TradeClient {
   }): Promise<string> {
     const normalizedType = params.type.toUpperCase() as "MT4" | "MT5";
     const providerType = normalizedType === "MT4" ? "Metatrader 4" : "Metatrader 5";
-    const result = await this.request<unknown>("POST", "RegisterAccount", {
+    const result = await this.request<unknown>("GET", "RegisterAccount", {
       user: params.user,
       login: params.user,
       password: params.password,
       server: params.server,
       type: providerType,
       name: params.name,
-    }, {
-      body: {
-        user: params.user,
-        login: params.user,
-        password: params.password,
-        server: params.server,
-        type: providerType,
-        name: params.name,
-      },
     });
     if (typeof result === "string") {
       const token = normalizeApi2TradeToken(result);
@@ -456,7 +453,7 @@ export class Api2TradeClient {
 
   async disconnect(accountId: string): Promise<string> {
     if (this.config.apiKey) {
-      return this.request<string>("DELETE", "DeleteAccount", this.accountParams(accountId), { expectText: true });
+      return this.request<string>("GET", "DeleteAccount", this.accountParams(accountId), { expectText: true });
     }
     return this.request<string>("GET", "Disconnect", this.accountParams(accountId), { expectText: true });
   }
