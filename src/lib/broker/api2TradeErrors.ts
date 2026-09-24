@@ -22,6 +22,16 @@ export function publicBrokerConnectionError(error: unknown): string {
   const normalized = sanitized.toLowerCase();
 
   if (
+    normalized.includes("invalid_account")
+    || normalized.includes("invalid account")
+    || normalized.includes("account disabled")
+    || normalized.includes("authorization failed")
+    || normalized.includes("authentication failed")
+  ) {
+    return "Connection failed because the broker rejected this MT5 login, password, or server. Confirm it is the main trading password and the exact server shown inside MT5.";
+  }
+
+  if (
     normalized.includes("trading account not found")
     || normalized.includes("client with id")
     || normalized.includes("invalid_token")
