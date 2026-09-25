@@ -145,7 +145,7 @@ export async function fetchFredEconomicEvents(params?: {
   });
 
   const response = await fetch(`${FRED_API_BASE}/releases/dates?${search.toString()}`, {
-    next: { revalidate: 60 * 60 },
+    cache: "no-store",
   });
 
   if (!response.ok) {

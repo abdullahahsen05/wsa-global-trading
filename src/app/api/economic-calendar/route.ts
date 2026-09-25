@@ -3,6 +3,8 @@ import { requireTrader, AuthError } from "@/lib/auth/session";
 import { listPublishedEvents } from "@/lib/services/economicCalendarService";
 
 // GET /api/economic-calendar — readable by any authenticated active user.
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   try {
     await requireTrader();
@@ -18,6 +20,11 @@ export async function GET(request: Request) {
         to: to && !Number.isNaN(to.getTime()) ? to : undefined,
         limit: Number.isFinite(limitParam) ? limitParam : 200,
       }),
+      {
+        headers: {
+          "Cache-Control": "no-store, max-age=0",
+        },
+      },
     );
   } catch (err) {
     if (err instanceof AuthError) return jsonFail(err.code, err.message, err.statusCode);

@@ -121,7 +121,7 @@ export default function TraderCalendarPage() {
       to: end.toISOString(),
     };
   }, [dateRange, now]);
-  const { data: events = [], isLoading, isError, isFetching } = useQuery<CalendarEvent[]>({
+  const { data: events = [], isLoading, isError } = useQuery<CalendarEvent[]>({
     queryKey: [...queryKeys.economicCalendar, calendarWindow.from, calendarWindow.to],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: "300" });
@@ -134,9 +134,8 @@ export default function TraderCalendarPage() {
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load calendar");
       return json.data;
     },
-    refetchInterval: 60_000,
     refetchOnWindowFocus: true,
-    staleTime: 30_000,
+    staleTime: 5 * 60_000,
   });
 
   useEffect(() => {
@@ -186,7 +185,7 @@ export default function TraderCalendarPage() {
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Calendar</h2>
-            <p className="mt-1 text-sm text-muted">ForexFactory-style macro calendar using FRED releases and WSA events.</p>
+            <p className="mt-1 text-sm text-muted">ForexFactory-style macro calendar with a fresh daily event window.</p>
           </div>
           <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-3">
             <div className="min-w-[180px]">
@@ -224,10 +223,6 @@ export default function TraderCalendarPage() {
             <span className="text-accent">{new Date(now).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
             <span>Today: {shortDateLabel(new Date(now).toISOString()).replace(/^[^,]+,?\s*/, "")}</span>
             <span className="rounded-[3px] border border-line bg-background px-2 py-1">{rangeLabel(dateRange)}</span>
-            <span className="rounded-[3px] border border-line bg-background px-2 py-1">FRED + WSA</span>
-            <span className="rounded-[3px] border border-line bg-background px-2 py-1">
-              {isFetching ? "Refreshing" : "Auto refresh 60s"}
-            </span>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
             <span>{filtered.length} events</span>
