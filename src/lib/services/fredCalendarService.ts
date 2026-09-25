@@ -75,10 +75,54 @@ function categoryFor(name: string): string {
   return "Economic release";
 }
 
-function eventTimeFromFredDate(date: string): string {
-  // FRED release-calendar rows are date-level events. Use noon UTC so sorting is stable
-  // without pretending FRED supplied an exact intraday release time.
-  return `${date}T12:00:00.000Z`;
+const FRED_RELEASE_TIME_ZONE = "America/Chicago";
+
+function fredReleaseLocalTime(name: string): string {
+  if (/fomc|federal open market|minutes|beige book/i.test(name)) return "13:00";
+  if (/employment situation|nonfarm|payroll|unemployment|jobless claims|claims/i.test(name)) return "07:30";
+  if (/consumer price index|\bcpi\b|producer price index|\bppi\b|personal consumption expenditures|\bpce\b|personal income/i.test(name)) return "07:30";
+  if (/gross domestic product|\bgdp\b|retail sales|durable goods|trade balance|imports|exports|empire state|philadelphia fed/i.test(name)) return "07:30";
+  if (/industrial production|business inventories|factory orders|jolts|job openings|consumer confidence|consumer sentiment/i.test(name)) return "09:00";
+  if (/h\.?15|selected interest rates|commercial paper|money stock/i.test(name)) return "15:15";
+  if (/h\.?4\.?1|factors affecting reserve balances/i.test(name)) return "15:30";
+  return "08:00";
+}
+
+function zonedDateTimeToIso(date: string, time: string, timeZone: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  let utc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date(utc));
+
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const zonedAsUtc = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      Number(values.second),
+      0,
+    );
+    utc += Date.UTC(year, month - 1, day, hour, minute, 0, 0) - zonedAsUtc;
+  }
+
+  return new Date(utc).toISOString();
+}
+
+function eventTimeFromFredDate(date: string, releaseName: string): string {
+  return zonedDateTimeToIso(date, fredReleaseLocalTime(releaseName), FRED_RELEASE_TIME_ZONE);
 }
 
 function fredTimestampToIso(value: string | undefined, fallback: string): string {
@@ -100,9 +144,9 @@ function mapFredRelease(row: FredReleaseDate): EconomicEventDto | null {
     countryCode,
     currency,
     impact,
-    eventTime: eventTimeFromFredDate(row.date),
+    eventTime: eventTimeFromFredDate(row.date, row.release_name),
     endTime: null,
-    timezone: "UTC",
+    timezone: FRED_RELEASE_TIME_ZONE,
     eventType: "ECONOMIC",
     locationUrl: `https://fred.stlouisfed.org/release?rid=${row.release_id}`,
     status: "PUBLISHED",
@@ -111,7 +155,7 @@ function mapFredRelease(row: FredReleaseDate): EconomicEventDto | null {
     forecast: null,
     previous: null,
     source: "FRED",
-    description: `FRED economic release date. ${row.release_last_updated ? `Last updated by source: ${row.release_last_updated}.` : "Exact release time is not supplied by FRED."}`,
+    description: `FRED economic release date with WSA scheduled-time classification. ${row.release_last_updated ? `Last updated by source: ${row.release_last_updated}.` : ""}`,
     category,
     createdAt: now,
     updatedAt: fredTimestampToIso(row.release_last_updated, now),

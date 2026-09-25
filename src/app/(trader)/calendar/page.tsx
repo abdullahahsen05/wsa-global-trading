@@ -79,6 +79,18 @@ function hasEventValue(value: string | null): boolean {
   return Boolean(value?.trim());
 }
 
+function formatEventTime(event: CalendarEvent): string {
+  const timeZone = event.timezone || undefined;
+  const time = new Date(event.eventTime).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone,
+  });
+  if (timeZone === "America/Chicago") return `${time} CT`;
+  if (timeZone === "UTC") return `${time} UTC`;
+  return time;
+}
+
 function startOfLocalDay(timestamp: number): Date {
   const date = new Date(timestamp);
   date.setHours(0, 0, 0, 0);
@@ -296,10 +308,7 @@ export default function TraderCalendarPage() {
                         </td>
                       </tr>
                       {dayEvents.map((event, index) => {
-                        const timeLabel =
-                          event.source === "FRED"
-                            ? "All Day"
-                            : new Date(event.eventTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                        const timeLabel = formatEventTime(event);
                         const dotCount = impactDots[event.impact];
                         return (
                           <tr key={event.id} className="group bg-panel/35 transition hover:bg-accent/[0.05]">
