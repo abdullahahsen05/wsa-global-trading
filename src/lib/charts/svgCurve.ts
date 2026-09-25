@@ -3,79 +3,73 @@ export type SvgCurvePoint = {
   y: number;
 };
 
-function bellCurveFallback(points: SvgCurvePoint[]): SvgCurvePoint[] {
-  if (points.length === 0) return [];
-
-  const yValues = points.map((point) => point.y);
-  const yRange = Math.max(...yValues) - Math.min(...yValues);
-  if (points.length > 2 && yRange > 1.5) return points;
-
-  const first = points[0];
-  const last = points[points.length - 1] ?? first;
-  const startX = points.length === 1 ? first.x - 120 : first.x;
-  const endX = points.length === 1 ? first.x + 120 : last.x;
-  const width = Math.max(1, endX - startX);
-  const baseY = yValues.reduce((sum, value) => sum + value, 0) / yValues.length;
-  const amplitude = Math.max(22, Math.min(58, width * 0.09));
-  const generatedCount = Math.max(7, points.length);
-
-  return Array.from({ length: generatedCount }, (_, index) => {
-    const ratio = index / Math.max(1, generatedCount - 1);
-    const existing = points[Math.round(ratio * Math.max(0, points.length - 1))];
-    const x = points.length > 2 && existing
-      ? existing.x
-      : startX + ratio * width;
-
-    // Use a soft bell profile for flat/no-variation series. This keeps the
-    // visual language as a curve while the displayed numeric value remains
-    // the real account value in the surrounding card labels.
-    const bell = Math.sin(Math.PI * ratio);
-    const shoulder = Math.sin(Math.PI * ratio * 2) * 0.16;
-    return {
-      x,
-      y: Math.max(4, baseY - amplitude * (bell + shoulder)),
-    };
-  });
+function validPoints(points: SvgCurvePoint[]): SvgCurvePoint[] {
+  return points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
 }
 
-function displayCurvePoints(points: SvgCurvePoint[]): SvgCurvePoint[] {
-  return bellCurveFallback(points).filter((point) => (
-    Number.isFinite(point.x) &&
-    Number.isFinite(point.y)
-  ));
-}
+/**
+ * Monotone cubic interpolation keeps every broker sample as an anchor without
+ * overshooting between points. A flat account history stays flat; no visual
+ * data is fabricated to make the chart look more active.
+ */
+function toMonotoneCubicPath(points: SvgCurvePoint[]): string {
+  const data = validPoints(points);
+  if (data.length === 0) return "";
+  if (data.length === 1) return `M ${data[0].x} ${data[0].y}`;
+  if (data.length === 2) return `M ${data[0].x} ${data[0].y} L ${data[1].x} ${data[1].y}`;
 
-function toMonotoneQuadraticPath(points: SvgCurvePoint[]): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-  if (points.length === 2) return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
-
-  let path = `M ${points[0].x} ${points[0].y}`;
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const current = points[index];
-    const next = points[index + 1];
-    const midX = (current.x + next.x) / 2;
-    const midY = (current.y + next.y) / 2;
-    path += ` Q ${current.x} ${current.y}, ${midX} ${midY}`;
+  const slopes: number[] = [];
+  for (let index = 0; index < data.length - 1; index += 1) {
+    const width = data[index + 1].x - data[index].x;
+    if (width <= 0) return data.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+    slopes.push((data[index + 1].y - data[index].y) / width);
   }
 
-  const previous = points[points.length - 2];
-  const last = points[points.length - 1];
-  path += ` Q ${previous.x} ${previous.y}, ${last.x} ${last.y}`;
+  const tangents = new Array<number>(data.length);
+  tangents[0] = slopes[0];
+  tangents[data.length - 1] = slopes[slopes.length - 1];
+  for (let index = 1; index < data.length - 1; index += 1) {
+    const previous = slopes[index - 1];
+    const next = slopes[index];
+    tangents[index] = previous === 0 || next === 0 || previous * next < 0 ? 0 : (previous + next) / 2;
+  }
+
+  let path = `M ${data[0].x} ${data[0].y}`;
+  for (let index = 0; index < data.length - 1; index += 1) {
+    const current = data[index];
+    const next = data[index + 1];
+    const width = next.x - current.x;
+    const slope = slopes[index];
+    let startTangent = tangents[index];
+    let endTangent = tangents[index + 1];
+    if (slope === 0) {
+      startTangent = 0;
+      endTangent = 0;
+    } else {
+      const startRatio = startTangent / slope;
+      const endRatio = endTangent / slope;
+      const magnitude = Math.hypot(startRatio, endRatio);
+      if (magnitude > 3) {
+        const scale = 3 / magnitude;
+        startTangent = scale * startRatio * slope;
+        endTangent = scale * endRatio * slope;
+      }
+    }
+    path += ` C ${(current.x + width / 3).toFixed(2)} ${(current.y + (startTangent * width) / 3).toFixed(2)}, ${(next.x - width / 3).toFixed(2)} ${(next.y - (endTangent * width) / 3).toFixed(2)}, ${next.x.toFixed(2)} ${next.y.toFixed(2)}`;
+  }
   return path;
 }
 
 export function toSmoothPath(points: SvgCurvePoint[]): string {
-  return toMonotoneQuadraticPath(displayCurvePoints(points));
+  return toMonotoneCubicPath(points);
 }
 
 export function toSmoothAreaPath(points: SvgCurvePoint[], baselineY: number): string {
-  const displayPoints = displayCurvePoints(points);
-  if (displayPoints.length === 0) return "";
-
-  const first = displayPoints[0];
-  const last = displayPoints[displayPoints.length - 1];
-  const curve = toMonotoneQuadraticPath(displayPoints);
+  const data = validPoints(points);
+  if (data.length === 0) return "";
+  const first = data[0];
+  const last = data[data.length - 1];
+  const curve = toMonotoneCubicPath(data);
 
   return `${curve} L ${last.x} ${baselineY} L ${first.x} ${baselineY} Z`;
 }

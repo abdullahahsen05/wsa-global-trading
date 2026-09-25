@@ -11,6 +11,7 @@ import { DashboardKpiStrip, MarketSentimentStrip } from "@/components/dashboard/
 import { PerformanceRings, type PerformanceRingItem } from "@/components/dashboard/PerformanceRings";
 import { Panel, PageActionGroup, WorkspacePage } from "@/components/app/WorkspaceUI";
 import { formatMoney, formatPercent, normalizeMoneyAmount } from "@/lib/utils/format";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import {
   calculateAverageWinLossRatio,
   calculateConsistencyScore,
@@ -46,11 +47,6 @@ const dashboardTabs: Array<{ id: DashboardView; label: string }> = [
   { id: "PROFIT_SUMMARY", label: "Profit Summary" },
   { id: "CALENDAR_TRACKER", label: "Calendar Tracker" },
 ];
-
-type ChartMetricPoint = {
-  x: number;
-  y: number;
-};
 
 type PerformanceChartTab = "CHART" | "GROWTH" | "BALANCE" | "PROFIT" | "DRAWDOWN" | "MARGIN";
 
@@ -118,24 +114,6 @@ function formatCompactMoneyAmount(amount: number, currency: string): string {
 function formatShortDate(value: string | null | undefined): string {
   if (!value) return "";
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "2-digit" });
-}
-
-function toLinearPath(points: ChartMetricPoint[]): string {
-  if (points.length === 0) return "";
-  return points
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(" ");
-}
-
-function toLinearAreaPath(points: ChartMetricPoint[], baselineY: number): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) {
-    const point = points[0];
-    return `M ${point.x.toFixed(2)} ${baselineY} L ${point.x.toFixed(2)} ${point.y.toFixed(2)} L ${point.x.toFixed(2)} ${baselineY} Z`;
-  }
-  const first = points[0];
-  const last = points[points.length - 1];
-  return `${toLinearPath(points)} L ${last.x.toFixed(2)} ${baselineY} L ${first.x.toFixed(2)} ${baselineY} Z`;
 }
 
 function tradeTime(trade: TradeDto): number {
@@ -303,13 +281,13 @@ function TraderPerformanceChart({
   const profitPoints = pnlTimeline.map((point) => ({ x: scaleX(point.at), y: scaleProfitY(point.pnl) }));
   const drawdownPoints = drawdownTimeline.map((point) => ({ x: scaleX(point.at), y: scaleDrawdownY(point.drawdown) }));
   const zeroY = scaleY(0);
-  const equityPath = toLinearPath(equityPoints);
-  const equityArea = toLinearAreaPath(equityPoints, zeroY);
-  const pnlPath = toLinearPath(pnlPoints);
-  const balancePath = toLinearPath(balancePoints);
-  const equityMoneyPath = toLinearPath(equityMoneyPoints);
-  const profitPath = toLinearPath(profitPoints);
-  const drawdownPath = toLinearPath(drawdownPoints);
+  const equityPath = toSmoothPath(equityPoints);
+  const equityArea = toSmoothAreaPath(equityPoints, zeroY);
+  const pnlPath = toSmoothPath(pnlPoints);
+  const balancePath = toSmoothPath(balancePoints);
+  const equityMoneyPath = toSmoothPath(equityMoneyPoints);
+  const profitPath = toSmoothPath(profitPoints);
+  const drawdownPath = toSmoothPath(drawdownPoints);
   const maxVolume = Math.max(...volumeTimeline.map((point) => point.volume), 1);
   const dateLabels = chartDateLabels(equityCurve, trades);
   const effectiveDateLabels = dateLabels.start
@@ -528,7 +506,7 @@ function TraderPerformanceChart({
             ) : null}
             {activeChartTab === "BALANCE" && balancePoints.length > 1 ? (
               <>
-                <path d={toLinearAreaPath(equityMoneyPoints, height - paddingY)} fill="url(#dashboardEquityFill)" />
+                <path d={toSmoothAreaPath(equityMoneyPoints, height - paddingY)} fill="url(#dashboardEquityFill)" />
                 <path d={balancePath} fill="none" stroke="#ffcf00" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
                 <path d={equityMoneyPath} fill="none" stroke="#21d19f" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
               </>

@@ -17,6 +17,7 @@ import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 import type {
   AnalyticsSummary,
+  BrokerPerformanceChart,
   EquityPoint,
   TraderAccountSummary,
 } from "@/lib/domain/types";
@@ -28,7 +29,8 @@ import {
 const periods = ["DAILY", "WEEKLY", "MONTHLY", "ALL_TIME"] as const;
 
 function DrawdownMeter({ value }: { value: number }) {
-  const capped = Math.min(value, 12);
+  const chartMaximum = Math.max(1, Math.ceil(Math.max(0, value) * 1.25 * 10) / 10);
+  const capped = Math.min(Math.max(0, value), chartMaximum);
   return (
     <div className="rounded-[4px] border border-line bg-panel p-5">
       <div className="flex items-center justify-between gap-3">
@@ -49,13 +51,13 @@ function DrawdownMeter({ value }: { value: number }) {
       <div className="mt-5 h-4 overflow-hidden rounded-full border border-line bg-background">
         <div
           className="h-full rounded-full bg-accent transition-all"
-          style={{ width: `${(capped / 12) * 100}%` }}
+          style={{ width: `${(capped / chartMaximum) * 100}%` }}
         />
       </div>
       <div className="mt-4 flex items-center justify-between text-xs text-muted">
         <span>0%</span>
-        <span>6%</span>
-        <span>12%</span>
+        <span>{formatPercent(chartMaximum / 2)}</span>
+        <span>{formatPercent(chartMaximum)}</span>
       </div>
     </div>
   );
@@ -66,13 +68,20 @@ function GrowthGraph({ points }: { points: EquityPoint[] }) {
   const height = 220;
   const padding = 18;
   const values = points.map((point) => point.equity);
-  const min = values.length > 0 ? Math.min(...values) - 250 : 0;
-  const max = values.length > 0 ? Math.max(...values) + 250 : 1;
+  const actualMin = values.length > 0 ? Math.min(...values) : 0;
+  const actualMax = values.length > 0 ? Math.max(...values) : 1;
+  const spread = Math.max(actualMax - actualMin, Math.max(Math.abs(actualMax) * 0.002, 1));
+  const min = actualMin - spread * 0.1;
+  const max = actualMax + spread * 0.1;
   const range = max - min || 1;
+  const firstTime = new Date(points[0]?.capturedAt ?? 0).getTime();
+  const lastTime = new Date(points.at(-1)?.capturedAt ?? 0).getTime();
   const coordinates = points.map((point, index) => {
     const x =
       padding +
-      (index / Math.max(points.length - 1, 1)) * (width - padding * 2);
+      (points.length === 1
+        ? width - padding * 2
+        : ((new Date(point.capturedAt).getTime() - firstTime) / Math.max(lastTime - firstTime, 1)) * (width - padding * 2));
     const y =
       height -
       padding -
@@ -228,14 +237,14 @@ function AnalyticsContent() {
   });
 
   const {
-    data: equityCurve = [],
+    data: performanceChart,
     isLoading: curveLoading,
     isError: curveError,
-  } = useQuery<EquityPoint[]>({
-    queryKey: ["equity-curve", accountScope, period],
+  } = useQuery<BrokerPerformanceChart>({
+    queryKey: ["performance-chart", accountScope, period],
     queryFn: async () => {
       const res = await fetch(
-        `/api/analytics/equity-curve?accountId=${accountScope}&period=${period}`,
+        `/api/analytics/performance-chart?accountId=${accountScope}&period=${period}`,
       );
       const json = await res.json();
       if (!json.ok)
@@ -243,8 +252,13 @@ function AnalyticsContent() {
       return json.data;
     },
     enabled: !accountsLoading && connectedAccounts.length > 0,
-    refetchInterval: 10_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
+  const equityCurve = performanceChart?.equityCurve ?? [];
   const selectedCurrency =
     analyticsSummary?.totalProfit.currency ??
     selectedAccount?.equity.currency ??
@@ -423,7 +437,13 @@ function AnalyticsContent() {
       </div>
 
       <div className="mt-5 grid gap-4 xl:grid-cols-[0.64fr_0.36fr]">
-        <EquityCurve data={equityCurve} currency={selectedCurrency} />
+        <EquityCurve
+          data={equityCurve}
+          currency={selectedCurrency}
+          description={performanceChart?.source === "API2TRADE"
+            ? "API2Trade equity history from the selected MT4/MT5 account"
+            : "Live broker snapshots for the selected account scope"}
+        />
         <DrawdownMeter value={analyticsSummary?.maxDrawdownPercent ?? 0} />
       </div>
 

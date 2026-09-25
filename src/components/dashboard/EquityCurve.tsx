@@ -1,49 +1,6 @@
 import type { EquityPoint } from "@/lib/domain/types";
 import { formatMoney } from "@/lib/utils/format";
-
-type ChartCoordinate = {
-  x: number;
-  y: number;
-};
-
-function toActualSmoothPath(points: ChartCoordinate[]): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-  if (points.length === 2)
-    return `M ${points[0].x} ${points[0].y} L ${points[1].x} ${points[1].y}`;
-
-  const [first, second] = points;
-  const commands = [
-    `M ${first.x} ${first.y}`,
-    `Q ${first.x} ${first.y} ${(first.x + second.x) / 2} ${(first.y + second.y) / 2}`,
-  ];
-
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const current = points[index];
-    const next = points[index + 1];
-    commands.push(`T ${(current.x + next.x) / 2} ${(current.y + next.y) / 2}`);
-  }
-
-  const last = points[points.length - 1];
-  commands.push(`T ${last.x} ${last.y}`);
-  return commands.join(" ");
-}
-
-function toActualAreaPath(
-  points: ChartCoordinate[],
-  baselineY: number,
-): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) {
-    const point = points[0];
-    return `M ${point.x} ${baselineY} L ${point.x} ${point.y} L ${point.x} ${baselineY} Z`;
-  }
-
-  const line = toActualSmoothPath(points);
-  const first = points[0];
-  const last = points[points.length - 1];
-  return `${line} L ${last.x} ${baselineY} L ${first.x} ${baselineY} Z`;
-}
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 
 function compactMoney(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
@@ -110,7 +67,12 @@ function EquityCurvePanel({
   };
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
-  const values = data.map((point) => point.equity);
+  const samples = [...data]
+    .map((point) => ({ ...point, at: new Date(point.capturedAt).getTime() }))
+    .filter((point) => Number.isFinite(point.at) && Number.isFinite(point.equity))
+    .sort((left, right) => left.at - right.at);
+  if (samples.length === 0) return EquityCurvePanel({ data: [], title, description, currency });
+  const values = samples.map((point) => point.equity);
   const actualMin = Math.min(...values);
   const actualMax = Math.max(...values);
   const actualRange = actualMax - actualMin;
@@ -121,22 +83,26 @@ function EquityCurvePanel({
   const min = actualMin - buffer;
   const max = actualMax + buffer;
   const range = max - min || 1;
-  const points = data.map((point, index) => {
-    const x = padding.left + (index / Math.max(data.length - 1, 1)) * plotWidth;
+  const firstTime = samples[0]?.at ?? 0;
+  const lastTime = samples.at(-1)?.at ?? firstTime;
+  const points = samples.map((point, index) => {
+    const x = padding.left + (samples.length === 1
+      ? plotWidth
+      : ((point.at - firstTime) / Math.max(lastTime - firstTime, 1)) * plotWidth);
     const y = padding.top + ((max - point.equity) / range) * plotHeight;
     return { x, y, point };
   });
   const curvePoints = points.map(({ x, y }) => ({ x, y }));
-  const linePath = toActualSmoothPath(curvePoints);
-  const areaPath = toActualAreaPath(curvePoints, height - padding.bottom);
-  const latest = data[data.length - 1];
+  const linePath = toSmoothPath(curvePoints);
+  const areaPath = toSmoothAreaPath(curvePoints, height - padding.bottom);
+  const latest = samples[samples.length - 1];
   const axisTicks = Array.from({ length: 5 }, (_, index) => {
     const ratio = index / 4;
     const value = max - range * ratio;
     const y = padding.top + plotHeight * ratio;
     return { value, y };
   });
-  const firstPoint = data[0];
+  const firstPoint = samples[0];
   const latestCoordinate = points[points.length - 1];
 
   return (
@@ -200,14 +166,16 @@ function EquityCurvePanel({
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <circle
-          cx={latestCoordinate.x}
-          cy={latestCoordinate.y}
-          r="5"
-          fill="#050807"
-          stroke="#21d19f"
-          strokeWidth="3"
-        />
+        {latestCoordinate ? (
+          <circle
+            cx={latestCoordinate.x}
+            cy={latestCoordinate.y}
+            r="5"
+            fill="#050807"
+            stroke="#21d19f"
+            strokeWidth="3"
+          />
+        ) : null}
         <text
           x={padding.left}
           y={height - 7}
