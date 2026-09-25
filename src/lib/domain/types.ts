@@ -79,6 +79,28 @@ export interface EquityPoint {
   equity: number;
 }
 
+export type BrokerCashTransferType = "DEPOSIT" | "WITHDRAWAL";
+
+/** A read-only cash movement recorded by the connected MT4/MT5 broker. */
+export interface BrokerCashTransfer {
+  id: string;
+  occurredAt: string;
+  amount: number;
+  type: BrokerCashTransferType;
+  comment?: string | null;
+}
+
+/**
+ * Normalized data for the dashboard chart. API2Trade is queried server-side;
+ * callers never receive a provider account id or an unfiltered broker payload.
+ */
+export interface BrokerPerformanceChart {
+  equityCurve: EquityPoint[];
+  cashTransfers: BrokerCashTransfer[];
+  source: "API2TRADE" | "SNAPSHOTS";
+  refreshedAt: string;
+}
+
 export interface RiskRuleDto {
   id: string;
   accountId: string | null;

@@ -27,6 +27,8 @@ import {
 } from "@/lib/domain/dashboard";
 import type {
   AnalyticsSummary,
+  BrokerCashTransfer,
+  BrokerPerformanceChart,
   EquityPoint,
   TraderAccountSummary,
   TradeDto,
@@ -187,6 +189,8 @@ function chartDateLabels(equityCurve: EquityPoint[], trades: TradeDto[]): { star
 
 function TraderPerformanceChart({
   equityCurve,
+  cashTransfers,
+  chartSource,
   trades,
   currency,
   periodProfit,
@@ -196,6 +200,8 @@ function TraderPerformanceChart({
   accountName,
 }: {
   equityCurve: EquityPoint[];
+  cashTransfers: BrokerCashTransfer[];
+  chartSource: BrokerPerformanceChart["source"];
   trades: TradeDto[];
   currency: string;
   periodProfit: number;
@@ -232,13 +238,18 @@ function TraderPerformanceChart({
       ? [{ capturedAt: new Date(liveEquityAt).toISOString(), at: liveEquityAt, balance: currentEquity, equity: currentEquity }]
       : [];
   const tradeTimes = trades.map(tradeTime).filter(Number.isFinite);
+  const cashTransferTimes = cashTransfers
+    .map((transfer) => new Date(transfer.occurredAt).getTime())
+    .filter(Number.isFinite);
   const timelineStart = Math.min(
     ...equitySamples.map((point) => point.at),
     ...tradeTimes,
+    ...cashTransferTimes,
   );
   const timelineEnd = Math.max(
     ...equitySamples.map((point) => point.at),
     ...tradeTimes,
+    ...cashTransferTimes,
     timelineStart || liveEquityAt,
   );
   const hasTimeline = Number.isFinite(timelineStart) && Number.isFinite(timelineEnd);
@@ -362,6 +373,8 @@ function TraderPerformanceChart({
       active: visibleSeries.volume,
     },
   ];
+  const deposits = cashTransfers.filter((transfer) => transfer.type === "DEPOSIT");
+  const withdrawals = cashTransfers.filter((transfer) => transfer.type === "WITHDRAWAL");
 
   return (
     <Panel className="mt-4 overflow-hidden p-0">
@@ -370,7 +383,7 @@ function TraderPerformanceChart({
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Performance analytics</p>
           <h2 className="mt-2 text-lg font-semibold text-foreground">Account performance curve</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            MT5-synced equity growth, closed P&L, and traded volume from {accountName}, shown with percentage and money scales.
+            {chartSource === "API2TRADE" ? "API2Trade-synced" : "MT5 snapshot"} equity growth, closed P&amp;L, traded volume, and broker cash movements from {accountName}.
           </p>
         </div>
         <div className="grid grid-cols-2 overflow-hidden rounded-[4px] border border-line bg-background text-right sm:grid-cols-4">
@@ -471,6 +484,19 @@ function TraderPerformanceChart({
                 />
               );
             }) : null}
+            {combinedMode ? cashTransfers.map((transfer) => {
+              const at = new Date(transfer.occurredAt).getTime();
+              if (!Number.isFinite(at)) return null;
+              const x = Math.max(paddingX, Math.min(width - paddingX, scaleX(at)));
+              const color = transfer.type === "DEPOSIT" ? "#21d19f" : "#ff5f56";
+              const label = `${transfer.type === "DEPOSIT" ? "Deposit" : "Withdrawal"}: ${formatMoney({ amount: transfer.amount, currency })}`;
+              return (
+                <g key={`${transfer.type}-${transfer.id}`}>
+                  <title>{label}</title>
+                  <circle cx={x} cy={height - paddingY + 2} r="5" fill={color} stroke="#050505" strokeWidth="2" />
+                </g>
+              );
+            }) : null}
             {combinedMode ? <line
               x1={paddingX}
               x2={width - paddingX}
@@ -567,7 +593,7 @@ function TraderPerformanceChart({
           </svg>
         </div>
         {combinedMode ? (
-          <div className="mt-4 grid gap-3 text-xs text-muted sm:grid-cols-4">
+          <div className="mt-4 grid gap-3 text-xs text-muted sm:grid-cols-5">
             {legendItems.map((item) => (
               <button
                 key={item.key}
@@ -592,6 +618,26 @@ function TraderPerformanceChart({
                 <p className="mt-1">{item.helper}</p>
               </button>
             ))}
+            <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-accent-2" />
+                  <span className="font-semibold text-foreground">Deposits</span>
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">{deposits.length}</span>
+              </div>
+              <p className="mt-1">Broker-recorded account funding.</p>
+            </div>
+            <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-danger" />
+                  <span className="font-semibold text-foreground">Withdrawals</span>
+                </span>
+                <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">{withdrawals.length}</span>
+              </div>
+              <p className="mt-1">Broker-recorded cash withdrawals.</p>
+            </div>
             <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
               <div className="flex items-center gap-2">
                 <span className={`h-2 w-2 rounded-full ${drawdown > 0 ? "bg-danger" : "bg-muted"}`} />
@@ -884,14 +930,14 @@ function TraderDashboardContent() {
     refetchOnReconnect: "always",
   });
 
-  const { data: equityCurve = [] } = useQuery<EquityPoint[]>({
+  const { data: performanceChart } = useQuery<BrokerPerformanceChart>({
     queryKey: ["dashboard-equity-curve", baseAccount?.accountId, selectedPeriod],
     queryFn: async () => {
       const params = new URLSearchParams({
         accountId: baseAccount!.accountId,
         period: selectedPeriod,
       });
-      const res = await fetch(`/api/analytics/equity-curve?${params.toString()}`, {
+      const res = await fetch(`/api/analytics/performance-chart?${params.toString()}`, {
         cache: "no-store",
       });
       const json = await res.json();
@@ -899,12 +945,14 @@ function TraderDashboardContent() {
       return json.data;
     },
     enabled: Boolean(baseAccount?.accountId),
-    staleTime: 3_000,
-    refetchInterval: 5_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
+  const equityCurve = performanceChart?.equityCurve ?? [];
+  const cashTransfers = performanceChart?.cashTransfers ?? [];
 
   // Subscribe to realtime updates
 
@@ -1247,6 +1295,8 @@ function TraderDashboardContent() {
           </Panel>
           <TraderPerformanceChart
             equityCurve={equityCurve}
+            cashTransfers={cashTransfers}
+            chartSource={performanceChart?.source ?? "SNAPSHOTS"}
             trades={periodTrades}
             currency={accountCurrency}
             periodProfit={periodStats.totalProfit}

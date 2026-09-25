@@ -72,6 +72,18 @@ export interface Api2TradeOrder {
   closeTimestampUTC?: number;
 }
 
+export interface Api2TradeEquityHistoryPoint {
+  time?: string | number;
+  balance?: number;
+  equity?: number;
+  balanceDrawdownRaw?: number;
+  balanceDrawdownRelative?: number;
+  equityDrawdownRaw?: number;
+  equityDrawdownRelative?: number;
+  realizedPL?: number;
+  unrealizedPL?: number;
+}
+
 export interface Api2TradeConnectionStatus {
   id?: string;
   isConnected?: boolean;
@@ -532,6 +544,45 @@ export class Api2TradeClient {
       ascending: false,
     });
     return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+  }
+
+  /**
+   * The paged history endpoint includes broker Balance operations (deposits and
+   * withdrawals) when ignoreDepositWithdraw is false. Keep this explicit: the
+   * dashboard must never infer cash movements from an equity delta.
+   */
+  async orderHistoryWithCashTransfers(params: {
+    accountId: string;
+    from: string;
+    to: string;
+    ordersPerPage?: number;
+    pageNumber?: number;
+  }): Promise<Api2TradeOrder[]> {
+    const result = await this.request<unknown>("GET", "OrderHistoryPagination", {
+      ...this.accountParams(params.accountId),
+      from: params.from,
+      to: params.to,
+      ordersPerPage: params.ordersPerPage ?? 500,
+      pageNumber: params.pageNumber ?? 0,
+      requestAgain: false,
+      sort: "OpenTime",
+      ascending: true,
+      ignoreDepositWithdraw: false,
+    });
+    return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+  }
+
+  async equityHistory(params: {
+    accountId: string;
+    from: string;
+    excludeSameBars?: boolean;
+  }): Promise<Api2TradeEquityHistoryPoint[]> {
+    const result = await this.request<unknown>("GET", "EquityHistory", {
+      ...this.accountParams(params.accountId),
+      from: params.from,
+      excludeSameBars: params.excludeSameBars ?? true,
+    });
+    return Array.isArray(result) ? result as Api2TradeEquityHistoryPoint[] : [];
   }
 
   async historyPositionsByCloseTime(params: {
