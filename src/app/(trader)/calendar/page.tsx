@@ -75,6 +75,10 @@ function numericTone(value: string | null): string {
   return "text-accent-2";
 }
 
+function hasEventValue(value: string | null): boolean {
+  return Boolean(value?.trim());
+}
+
 function startOfLocalDay(timestamp: number): Date {
   const date = new Date(timestamp);
   date.setHours(0, 0, 0, 0);
@@ -165,6 +169,19 @@ export default function TraderCalendarPage() {
   const upcoming = events.filter((event) => new Date(event.endTime ?? event.eventTime).getTime() >= now).length;
   const nextEvent = events.find((event) => new Date(event.endTime ?? event.eventTime).getTime() >= now);
   const filteredHighImpact = filtered.filter((event) => event.impact === "HIGH").length;
+  const showActual = filtered.some((event) => hasEventValue(event.actual));
+  const showForecast = filtered.some((event) => hasEventValue(event.forecast));
+  const showPrevious = filtered.some((event) => hasEventValue(event.previous));
+  const valueColumnCount = [showActual, showForecast, showPrevious].filter(Boolean).length;
+  const tableColumnCount = 8 + valueColumnCount;
+  const tableMinWidth =
+    valueColumnCount === 0
+      ? "min-w-[832px]"
+      : valueColumnCount === 1
+        ? "min-w-[928px]"
+        : valueColumnCount === 2
+          ? "min-w-[1024px]"
+          : "min-w-[1120px]";
 
   return (
     <WorkspacePage
@@ -250,7 +267,7 @@ export default function TraderCalendarPage() {
             />
           ) : (
             <div className="overflow-x-auto border-x border-b border-line">
-              <table className="w-full min-w-[1120px] table-fixed border-collapse text-left text-[12px]">
+              <table className={`w-full ${tableMinWidth} table-fixed border-collapse text-left text-[12px]`}>
                 <thead className="bg-[#111417] text-[10px] uppercase tracking-[0.16em] text-muted">
                   <tr>
                     <th className="w-[112px] border-b border-line px-2 py-2">Date</th>
@@ -260,9 +277,9 @@ export default function TraderCalendarPage() {
                     <th className="border-b border-line px-2 py-2">Event</th>
                     <th className="w-[66px] border-b border-line px-2 py-2 text-center">Alerts</th>
                     <th className="w-[70px] border-b border-line px-2 py-2 text-center">Detail</th>
-                    <th className="w-[96px] border-b border-line px-2 py-2 text-right">Actual</th>
-                    <th className="w-[96px] border-b border-line px-2 py-2 text-right">Forecast</th>
-                    <th className="w-[96px] border-b border-line px-2 py-2 text-right">Previous</th>
+                    {showActual ? <th className="w-[96px] border-b border-line px-2 py-2 text-right">Actual</th> : null}
+                    {showForecast ? <th className="w-[96px] border-b border-line px-2 py-2 text-right">Forecast</th> : null}
+                    {showPrevious ? <th className="w-[96px] border-b border-line px-2 py-2 text-right">Previous</th> : null}
                     <th className="w-[70px] border-b border-line px-2 py-2 text-center">Graph</th>
                   </tr>
                 </thead>
@@ -270,7 +287,7 @@ export default function TraderCalendarPage() {
                   {groups.map(([date, dayEvents]) => (
                     <Fragment key={date}>
                       <tr className="bg-background/80">
-                        <td colSpan={11} className="border-b border-line px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-accent">
+                        <td colSpan={tableColumnCount} className="border-b border-line px-2 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-accent">
                           <span className="inline-flex items-center gap-2">
                             <CalendarDays className="h-3.5 w-3.5" />
                             {compactDayLabel(dayEvents[0]?.eventTime ?? new Date().toISOString(), now)}
@@ -319,9 +336,15 @@ export default function TraderCalendarPage() {
                                 <span className="text-muted">—</span>
                               )}
                             </td>
-                            <td className={`border-b border-line px-2 py-2 text-right align-middle font-bold ${numericTone(event.actual)}`}>{event.actual ?? "—"}</td>
-                            <td className="border-b border-line px-2 py-2 text-right align-middle text-muted">{event.forecast ?? "—"}</td>
-                            <td className="border-b border-line px-2 py-2 text-right align-middle text-muted">{event.previous ?? "—"}</td>
+                            {showActual ? (
+                              <td className={`border-b border-line px-2 py-2 text-right align-middle font-bold ${numericTone(event.actual)}`}>{event.actual ?? "—"}</td>
+                            ) : null}
+                            {showForecast ? (
+                              <td className="border-b border-line px-2 py-2 text-right align-middle text-muted">{event.forecast ?? "—"}</td>
+                            ) : null}
+                            {showPrevious ? (
+                              <td className="border-b border-line px-2 py-2 text-right align-middle text-muted">{event.previous ?? "—"}</td>
+                            ) : null}
                             <td className="border-b border-line px-2 py-2 text-center align-middle">
                               {event.locationUrl ? (
                                 <a href={event.locationUrl} target="_blank" rel="noreferrer" className="inline-flex h-6 w-6 items-center justify-center rounded-[3px] border border-line bg-background text-muted hover:border-accent hover:text-accent">
