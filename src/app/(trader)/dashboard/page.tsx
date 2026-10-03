@@ -169,7 +169,6 @@ function chartDateLabels(equityCurve: EquityPoint[], trades: TradeDto[]): { star
 function TraderPerformanceChart({
   equityCurve,
   cashTransfers,
-  chartSource,
   trades,
   currency,
   periodProfit,
@@ -180,7 +179,6 @@ function TraderPerformanceChart({
 }: {
   equityCurve: EquityPoint[];
   cashTransfers: BrokerCashTransfer[];
-  chartSource: BrokerPerformanceChart["source"];
   trades: TradeDto[];
   currency: string;
   periodProfit: number;
@@ -362,7 +360,7 @@ function TraderPerformanceChart({
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Performance analytics</p>
           <h2 className="mt-2 text-lg font-semibold text-foreground">Account performance curve</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            {chartSource === "API2TRADE" ? "API2Trade-synced" : "MT5 snapshot"} equity growth, closed P&amp;L, traded volume, and broker cash movements from {accountName}.
+            Live MT4/MT5 equity growth, closed P&amp;L, traded volume, and account cash movements from {accountName}.
           </p>
         </div>
         <div className="grid grid-cols-2 overflow-hidden rounded-[4px] border border-line bg-background text-right sm:grid-cols-4">
@@ -1275,7 +1273,6 @@ function TraderDashboardContent() {
           <TraderPerformanceChart
             equityCurve={equityCurve}
             cashTransfers={cashTransfers}
-            chartSource={performanceChart?.source ?? "SNAPSHOTS"}
             trades={periodTrades}
             currency={accountCurrency}
             periodProfit={periodStats.totalProfit}

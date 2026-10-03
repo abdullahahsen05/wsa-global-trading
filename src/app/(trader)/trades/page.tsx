@@ -220,8 +220,8 @@ function TradesContent() {
           </div>
         ) : !recentTrades.length ? (
           <EmptyState
-            title="No trades yet"
-            description="API2Trade has not returned any broker trade orders for the selected account. Deposits and withdrawals are account funding, not trades."
+            title="No executed trades"
+            description="There are no executed broker trades for the selected account. Deposits and withdrawals are account funding and are not listed as trades."
           />
         ) : (
           <Panel className="overflow-hidden p-0">

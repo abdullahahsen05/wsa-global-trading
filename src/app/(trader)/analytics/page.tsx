@@ -440,9 +440,7 @@ function AnalyticsContent() {
         <EquityCurve
           data={equityCurve}
           currency={selectedCurrency}
-          description={performanceChart?.source === "API2TRADE"
-            ? "API2Trade equity history from the selected MT4/MT5 account"
-            : "Live broker snapshots for the selected account scope"}
+          description="Live broker snapshots for the selected account scope"
         />
         <DrawdownMeter value={analyticsSummary?.maxDrawdownPercent ?? 0} />
       </div>

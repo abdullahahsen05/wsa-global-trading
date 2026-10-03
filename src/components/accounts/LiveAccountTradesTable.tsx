@@ -54,8 +54,8 @@ export function LiveAccountTradesTable({ accountId }: Props) {
           </div>
         ) : !recentTrades.length ? (
           <EmptyState
-            title="No trades yet"
-            description="API2Trade has not returned any broker trade orders for this account. Deposits and withdrawals are account funding, not trades."
+            title="No executed trades"
+            description="There are no executed broker trades for this account. Deposits and withdrawals are account funding and are not listed as trades."
           />
         ) : (
           <DataTable
