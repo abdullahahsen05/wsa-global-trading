@@ -190,7 +190,7 @@ export default function AdminEconomicCalendarPage() {
           { label: "Total events", value: isLoading ? "…" : events.length },
           { label: "Upcoming", value: isLoading ? "…" : upcoming.length, tone: "accent" },
           { label: "High impact", value: isLoading ? "…" : highImpact.length, tone: "danger" },
-          { label: "FRED feed", value: isLoading ? "…" : events.filter((event) => event.source === "FRED").length, tone: "lime" },
+          { label: "Live Xoomar feed", value: isLoading ? "…" : events.filter((event) => event.source === "XOOMAR").length, tone: "lime" },
         ]}
       />
 
@@ -232,19 +232,19 @@ export default function AdminEconomicCalendarPage() {
           <DataTable
             headers={["Event", "Type", "Source", "Status", "Audience", "Time (local)", ""]}
             rows={events.map((e) => {
-              const isFred = e.source === "FRED" || e.id.startsWith("fred-");
+              const isLiveFeed = e.source === "XOOMAR" || e.id.startsWith("xoomar-");
               return [
               <div key="t" className="min-w-0">
                 <p className="truncate text-sm font-semibold text-foreground">{e.title}</p>
                 <p className="truncate text-xs text-muted">{e.currency} · {e.category ?? e.timezone}</p>
               </div>,
               <span key="type" className="font-semibold text-foreground">{e.eventType}</span>,
-              <StatusPill key="source" tone={isFred ? "lime" : "muted"}>{isFred ? "FRED" : e.source ?? "WSA"}</StatusPill>,
+              <StatusPill key="source" tone={isLiveFeed ? "lime" : "muted"}>{isLiveFeed ? "XOOMAR" : e.source ?? "WSA"}</StatusPill>,
               <StatusPill key="status" tone={e.status === "PUBLISHED" ? "lime" : e.status === "CANCELLED" ? "danger" : "muted"}>{e.status}</StatusPill>,
               <span key="audience">{e.audience}</span>,
-              <span key="ti">{isFred ? new Date(e.eventTime).toLocaleDateString() : new Date(e.eventTime).toLocaleString()}</span>,
+              <span key="ti">{new Date(e.eventTime).toLocaleString()}</span>,
               <div key="a" className="flex gap-2">
-                {isFred ? (
+                {isLiveFeed ? (
                   <span className="text-xs font-semibold uppercase tracking-[0.16em] text-muted">Read only</span>
                 ) : (
                   <>

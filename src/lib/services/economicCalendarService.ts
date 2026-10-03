@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchFredEconomicEvents } from "@/lib/services/fredCalendarService";
+import { fetchXoomarEconomicEvents } from "@/lib/services/xoomarCalendarService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Economic Calendar Service (server-only)
@@ -96,23 +96,23 @@ function byEventTimeDescending(left: EconomicEventDto, right: EconomicEventDto):
   return new Date(right.eventTime).getTime() - new Date(left.eventTime).getTime();
 }
 
-async function withFredEvents(
+async function withXoomarEvents(
   manualEvents: EconomicEventDto[],
   params?: { from?: Date; to?: Date; limit?: number; sort?: "asc" | "desc" },
 ): Promise<EconomicEventDto[]> {
-  let fredEvents: EconomicEventDto[] = [];
+  let xoomarEvents: EconomicEventDto[] = [];
   try {
-    fredEvents = await fetchFredEconomicEvents({
+    xoomarEvents = await fetchXoomarEconomicEvents({
       from: params?.from,
       to: params?.to,
       limit: params?.limit,
     });
   } catch {
-    fredEvents = [];
+    xoomarEvents = [];
   }
 
   const merged = new Map<string, EconomicEventDto>();
-  for (const event of fredEvents) merged.set(event.id, event);
+  for (const event of xoomarEvents) merged.set(event.id, event);
   for (const event of manualEvents) merged.set(event.id, event);
   const list = Array.from(merged.values()).sort(
     params?.sort === "desc" ? byEventTimeDescending : byEventTimeAscending,
@@ -154,7 +154,7 @@ export async function listUpcomingEvents(params: {
   const manualEvents = (data ?? []).map(mapEvent);
   const from = new Date(params.fromIso);
   const to = new Date(params.toIso);
-  const merged = await withFredEvents(manualEvents, {
+  const merged = await withXoomarEvents(manualEvents, {
     from,
     to,
     limit: params.limit ?? 50,
@@ -178,7 +178,7 @@ export async function listEvents(limit = 200): Promise<EconomicEventDto[]> {
     .order("event_time", { ascending: false })
     .limit(limit);
   if (error) throw new Error(`Failed to fetch economic events: ${error.message}`);
-  return withFredEvents((data ?? []).map(mapEvent), { limit, sort: "desc" });
+  return withXoomarEvents((data ?? []).map(mapEvent), { limit, sort: "desc" });
 }
 
 export async function listPublishedEvents(params?: {
@@ -202,7 +202,7 @@ export async function listPublishedEvents(params?: {
 
   const { data, error } = await query.limit(limit);
   if (error) throw new Error(`Failed to fetch calendar events: ${error.message}`);
-  const merged = await withFredEvents((data ?? []).map(mapEvent), {
+  const merged = await withXoomarEvents((data ?? []).map(mapEvent), {
     from,
     to,
     limit,

@@ -152,6 +152,8 @@ export default function TraderCalendarPage() {
     },
     refetchOnWindowFocus: true,
     staleTime: 5 * 60_000,
+    refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: false,
   });
 
   useEffect(() => {
@@ -199,7 +201,7 @@ export default function TraderCalendarPage() {
     <WorkspacePage
       eyebrow="Schedule"
       title="Economic news calendar"
-      description="FRED-powered macro release dates organized in a trader-friendly calendar view."
+      description="Live U.S. macro releases with agency-confirmed timing and published values."
     >
       <InlineStatusStrip
         items={[
@@ -214,7 +216,7 @@ export default function TraderCalendarPage() {
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-line pb-4">
           <div>
             <h2 className="text-lg font-semibold text-foreground">Calendar</h2>
-            <p className="mt-1 text-sm text-muted">ForexFactory-style macro calendar with a fresh daily event window.</p>
+            <p className="mt-1 text-sm text-muted">Live agency-scheduled U.S. macro releases, with values shown when published.</p>
           </div>
           <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-3">
             <div className="min-w-[180px]">
@@ -379,9 +381,16 @@ export default function TraderCalendarPage() {
         <div className="flex items-start gap-3 text-sm leading-6 text-muted">
           <CalendarDays className="mt-1 h-4 w-4 shrink-0 text-accent" />
           <p>
-            FRED release-calendar rows are date-level economic events. WSA filters the feed to macro releases and
-            classifies likely impact for trading context; manual WSA events can still include exact times, actual,
-            forecast, and previous values.
+            Live U.S. macro events are sourced from Xoomar using agency release schedules. Actual and Previous values
+            appear when published; Xoomar does not provide consensus forecasts.{" "}
+            <a
+              className="font-semibold text-accent hover:underline"
+              href="https://xoomar.com/markets/calendar"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Data: XOOMAR
+            </a>
           </p>
         </div>
       </Panel>
