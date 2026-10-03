@@ -1,8 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ExternalLink } from "lucide-react";
+import { CalendarDays, X } from "lucide-react";
 import { EmptyState, InlineStatusStrip, Panel, WorkspacePage } from "@/components/app/WorkspaceUI";
 import { SelectField } from "@/components/app/FormFields";
 import { queryKeys } from "@/lib/data/queryKeys";
@@ -79,6 +80,27 @@ function hasEventValue(value: string | null): boolean {
   return Boolean(value?.trim());
 }
 
+function comparableNumber(value: string | null): number | null {
+  if (!value) return null;
+  const match = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*([KMB])?\s*%?$/i);
+  if (!match) return null;
+
+  const base = Number(match[1]);
+  if (!Number.isFinite(base)) return null;
+  const multiplier = match[2]?.toUpperCase() === "K"
+    ? 1_000
+    : match[2]?.toUpperCase() === "M"
+      ? 1_000_000
+      : match[2]?.toUpperCase() === "B"
+        ? 1_000_000_000
+        : 1;
+  return base * multiplier;
+}
+
+function canCompareRelease(event: CalendarEvent): boolean {
+  return comparableNumber(event.actual) !== null && comparableNumber(event.previous) !== null;
+}
+
 function formatEventTime(event: CalendarEvent): string {
   const timeZone = event.timezone || undefined;
   const time = new Date(event.eventTime).toLocaleTimeString([], {
@@ -121,6 +143,8 @@ export default function TraderCalendarPage() {
   const [type, setType] = useState<"ALL" | CalendarEvent["eventType"]>("ALL");
   const [impact, setImpact] = useState<"ALL" | CalendarEvent["impact"]>("ALL");
   const [dateRange, setDateRange] = useState<DateRange>("UPCOMING");
+  const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
+  const [graphEvent, setGraphEvent] = useState<CalendarEvent | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const calendarWindow = useMemo(() => {
     if (dateRange === "ALL") return { from: null as string | null, to: null as string | null };
@@ -289,12 +313,12 @@ export default function TraderCalendarPage() {
                     <th className="w-[78px] border-b border-line px-2 py-2">Currency</th>
                     <th className="w-[82px] border-b border-line px-2 py-2">Impact</th>
                     <th className="border-b border-line px-2 py-2">Event</th>
-                    <th className="w-[66px] border-b border-line px-2 py-2 text-center">Alerts</th>
-                    <th className="w-[70px] border-b border-line px-2 py-2 text-center">Detail</th>
+                    <th className="w-[66px] border-b border-line px-2 py-2 text-center">Impact</th>
+                    <th className="w-[76px] border-b border-line px-2 py-2 text-center">Detail</th>
                     {showActual ? <th className="w-[96px] border-b border-line px-2 py-2 text-right">Actual</th> : null}
                     {showForecast ? <th className="w-[96px] border-b border-line px-2 py-2 text-right">Forecast</th> : null}
                     {showPrevious ? <th className="w-[96px] border-b border-line px-2 py-2 text-right">Previous</th> : null}
-                    <th className="w-[70px] border-b border-line px-2 py-2 text-center">Graph</th>
+                    <th className="w-[76px] border-b border-line px-2 py-2 text-center">Graph</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -339,13 +363,13 @@ export default function TraderCalendarPage() {
                               </span>
                             </td>
                             <td className="border-b border-line px-2 py-2 text-center align-middle">
-                              {event.locationUrl ? (
-                                <a href={event.locationUrl} target="_blank" rel="noreferrer" className="inline-flex h-6 w-6 items-center justify-center rounded-[3px] border border-line bg-background font-bold text-accent hover:border-accent">
-                                  i
-                                </a>
-                              ) : (
-                                <span className="text-muted">—</span>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => setDetailEvent(event)}
+                                className="inline-flex h-6 items-center justify-center rounded-[3px] border border-line bg-background px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-accent hover:border-accent hover:text-foreground"
+                              >
+                                View
+                              </button>
                             </td>
                             {showActual ? (
                               <td className={`border-b border-line px-2 py-2 text-right align-middle font-bold ${numericTone(event.actual)}`}>{event.actual ?? "—"}</td>
@@ -357,13 +381,15 @@ export default function TraderCalendarPage() {
                               <td className="border-b border-line px-2 py-2 text-right align-middle text-muted">{event.previous ?? "—"}</td>
                             ) : null}
                             <td className="border-b border-line px-2 py-2 text-center align-middle">
-                              {event.locationUrl ? (
-                                <a href={event.locationUrl} target="_blank" rel="noreferrer" className="inline-flex h-6 w-6 items-center justify-center rounded-[3px] border border-line bg-background text-muted hover:border-accent hover:text-accent">
-                                  <ExternalLink className="h-3 w-3" />
-                                </a>
-                              ) : (
-                                <span className="text-muted">—</span>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => setGraphEvent(event)}
+                                disabled={!canCompareRelease(event)}
+                                title={canCompareRelease(event) ? "Compare the published Actual and Previous values" : "Available after Actual and Previous values are published"}
+                                className="inline-flex h-6 items-center justify-center rounded-[3px] border border-line bg-background px-2 text-[10px] font-bold uppercase tracking-[0.08em] text-muted hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-line disabled:hover:text-muted"
+                              >
+                                Chart
+                              </button>
                             </td>
                           </tr>
                         );
@@ -376,6 +402,93 @@ export default function TraderCalendarPage() {
           )}
         </div>
       </Panel>
+
+      <Dialog.Root open={Boolean(detailEvent)} onOpenChange={(open) => !open && setDetailEvent(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-[6px] border border-line bg-panel p-5 shadow-[0_24px_80px_rgba(0,0,0,0.62)] focus:outline-none sm:p-6">
+            <Dialog.Title className="pr-10 text-xl font-semibold text-foreground">
+              {detailEvent?.title ?? "Event details"}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
+              {detailEvent ? `${shortDateLabel(detailEvent.eventTime)} · ${formatEventTime(detailEvent)} · ${detailEvent.currency} · ${detailEvent.impact.toLowerCase()} impact` : ""}
+            </Dialog.Description>
+            {detailEvent ? (
+              <div className="mt-5 space-y-5">
+                <div className="grid gap-px overflow-hidden rounded-[4px] border border-line bg-line sm:grid-cols-3">
+                  {[
+                    ["Actual", detailEvent.actual ?? "Not published"],
+                    ["Previous", detailEvent.previous ?? "Not published"],
+                    ["Forecast", detailEvent.forecast ?? "Not supplied"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="bg-background px-3 py-3">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted">{label}</p>
+                      <p className={`mt-1 text-sm font-semibold ${label === "Actual" ? numericTone(detailEvent.actual) : "text-foreground"}`}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="space-y-3 rounded-[4px] border border-line bg-background p-4 text-sm leading-6 text-muted">
+                  <p><span className="font-semibold text-foreground">Reference period:</span> {detailEvent.category ?? "Not supplied"}</p>
+                  <p><span className="font-semibold text-foreground">Source:</span> {detailEvent.source ?? "WSA"}</p>
+                  <p>{detailEvent.description ?? "No additional source detail is available for this release."}</p>
+                </div>
+                {detailEvent.locationUrl ? (
+                  <a href={detailEvent.locationUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-sm font-semibold text-accent hover:underline">
+                    Open Xoomar calendar source
+                  </a>
+                ) : null}
+              </div>
+            ) : null}
+            <Dialog.Close aria-label="Close event details" className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-[3px] border border-line bg-background text-muted hover:border-accent hover:text-foreground">
+              <X className="h-4 w-4" />
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+
+      <Dialog.Root open={Boolean(graphEvent)} onOpenChange={(open) => !open && setGraphEvent(null)}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-40 bg-black/80" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100vw-1rem)] max-w-xl -translate-x-1/2 -translate-y-1/2 rounded-[6px] border border-line bg-panel p-5 shadow-[0_24px_80px_rgba(0,0,0,0.62)] focus:outline-none sm:p-6">
+            <Dialog.Title className="pr-10 text-xl font-semibold text-foreground">
+              {graphEvent ? `${graphEvent.title} comparison` : "Release comparison"}
+            </Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
+              Actual versus Previous from the published agency release. This is a release comparison, not an invented history chart.
+            </Dialog.Description>
+            {graphEvent ? (() => {
+              const actual = comparableNumber(graphEvent.actual) ?? 0;
+              const previous = comparableNumber(graphEvent.previous) ?? 0;
+              const maxMagnitude = Math.max(Math.abs(actual), Math.abs(previous), 1);
+              const rows = [
+                { label: "Actual", value: graphEvent.actual ?? "—", amount: actual, className: numericTone(graphEvent.actual).includes("danger") ? "bg-danger" : "bg-accent" },
+                { label: "Previous", value: graphEvent.previous ?? "—", amount: previous, className: "bg-muted" },
+              ];
+              return (
+                <div className="mt-6 space-y-5">
+                  {rows.map((row) => (
+                    <div key={row.label}>
+                      <div className="mb-2 flex items-center justify-between gap-3 text-sm">
+                        <span className="font-semibold text-foreground">{row.label}</span>
+                        <span className="font-mono text-foreground">{row.value}</span>
+                      </div>
+                      <div className="h-3 overflow-hidden rounded-[2px] bg-background">
+                        <div className={`h-full rounded-[2px] ${row.className}`} style={{ width: `${Math.max((Math.abs(row.amount) / maxMagnitude) * 100, 3)}%` }} />
+                      </div>
+                    </div>
+                  ))}
+                  <p className="border-t border-line pt-4 text-xs leading-5 text-muted">
+                    Unit: {graphEvent.description?.match(/Unit: ([^.]+)\./)?.[1] ?? "as published by the source"}.
+                  </p>
+                </div>
+              );
+            })() : null}
+            <Dialog.Close aria-label="Close release comparison" className="absolute right-4 top-4 grid h-9 w-9 place-items-center rounded-[3px] border border-line bg-background text-muted hover:border-accent hover:text-foreground">
+              <X className="h-4 w-4" />
+            </Dialog.Close>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       <Panel className="mt-5">
         <div className="flex items-start gap-3 text-sm leading-6 text-muted">
