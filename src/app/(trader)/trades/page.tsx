@@ -221,7 +221,7 @@ function TradesContent() {
         ) : !recentTrades.length ? (
           <EmptyState
             title="No trades yet"
-            description="Trades will appear here after your account syncs with your broker."
+            description="API2Trade has not returned any broker trade orders for the selected account. Deposits and withdrawals are account funding, not trades."
           />
         ) : (
           <Panel className="overflow-hidden p-0">

@@ -119,3 +119,32 @@ describe("api2trade execution transport", () => {
     expect(fallbackOptions.body).toBeUndefined();
   });
 });
+
+describe("api2trade history payloads", () => {
+  it("accepts the documented OrderHistory envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({
+        partialResponse: false,
+        orders: [{ ticket: 123, symbol: "EURUSD", orderType: "Buy" }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new Api2TradeClient({
+      authMode: "basic",
+      baseUrl: "https://mt5.mt4api.dev",
+      username: "swagger-user",
+      password: "swagger-pass",
+    });
+
+    const orders = await client.orderHistory({
+      accountId: "session-token",
+      from: "2026-09-01T00:00:00",
+      to: "2026-10-01T00:00:00",
+    });
+
+    expect(orders).toHaveLength(1);
+    expect(orders[0]).toMatchObject({ ticket: 123, symbol: "EURUSD" });
+  });
+});

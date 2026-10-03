@@ -608,10 +608,11 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     return orders.map((order) => mapOrder(accountId, order, "OPEN", summary.currency ?? "USD"));
   }
 
-  async fetchTradeHistory(accountId: string): Promise<TradeDto[]> {
+  async fetchTradeHistory(accountId: string, historyDays = 30): Promise<TradeDto[]> {
     const client = this.assertConfigured();
     const to = new Date();
-    const from = new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const safeHistoryDays = Math.min(Math.max(Math.floor(historyDays), 1), 3_650);
+    const from = new Date(to.getTime() - safeHistoryDays * 24 * 60 * 60 * 1000);
     const [summary, providerOrders] = await this.withSessionRetry(accountId, async (providerAccountId) =>
       Promise.all([
         client.accountSummary(providerAccountId).catch(() => ({ currency: "USD" })),
@@ -631,7 +632,12 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
         }),
       ]),
     );
-    return providerOrders.map((order) => mapOrder(accountId, order, "CLOSED", summary.currency ?? "USD"));
+    // OrderHistory also contains Balance/Credit operations. They are cash
+    // movements, not trades; only a broker order with a symbol belongs in the
+    // trade ledger. Cash movements are consumed separately by analytics.
+    return providerOrders
+      .filter((order) => Boolean(order.symbol?.trim()))
+      .map((order) => mapOrder(accountId, order, "CLOSED", summary.currency ?? "USD"));
   }
 
   async fetchSymbolSpecifications(accountId: string, symbol: string): Promise<BrokerSymbolSpecifications | null> {

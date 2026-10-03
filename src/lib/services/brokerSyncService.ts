@@ -216,6 +216,11 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function initialTradeHistoryDays(): number {
+  const configured = Number.parseInt(process.env.API2TRADE_INITIAL_HISTORY_DAYS ?? "365", 10);
+  return Math.min(Math.max(Number.isFinite(configured) ? configured : 365, 1), 3_650);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -826,7 +831,9 @@ async function runApi2TradeSync(params: {
     const [snapshot, openTrades, closedTrades] = await Promise.all([
       adapter.fetchSnapshot(accountId),
       adapter.fetchOpenTrades(accountId),
-      adapter.fetchTradeHistory(accountId),
+      // Initial and reconnect syncs should recover useful account history;
+      // recurring worker refreshes retain the adapter's short default window.
+      adapter.fetchTradeHistory(accountId, initialTradeHistoryDays()),
     ]);
     const persisted = await persistBrokerSnapshotAndTrades({
       supabase,

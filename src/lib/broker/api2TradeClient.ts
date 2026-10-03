@@ -145,6 +145,23 @@ export interface Api2TradeRegisteredAccount {
 
 export type Api2TradeSymbolSpecifications = Record<string, unknown>;
 
+/**
+ * API2Trade returns order collections in two valid shapes: a raw array for
+ * some endpoints and an envelope such as `{ orders: [...] }` for history
+ * endpoints. Treat both as the same broker payload so a valid history never
+ * disappears merely because the server used its paged response shape.
+ */
+function extractOrders(value: unknown): Api2TradeOrder[] {
+  if (Array.isArray(value)) return value as Api2TradeOrder[];
+  if (typeof value !== "object" || value === null) return [];
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["orders", "positions", "data", "results"]) {
+    if (Array.isArray(record[key])) return record[key] as Api2TradeOrder[];
+  }
+  return [];
+}
+
 function shouldFallbackToSafeExecutionEndpoint(error: unknown): boolean {
   const message = publicApi2TradeError(error).toLowerCase();
   return message.includes("404")
@@ -523,12 +540,12 @@ export class Api2TradeClient {
 
   async openedOrders(accountId: string): Promise<Api2TradeOrder[]> {
     const result = await this.request<unknown>("GET", "OpenedOrders", this.accountParams(accountId));
-    return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+    return extractOrders(result);
   }
 
   async closedOrders(accountId: string): Promise<Api2TradeOrder[]> {
     const result = await this.request<unknown>("GET", "ClosedOrders", this.accountParams(accountId));
-    return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+    return extractOrders(result);
   }
 
   async orderHistory(params: {
@@ -543,7 +560,7 @@ export class Api2TradeClient {
       sort: 1,
       ascending: false,
     });
-    return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+    return extractOrders(result);
   }
 
   /**
@@ -569,7 +586,7 @@ export class Api2TradeClient {
       ascending: true,
       ignoreDepositWithdraw: false,
     });
-    return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+    return extractOrders(result);
   }
 
   async equityHistory(params: {
@@ -595,7 +612,7 @@ export class Api2TradeClient {
       from: params.from,
       to: params.to,
     });
-    return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+    return extractOrders(result);
   }
 
   async orderSend(params: {
