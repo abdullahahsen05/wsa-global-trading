@@ -2,6 +2,7 @@ import { AuthError, requireTrader } from "@/lib/auth/session";
 import { jsonFail } from "@/lib/api/envelope";
 import { listTrades } from "@/lib/services/tradeService";
 import { formatPrice } from "@/lib/utils/format";
+import { tradeQuerySchema } from "@/lib/validation/schemas";
 
 function csvCell(value: string | number | null): string {
   if (value === null) return "";
@@ -9,10 +10,21 @@ function csvCell(value: string | number | null): string {
   return /[",\r\n]/.test(normalized) ? `"${normalized.replaceAll('"', '""')}"` : normalized;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireTrader();
-    const trades = await listTrades({ userId: user.id, role: user.role, limit: 10_000 });
+    const parsed = tradeQuerySchema.pick({ accountId: true }).safeParse(
+      Object.fromEntries(new URL(request.url).searchParams),
+    );
+    if (!parsed.success) {
+      return jsonFail("INVALID_QUERY", parsed.error.message, 400);
+    }
+    const trades = await listTrades({
+      userId: user.id,
+      role: user.role,
+      accountId: parsed.data.accountId,
+      limit: 10_000,
+    });
     const rows = [
       [
         "Trade ID",

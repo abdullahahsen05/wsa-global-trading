@@ -25,6 +25,7 @@ import { formatMoney, formatPercent } from "@/lib/utils/format";
 import { normalizeBrokerLogin } from "@/lib/utils/brokerLogin";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
+import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 // Dialog step state machine
 type ConnectStep = "setup" | "credentials";
@@ -97,6 +98,7 @@ export default function AccountsPage() {
 }
 
 function AccountsContent() {
+  const { setSelectedAccountId } = useTradingAccountSelection();
   const searchParams = useSearchParams();
   const handledRouteActionRef = useRef("");
   const [query, setQuery] = useState("");
@@ -805,6 +807,7 @@ function AccountsContent() {
                       ? `/accounts?setup=${account.accountId}`
                       : `/accounts/${account.accountId}`
                   }
+                  onClick={() => setSelectedAccountId(account.accountId)}
                   className="btn-dark inline-flex h-9 items-center whitespace-nowrap px-3 text-xs font-semibold text-accent"
                 >
                   {accountActionLabel(account)}

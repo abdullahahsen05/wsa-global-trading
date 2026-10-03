@@ -37,6 +37,7 @@ import type {
 } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
 import { getAccountDisplayIdentity } from "@/lib/domain/accountIdentity";
+import { isLiveConnectedAccount } from "@/lib/accounts/lifecycle";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 type SessionUser = { id: string; name: string; email: string };
@@ -787,7 +788,7 @@ function TraderDashboardContent() {
   });
 
   const connectedAccounts = useMemo(
-    () => accounts.filter((account) => account.status === "CONNECTED"),
+    () => accounts.filter(isLiveConnectedAccount),
     [accounts],
   );
   const baseAccount =

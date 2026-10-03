@@ -25,6 +25,8 @@ import {
   EMPTY_PLATFORM_SUBSCRIPTION_ACCESS,
   useTraderAccessSummary,
 } from "@/hooks/useTraderAccessSummary";
+import { isLiveConnectedAccount, resolveLiveSelectedAccountId } from "@/lib/accounts/lifecycle";
+import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 const periods = ["DAILY", "WEEKLY", "MONTHLY", "ALL_TIME"] as const;
 
@@ -192,7 +194,7 @@ export default function AnalyticsPage() {
 
 function AnalyticsContent() {
   const [period, setPeriod] = useState<(typeof periods)[number]>("ALL_TIME");
-  const [accountScope, setAccountScope] = useState("ALL");
+  const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
 
   const {
     data: accounts = [],
@@ -210,9 +212,8 @@ function AnalyticsContent() {
     refetchInterval: 10_000,
   });
 
-  const connectedAccounts = accounts.filter(
-    (account) => account.status === "CONNECTED",
-  );
+  const connectedAccounts = accounts.filter(isLiveConnectedAccount);
+  const accountScope = resolveLiveSelectedAccountId(accounts, selectedAccountId);
   const selectedAccount = connectedAccounts.find(
     (account) => account.accountId === accountScope,
   );
@@ -232,7 +233,7 @@ function AnalyticsContent() {
         throw new Error(json.error?.message ?? "Failed to load analytics");
       return json.data;
     },
-    enabled: !accountsLoading && connectedAccounts.length > 0,
+    enabled: !accountsLoading && Boolean(accountScope),
     refetchInterval: 10_000,
   });
 
@@ -251,7 +252,7 @@ function AnalyticsContent() {
         throw new Error(json.error?.message ?? "Failed to load equity curve");
       return json.data;
     },
-    enabled: !accountsLoading && connectedAccounts.length > 0,
+    enabled: !accountsLoading && Boolean(accountScope),
     staleTime: 30_000,
     refetchInterval: 60_000,
     refetchIntervalInBackground: true,
@@ -356,11 +357,10 @@ function AnalyticsContent() {
         <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
           Account scope
           <select
-            value={accountScope}
-            onChange={(event) => setAccountScope(event.target.value)}
+            value={accountScope ?? ""}
+            onChange={(event) => setSelectedAccountId(event.target.value || null)}
             className="min-h-11 rounded-[4px] border border-line bg-background px-3 text-sm font-semibold normal-case tracking-normal text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
           >
-            <option value="ALL">All Accounts</option>
             {connectedAccounts.map((account) => (
               <option key={account.accountId} value={account.accountId}>
                 {account.accountName} · {account.brokerName}

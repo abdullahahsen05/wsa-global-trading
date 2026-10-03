@@ -8,6 +8,7 @@ import { EmptyState, GhostButton, InlineStatusStrip, Panel, PageActionGroup, Pri
 import { formatMoney, formatPrice } from "@/lib/utils/format";
 import type { TradeDto } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
+import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
 export default function TradesPage() {
   const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
@@ -43,6 +44,7 @@ export default function TradesPage() {
 
 function TradesContent() {
   const queryClient = useQueryClient();
+  const { selectedAccountId } = useTradingAccountSelection();
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -50,23 +52,32 @@ function TradesContent() {
   const [syncResult, setSyncResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const { data: tradeList = [], isLoading, isError } = useQuery<TradeDto[]>({
-    queryKey: ["trades"],
+    queryKey: ["trades", selectedAccountId],
     staleTime: 5_000,
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
     queryFn: async () => {
-      const res = await fetch("/api/trades");
+      const params = new URLSearchParams({ accountId: selectedAccountId! });
+      const res = await fetch(`/api/trades?${params.toString()}`, { cache: "no-store" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load trades");
       return json.data;
     },
+    enabled: Boolean(selectedAccountId),
   });
 
   const handleSyncTrades = useCallback(async () => {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const res = await fetch("/api/trader/sync-trades", { method: "POST" });
+      if (!selectedAccountId) {
+        throw new Error("Select a connected trading account before syncing trades.");
+      }
+      const res = await fetch("/api/trader/sync-trades", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: selectedAccountId }),
+      });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Sync failed");
 
@@ -82,19 +93,22 @@ function TradesContent() {
           ? `${queued} account${queued === 1 ? "" : "s"} queued for broker synchronization. This ledger updates automatically.`
           : "Live trade synchronization is active. The latest ledger data has been loaded.",
       });
-      await queryClient.invalidateQueries({ queryKey: ["trades"] });
+      await queryClient.invalidateQueries({ queryKey: ["trades", selectedAccountId] });
     } catch (err) {
       setSyncResult({ type: "error", text: err instanceof Error ? err.message : "Sync failed" });
     } finally {
       setSyncing(false);
     }
-  }, [queryClient]);
+  }, [queryClient, selectedAccountId]);
 
   const handleExportCsv = useCallback(async () => {
     setExporting(true);
     setSyncResult(null);
     try {
-      const res = await fetch("/api/reports/trades");
+      if (!selectedAccountId) {
+        throw new Error("Select a connected trading account before exporting trades.");
+      }
+      const res = await fetch(`/api/reports/trades?accountId=${encodeURIComponent(selectedAccountId)}`);
       if (!res.ok) {
         const payload = await res.json().catch(() => null);
         throw new Error(payload?.error?.message ?? "CSV export failed");
@@ -113,7 +127,7 @@ function TradesContent() {
     } finally {
       setExporting(false);
     }
-  }, []);
+  }, [selectedAccountId]);
 
   const recentTrades = useMemo(
     () => [...tradeList].sort((a, b) => {
@@ -148,7 +162,7 @@ function TradesContent() {
     <WorkspacePage
       eyebrow="Trade ledger"
       title="Trade history"
-      description="Review recent open and closed trades, search the full ledger, or export it to CSV."
+      description="Review recent open and closed trades for the account selected in the top bar, search its ledger, or export it to CSV."
       action={
         <PageActionGroup>
           <GhostButton type="button" onClick={() => setSearchOpen(true)}>
@@ -165,12 +179,12 @@ function TradesContent() {
     >
       <InlineStatusStrip
         items={[
-          { label: "Open trades", value: openTrades.length, helper: "Across connected accounts", tone: "accent" },
-          { label: "Closed trades", value: closedTrades.length, helper: "Current review period" },
+          { label: "Open trades", value: openTrades.length, helper: "Selected account", tone: "accent" },
+          { label: "Closed trades", value: closedTrades.length, helper: "Selected account" },
           {
             label: "Net PnL",
             value: netProfitValue,
-            helper: "Ledger total",
+            helper: "Selected account ledger",
             tone: netProfit >= 0 ? "lime" : "danger",
           },
           {
