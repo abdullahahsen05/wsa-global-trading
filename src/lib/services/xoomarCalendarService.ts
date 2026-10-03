@@ -40,6 +40,19 @@ function xoomarEventId(row: XoomarCalendarRow): string {
   return `xoomar-${eventKey}`;
 }
 
+function xoomarReleasePage(eventName: string): string | null {
+  const release = eventName.toLowerCase();
+  if (/consumer price index|\bcpi\b/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/cpi`;
+  if (/nonfarm|employment situation|jobs report/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/jobs-report`;
+  if (/fomc rate decision/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/fomc`;
+  if (/\bgdp\b|gross domestic product/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/gdp`;
+  if (/retail sales/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/retail-sales`;
+  if (/personal income and outlays|\bpce\b/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/pce`;
+  if (/initial jobless claims/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/jobless-claims`;
+  if (/producer price index|\bppi\b/.test(release)) return `${XOOMAR_CALENDAR_PAGE}/ppi`;
+  return null;
+}
+
 function mapXoomarEvent(row: XoomarCalendarRow, updatedAt: string): EconomicEventDto | null {
   if (!row.eventName || !row.scheduledAt || Number.isNaN(new Date(row.scheduledAt).getTime())) return null;
 
@@ -62,7 +75,7 @@ function mapXoomarEvent(row: XoomarCalendarRow, updatedAt: string): EconomicEven
     endTime: null,
     timezone: "UTC",
     eventType: "ECONOMIC",
-    locationUrl: XOOMAR_CALENDAR_PAGE,
+    locationUrl: xoomarReleasePage(row.eventName),
     status: "PUBLISHED",
     audience: "ALL",
     actual: row.actual?.trim() || null,
