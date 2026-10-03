@@ -155,13 +155,22 @@ export async function listTrades(params: {
     .slice(0, params.limit ?? 200)
 }
 
-export async function getDailyPnl(userId: string): Promise<{ dailyPnl: number; currency: string }> {
+export async function getDailyPnl(
+  userId: string,
+  accountId?: string,
+): Promise<{ dailyPnl: number; currency: string }> {
   const supabase = createAdminClient()
 
-  const { data: accounts } = await supabase
+  let accountQuery = supabase
     .from('trading_accounts')
     .select('id')
     .eq('user_id', userId)
+
+  if (accountId) {
+    accountQuery = accountQuery.eq('id', accountId)
+  }
+
+  const { data: accounts } = await accountQuery
 
   if (!accounts || accounts.length === 0) {
     return { dailyPnl: 0, currency: 'USD' }
