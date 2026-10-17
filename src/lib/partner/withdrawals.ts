@@ -74,6 +74,10 @@ export interface PartnerFinancialLedgerDto {
   withdrawableBalance: number;
   activeWithdrawalCount: number;
   historicalPaidWithdrawals: number;
+  /** All rebate rows of the partner (IB per-trade rows, CPA payouts, adjustments). */
+  rebateRowCount?: number;
+  /** Rebate rows contained in `items` (the newest per-trade IB rows are capped). */
+  rebateRowsListed?: number;
   items: PartnerLedgerItemDto[];
 }
 

@@ -1,6 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createNotification } from "@/lib/services/notificationService";
 import { writeAuditLog } from "@/lib/services/auditService";
+import { rebateKind } from "@/lib/partner/rebateRules";
+import { selectAllPages, selectAllPagesForIds } from "@/lib/supabase/pagedSelect";
 import {
   calculateWithdrawalBalance,
   MINIMUM_PARTNER_WITHDRAWAL,
@@ -56,25 +58,40 @@ function mapWithdrawal(
   };
 }
 
+/** PostgREST answers ≤ 1000 rows per request, so these ledgers are always read page by page. */
 async function getAllocationUsage(partnerId: string, currency: string): Promise<Map<string, number>> {
   const supabase = createAdminClient();
-  const { data: requests, error: requestError } = await supabase
-    .from("partner_withdrawal_requests")
-    .select("id")
-    .eq("partner_id", partnerId)
-    .eq("currency", currency)
-    .in("status", ["PENDING_REVIEW", "APPROVED", "PAID"]);
-  if (requestError) throw new Error(`Failed to load withdrawal reservations: ${requestError.message}`);
-  const requestIds = (requests ?? []).map((row) => row.id);
+  const requests = await selectAllPages<{ id: string }>(
+    "Failed to load withdrawal reservations",
+    (from, to) =>
+      supabase
+        .from("partner_withdrawal_requests")
+        .select("id")
+        .eq("partner_id", partnerId)
+        .eq("currency", currency)
+        .in("status", ["PENDING_REVIEW", "APPROVED", "PAID"])
+        .order("id")
+        .range(from, to),
+  );
+  const requestIds = requests.map((row) => row.id);
   const used = new Map<string, number>();
   if (requestIds.length === 0) return used;
 
-  const { data: allocations, error } = await supabase
-    .from("partner_withdrawal_allocations")
-    .select("commission_id, allocated_amount")
-    .in("withdrawal_request_id", requestIds);
-  if (error) throw new Error(`Failed to load withdrawal allocations: ${error.message}`);
-  for (const allocation of allocations ?? []) {
+  const allocations = await selectAllPagesForIds<{
+    commission_id: string;
+    allocated_amount: number | string;
+  }>(
+    "Failed to load withdrawal allocations",
+    requestIds,
+    (idChunk, from, to) =>
+      supabase
+        .from("partner_withdrawal_allocations")
+        .select("commission_id, allocated_amount")
+        .in("withdrawal_request_id", idChunk)
+        .order("id")
+        .range(from, to),
+  );
+  for (const allocation of allocations) {
     used.set(
       allocation.commission_id,
       (used.get(allocation.commission_id) ?? 0) + Number(allocation.allocated_amount),
@@ -89,29 +106,69 @@ async function getIncludedItemsByRequestIds(
   const result = new Map<string, PartnerWithdrawalIncludedItemDto[]>();
   if (requestIds.length === 0) return result;
   const supabase = createAdminClient();
-  const [{ data: commissionAllocations }, { data: rebateAllocations }] = await Promise.all([
-    supabase
-      .from("partner_withdrawal_allocations")
-      .select("id, withdrawal_request_id, commission_id, allocated_amount")
-      .in("withdrawal_request_id", requestIds),
-    supabase
-      .from("partner_withdrawal_rebate_allocations")
-      .select("id, withdrawal_request_id, rebate_id, allocated_amount")
-      .in("withdrawal_request_id", requestIds),
+  const [commissionAllocations, rebateAllocations] = await Promise.all([
+    selectAllPagesForIds<{
+      id: string;
+      withdrawal_request_id: string;
+      commission_id: string;
+      allocated_amount: number | string;
+    }>(
+      "Failed to load commission allocations",
+      requestIds,
+      (idChunk, from, to) =>
+        supabase
+          .from("partner_withdrawal_allocations")
+          .select("id, withdrawal_request_id, commission_id, allocated_amount")
+          .in("withdrawal_request_id", idChunk)
+          .order("id")
+          .range(from, to),
+    ),
+    selectAllPagesForIds<{
+      id: string;
+      withdrawal_request_id: string;
+      rebate_id: string;
+      allocated_amount: number | string;
+    }>(
+      "Failed to load rebate allocations",
+      requestIds,
+      (idChunk, from, to) =>
+        supabase
+          .from("partner_withdrawal_rebate_allocations")
+          .select("id, withdrawal_request_id, rebate_id, allocated_amount")
+          .in("withdrawal_request_id", idChunk)
+          .order("id")
+          .range(from, to),
+    ),
   ]);
-  const commissionIds = [...new Set((commissionAllocations ?? []).map((row) => row.commission_id))];
-  const rebateIds = [...new Set((rebateAllocations ?? []).map((row) => row.rebate_id))];
-  const [{ data: commissions }, { data: rebates }] = await Promise.all([
-    commissionIds.length
-      ? supabase.from("partner_commissions").select("id, source_type, purchase_id").in("id", commissionIds)
-      : Promise.resolve({ data: [] }),
-    rebateIds.length
-      ? supabase.from("partner_rebates").select("id, source_type, payment_order_id").in("id", rebateIds)
-      : Promise.resolve({ data: [] }),
+  const commissionIds = [...new Set(commissionAllocations.map((row) => row.commission_id))];
+  const rebateIds = [...new Set(rebateAllocations.map((row) => row.rebate_id))];
+  const [commissions, rebates] = await Promise.all([
+    selectAllPagesForIds<{ id: string; source_type: string | null; purchase_id: string | null }>(
+      "Failed to load allocated commissions",
+      commissionIds,
+      (idChunk, from, to) =>
+        supabase
+          .from("partner_commissions")
+          .select("id, source_type, purchase_id")
+          .in("id", idChunk)
+          .order("id")
+          .range(from, to),
+    ),
+    selectAllPagesForIds<{ id: string; source_type: string | null; payment_order_id: string | null }>(
+      "Failed to load allocated rebates",
+      rebateIds,
+      (idChunk, from, to) =>
+        supabase
+          .from("partner_rebates")
+          .select("id, source_type, payment_order_id")
+          .in("id", idChunk)
+          .order("id")
+          .range(from, to),
+    ),
   ]);
-  const commissionMap = new Map((commissions ?? []).map((row) => [row.id, row]));
-  const rebateMap = new Map((rebates ?? []).map((row) => [row.id, row]));
-  for (const allocation of commissionAllocations ?? []) {
+  const commissionMap = new Map(commissions.map((row) => [row.id, row]));
+  const rebateMap = new Map(rebates.map((row) => [row.id, row]));
+  for (const allocation of commissionAllocations) {
     const item = commissionMap.get(allocation.commission_id);
     result.set(allocation.withdrawal_request_id, [
       ...(result.get(allocation.withdrawal_request_id) ?? []),
@@ -125,7 +182,7 @@ async function getIncludedItemsByRequestIds(
       },
     ]);
   }
-  for (const allocation of rebateAllocations ?? []) {
+  for (const allocation of rebateAllocations) {
     const item = rebateMap.get(allocation.rebate_id);
     result.set(allocation.withdrawal_request_id, [
       ...(result.get(allocation.withdrawal_request_id) ?? []),
@@ -147,26 +204,38 @@ export async function getPartnerWithdrawalBalance(
   currency = "USD",
 ): Promise<PartnerWithdrawalBalanceDto> {
   const supabase = createAdminClient();
-  const [{ data: commissions, error }, { data: rebates, error: rebateError }] = await Promise.all([
-    supabase
-      .from("partner_commissions")
-      .select("id, commission_amount")
-      .eq("partner_id", partnerId)
-      .eq("currency", currency)
-      .eq("status", "APPROVED"),
-    supabase
-      .from("partner_rebates")
-      .select("id, amount")
-      .eq("partner_id", partnerId)
-      .eq("currency", currency)
-      .eq("status", "APPROVED"),
+  // Only the WSA subscription commission is withdrawable; the broker rebate
+  // total is informational (one row per closed trade — hence the paged read).
+  const [commissions, rebates, commissionUsage] = await Promise.all([
+    selectAllPages<{ id: string; commission_amount: number | string }>(
+      "Failed to load approved commissions",
+      (from, to) =>
+        supabase
+          .from("partner_commissions")
+          .select("id, commission_amount")
+          .eq("partner_id", partnerId)
+          .eq("currency", currency)
+          .eq("status", "APPROVED")
+          .order("id")
+          .range(from, to),
+    ),
+    selectAllPages<{ amount: number | string }>(
+      "Failed to load approved rebates",
+      (from, to) =>
+        supabase
+          .from("partner_rebates")
+          .select("amount")
+          .eq("partner_id", partnerId)
+          .eq("currency", currency)
+          .eq("status", "APPROVED")
+          .order("id")
+          .range(from, to),
+    ),
+    getAllocationUsage(partnerId, currency),
   ]);
-  if (error) throw new Error(`Failed to load approved commissions: ${error.message}`);
-  if (rebateError) throw new Error(`Failed to load approved rebates: ${rebateError.message}`);
-  const commissionUsage = await getAllocationUsage(partnerId, currency);
-  const commissionAmounts = (commissions ?? []).map((commission) => Number(commission.commission_amount));
-  const rebateAmounts = (rebates ?? []).map((rebate) => Number(rebate.amount));
-  const reserved = (commissions ?? []).map((commission) => commissionUsage.get(commission.id) ?? 0);
+  const commissionAmounts = commissions.map((commission) => Number(commission.commission_amount));
+  const rebateAmounts = rebates.map((rebate) => Number(rebate.amount));
+  const reserved = commissions.map((commission) => commissionUsage.get(commission.id) ?? 0);
   return calculateWithdrawalBalance(
     commissionAmounts,
     reserved,
@@ -236,16 +305,25 @@ export async function createPartnerWithdrawal(params: {
     .limit(1);
   if (active?.length) throw new Error("You already have an active withdrawal request in this currency.");
 
-  const { data: commissions, error: commissionError } = await supabase
-    .from("partner_commissions")
-    .select("id, commission_amount, created_at")
-    .eq("partner_id", params.partnerId)
-    .eq("currency", currency)
-    .eq("status", "APPROVED")
-    .order("created_at", { ascending: true });
-  if (commissionError) throw new Error(`Failed to load approved commissions: ${commissionError.message}`);
+  const commissions = await selectAllPages<{
+    id: string;
+    commission_amount: number | string;
+    created_at: string;
+  }>(
+    "Failed to load approved commissions",
+    (from, to) =>
+      supabase
+        .from("partner_commissions")
+        .select("id, commission_amount, created_at")
+        .eq("partner_id", params.partnerId)
+        .eq("currency", currency)
+        .eq("status", "APPROVED")
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+  );
   const used = await getAllocationUsage(params.partnerId, currency);
-  const availableCommissions = (commissions ?? []).reduce(
+  const availableCommissions = commissions.reduce(
     (sum, commission) => sum + Math.max(0, Number(commission.commission_amount) - (used.get(commission.id) ?? 0)),
     0,
   );
@@ -270,7 +348,7 @@ export async function createPartnerWithdrawal(params: {
 
   let remaining = amount;
   const allocations: Array<{ withdrawal_request_id: string; commission_id: string; allocated_amount: number }> = [];
-  for (const commission of commissions ?? []) {
+  for (const commission of commissions) {
     if (remaining <= 0) break;
     const commissionAvailable = Math.max(0, Number(commission.commission_amount) - (used.get(commission.id) ?? 0));
     const allocated = Math.min(remaining, commissionAvailable);
@@ -425,74 +503,145 @@ export async function transitionPartnerWithdrawal(params: {
   return mapWithdrawal(updated as WithdrawalRow);
 }
 
+/** Newest per-trade IB rebate rows listed in a ledger; totals always cover every row. */
+const LEDGER_IB_ITEM_LIMIT = 500;
+
+type LedgerCommissionRow = {
+  id: string;
+  trader_id: string | null;
+  source_type: string;
+  source_id: string | null;
+  purchase_id: string | null;
+  commission_amount: number | string;
+  currency: string;
+  status: string;
+  created_at: string;
+  paid_at: string | null;
+  metadata: { note?: unknown } | null;
+};
+
+type LedgerRebateRow = {
+  id: string;
+  status: string;
+  amount: number | string;
+  trader_id?: string | null;
+  source_type?: string | null;
+  calculation_type?: string | null;
+  payment_order_id?: string | null;
+  currency?: string;
+  description?: string | null;
+  created_at?: string;
+  paid_at?: string | null;
+};
+
 export async function getPartnerFinancialLedger(
   partnerId: string,
   currency = "USD",
   options?: { includeItems?: boolean },
 ): Promise<PartnerFinancialLedgerDto> {
   const supabase = createAdminClient();
+  const includeItems = options?.includeItems !== false;
+  // The overview of every partner only needs status + amount of each rebate row.
+  const rebateColumns = includeItems
+    ? "id, trader_id, source_type, calculation_type, payment_order_id, amount, currency, status, description, created_at, paid_at"
+    : "id, status, amount";
   const [
     { data: profile },
     { data: partnerProfile },
     { count: referredTraderCount },
-    { data: commissions, error: commissionError },
-    { data: rebates, error: rebateError },
-    { data: withdrawals, error: withdrawalError },
+    commissions,
+    rebates,
+    withdrawals,
   ] = await Promise.all([
     supabase.from("profiles").select("full_name, email").eq("id", partnerId).maybeSingle(),
     supabase.from("partner_profiles").select("referral_code").eq("user_id", partnerId).maybeSingle(),
     supabase.from("trader_profiles").select("user_id", { count: "exact", head: true }).eq("partner_id", partnerId),
-    supabase
-      .from("partner_commissions")
-      .select("id, trader_id, source_type, source_id, purchase_id, commission_amount, currency, status, created_at, paid_at, metadata")
-      .eq("partner_id", partnerId)
-      .eq("currency", currency)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("partner_rebates")
-      .select("id, trader_id, source_type, payment_order_id, amount, currency, status, description, created_at, paid_at")
-      .eq("partner_id", partnerId)
-      .eq("currency", currency)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("partner_withdrawal_requests")
-      .select("id, amount, status")
-      .eq("partner_id", partnerId)
-      .eq("currency", currency),
+    selectAllPages<LedgerCommissionRow>(
+      "Failed to load partner commissions",
+      (from, to) =>
+        supabase
+          .from("partner_commissions")
+          .select("id, trader_id, source_type, source_id, purchase_id, commission_amount, currency, status, created_at, paid_at, metadata")
+          .eq("partner_id", partnerId)
+          .eq("currency", currency)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to),
+    ),
+    selectAllPages<LedgerRebateRow>(
+      "Failed to load partner rebates",
+      (from, to) =>
+        supabase
+          .from("partner_rebates")
+          .select(rebateColumns)
+          .eq("partner_id", partnerId)
+          .eq("currency", currency)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: true })
+          .range(from, to),
+    ),
+    selectAllPages<{ id: string; amount: number | string; status: string }>(
+      "Failed to load partner withdrawals",
+      (from, to) =>
+        supabase
+          .from("partner_withdrawal_requests")
+          .select("id, amount, status")
+          .eq("partner_id", partnerId)
+          .eq("currency", currency)
+          .order("id", { ascending: true })
+          .range(from, to),
+    ),
   ]);
-  if (commissionError) throw new Error(`Failed to load partner commissions: ${commissionError.message}`);
-  if (rebateError) throw new Error(`Failed to load partner rebates: ${rebateError.message}`);
-  if (withdrawalError) throw new Error(`Failed to load partner withdrawals: ${withdrawalError.message}`);
 
-  const activeWithdrawalIds = (withdrawals ?? [])
+  const activeWithdrawalIds = withdrawals
     .filter((request) => request.status === "PENDING_REVIEW" || request.status === "APPROVED")
     .map((request) => request.id);
-  const paidWithdrawalIds = (withdrawals ?? [])
+  const paidWithdrawalIds = withdrawals
     .filter((request) => request.status === "PAID")
     .map((request) => request.id);
   const relevantRequestIds = [...activeWithdrawalIds, ...paidWithdrawalIds];
-  const [{ data: commissionAllocations }, { data: rebateAllocations }] = relevantRequestIds.length
-    ? await Promise.all([
+  const [commissionAllocations, rebateAllocations] = await Promise.all([
+    selectAllPagesForIds<{
+      commission_id: string;
+      allocated_amount: number | string;
+      withdrawal_request_id: string;
+    }>(
+      "Failed to load commission allocations",
+      relevantRequestIds,
+      (idChunk, from, to) =>
         supabase
           .from("partner_withdrawal_allocations")
           .select("commission_id, allocated_amount, withdrawal_request_id")
-          .in("withdrawal_request_id", relevantRequestIds),
+          .in("withdrawal_request_id", idChunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+    ),
+    selectAllPagesForIds<{
+      rebate_id: string;
+      allocated_amount: number | string;
+      withdrawal_request_id: string;
+    }>(
+      "Failed to load rebate allocations",
+      relevantRequestIds,
+      (idChunk, from, to) =>
         supabase
           .from("partner_withdrawal_rebate_allocations")
           .select("rebate_id, allocated_amount, withdrawal_request_id")
-          .in("withdrawal_request_id", relevantRequestIds),
-      ])
-    : [{ data: [] }, { data: [] }];
+          .in("withdrawal_request_id", idChunk)
+          .order("id", { ascending: true })
+          .range(from, to),
+    ),
+  ]);
 
   const activeIdSet = new Set(activeWithdrawalIds);
   const paidIdSet = new Set(paidWithdrawalIds);
   const approvedCommissionIds = new Set(
-    (commissions ?? []).filter((item) => item.status === "APPROVED").map((item) => item.id),
+    commissions.filter((item) => item.status === "APPROVED").map((item) => item.id),
   );
   const approvedRebateIds = new Set(
-    (rebates ?? []).filter((item) => item.status === "APPROVED").map((item) => item.id),
+    rebates.filter((item) => item.status === "APPROVED").map((item) => item.id),
   );
-  const paidCommissionAllocations = (commissionAllocations ?? []).reduce(
+  const paidCommissionAllocations = commissionAllocations.reduce(
     (sum, allocation) =>
       sum + (
         paidIdSet.has(allocation.withdrawal_request_id)
@@ -502,7 +651,7 @@ export async function getPartnerFinancialLedger(
       ),
     0,
   );
-  const paidRebateAllocations = (rebateAllocations ?? []).reduce(
+  const paidRebateAllocations = rebateAllocations.reduce(
     (sum, allocation) =>
       sum + (
         paidIdSet.has(allocation.withdrawal_request_id)
@@ -512,7 +661,7 @@ export async function getPartnerFinancialLedger(
       ),
     0,
   );
-  const lockedWithdrawalAmount = (commissionAllocations ?? [])
+  const lockedWithdrawalAmount = commissionAllocations
     .map((allocation) =>
       activeIdSet.has(allocation.withdrawal_request_id) ? Number(allocation.allocated_amount) : 0,
     )
@@ -524,11 +673,11 @@ export async function getPartnerFinancialLedger(
   ) => rows
     .filter((row) => statuses.includes(row.status))
     .reduce((sum, row) => sum + row.amount, 0);
-  const commissionAmounts = (commissions ?? []).map((item) => ({
+  const commissionAmounts = commissions.map((item) => ({
     status: item.status,
     amount: Number(item.commission_amount),
   }));
-  const rebateAmounts = (rebates ?? []).map((item) => ({
+  const rebateAmounts = rebates.map((item) => ({
     status: item.status,
     amount: Number(item.amount),
   }));
@@ -537,8 +686,21 @@ export async function getPartnerFinancialLedger(
   const approvedUnpaidCommissions = Math.max(0, approvedCommissionTotal - paidCommissionAllocations);
   const approvedUnpaidRebates = Math.max(0, approvedRebateTotal - paidRebateAllocations);
 
-  const items: PartnerLedgerItemDto[] = options?.includeItems === false ? [] : [
-    ...(commissions ?? []).map((item) => ({
+  // Items: every commission, every CPA payout / manual adjustment, and the
+  // newest per-trade IB rebate rows (one row per closed trade would otherwise
+  // put tens of thousands of rows into the browser).
+  let ibRowsListed = 0;
+  const listedRebates = includeItems
+    ? rebates.filter((item) => {
+        if (rebateKind({ calculation_type: item.calculation_type, source_type: item.source_type }) !== "IB") {
+          return true;
+        }
+        ibRowsListed += 1;
+        return ibRowsListed <= LEDGER_IB_ITEM_LIMIT;
+      })
+    : [];
+  const items: PartnerLedgerItemDto[] = includeItems ? [
+    ...commissions.map((item) => ({
       id: item.id,
       type: "COMMISSION" as const,
       traderId: item.trader_id,
@@ -551,20 +713,20 @@ export async function getPartnerFinancialLedger(
       createdAt: item.created_at,
       paidAt: item.paid_at,
     })),
-    ...(rebates ?? []).map((item) => ({
+    ...listedRebates.map((item) => ({
       id: item.id,
       type: "REBATE" as const,
-      traderId: item.trader_id,
-      sourceType: item.source_type,
-      paymentOrderId: item.payment_order_id,
+      traderId: item.trader_id ?? null,
+      sourceType: item.source_type ?? "REBATE",
+      paymentOrderId: item.payment_order_id ?? null,
       amount: Number(item.amount),
-      currency: item.currency,
+      currency: item.currency ?? currency,
       status: item.status as PartnerLedgerItemDto["status"],
-      description: item.description,
-      createdAt: item.created_at,
-      paidAt: item.paid_at,
+      description: item.description ?? null,
+      createdAt: item.created_at ?? new Date(0).toISOString(),
+      paidAt: item.paid_at ?? null,
     })),
-  ].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
+  ].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)) : [];
 
   return {
     partnerId,
@@ -595,11 +757,13 @@ export async function getPartnerFinancialLedger(
     ),
     activeWithdrawalCount: activeWithdrawalIds.length,
     historicalPaidWithdrawals: Number(
-      (withdrawals ?? [])
+      withdrawals
         .filter((request) => request.status === "PAID")
         .reduce((sum, request) => sum + Number(request.amount), 0)
         .toFixed(2),
     ),
+    rebateRowCount: rebates.length,
+    rebateRowsListed: listedRebates.length,
     items,
   };
 }

@@ -2,38 +2,39 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ExternalLink,
+  Info,
+  ListChecks,
   Loader2,
   MessageSquare,
   ScreenShare,
   ScreenShareOff,
   Send,
+  SlidersHorizontal,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import {
-  TradingViewAdvancedChart,
-  TRADING_VIEW_SYMBOLS,
-} from "@/components/trading/TradingViewAdvancedChart";
+import { TradingViewAdvancedChart } from "@/components/trading/TradingViewAdvancedChart";
+import { TradingViewOptionsPanel } from "@/components/trading/TradingViewOptionsPanel";
+import { TradingViewWatchlistEditor } from "@/components/trading/TradingViewWatchlistEditor";
 import { AI_ASSISTANT_NAME, ASK_ASSISTANT_LABEL, BRAND_NAME } from "@/lib/brand";
+import { buildSymbolOptions, tradingViewChartUrl } from "@/lib/terminal/tradingview";
+import {
+  TERMINAL_TIMEFRAMES,
+  TIMEFRAME_TO_INTERVAL,
+  symbolLabel,
+  type TradingViewPanels,
+  type TradingViewPatch,
+  type TradingViewWorkspace,
+} from "@/lib/terminal/workspace";
 
-type Timeframe = "1m" | "5m" | "15m" | "1H" | "4H" | "1D";
 type CropTargetConstructor = { fromElement(element: Element): Promise<unknown> };
 type CroppableTrack = MediaStreamTrack & { cropTo?: (target: unknown) => Promise<void> };
 
-const timeframes: Timeframe[] = ["1m", "5m", "15m", "1H", "4H", "1D"];
-
-const INTERVAL_MAP: Record<Timeframe, string> = {
-  "1m": "1",
-  "5m": "5",
-  "15m": "15",
-  "1H": "60",
-  "4H": "240",
-  "1D": "D",
-};
-
-const SYMBOL_OPTIONS = Object.entries(TRADING_VIEW_SYMBOLS).map(([label, value]) => ({
-  label,
-  value,
-}));
+const PANEL_TOGGLES: ReadonlyArray<{ key: keyof TradingViewPanels; label: string; hint: string }> = [
+  { key: "watchlist", label: "Watchlist", hint: "Symbol list on the right of the chart (your list)" },
+  { key: "details", label: "Details", hint: "Symbol details panel" },
+  { key: "hotlist", label: "Hotlist", hint: "Top gainers and losers" },
+];
 
 function cropTargetApi(): CropTargetConstructor | undefined {
   return (window as typeof window & { CropTarget?: CropTargetConstructor }).CropTarget;
@@ -63,9 +64,24 @@ async function waitForVideoFrame(video: HTMLVideoElement): Promise<void> {
   });
 }
 
-export function TradingChart({ accountId }: { accountId?: string }) {
-  const [selectedSymbol, setSelectedSymbol] = useState(TRADING_VIEW_SYMBOLS.XAUUSD);
-  const [timeframe, setTimeframe] = useState<Timeframe>("15m");
+export interface TradingChartProps {
+  accountId?: string;
+  /** symbol, timeframe, watchlist, panels and chart options - owned by the terminal workspace */
+  settings: TradingViewWorkspace;
+  onSettingsChange: (patch: TradingViewPatch) => void;
+  /** height of the chart area (the split layout uses a lower one) */
+  chartHeight?: string;
+}
+
+export function TradingChart({
+  accountId,
+  settings,
+  onSettingsChange,
+  chartHeight = "clamp(520px, 78dvh, 820px)",
+}: TradingChartProps) {
+  const { symbol: selectedSymbol, timeframe, watchlist, panels, chart } = settings;
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
@@ -80,11 +96,10 @@ export function TradingChart({ accountId }: { accountId?: string }) {
   const streamRef = useRef<MediaStream | null>(null);
   const streamIsRegionCroppedRef = useRef(false);
 
-  const selectedSymbolLabel =
-    SYMBOL_OPTIONS.find((option) => option.value === selectedSymbol)?.label ??
-    selectedSymbol.replace(/^[A-Z]+:/, "");
+  const selectedSymbolLabel = symbolLabel(selectedSymbol);
+  const symbolOptions = buildSymbolOptions(watchlist, selectedSymbol, symbolLabel);
   const tvSymbol = selectedSymbol;
-  const tvInterval = INTERVAL_MAP[timeframe];
+  const tvInterval = TIMEFRAME_TO_INTERVAL[timeframe];
   const captureSupported = typeof window !== "undefined"
     && Boolean(
       navigator.mediaDevices
@@ -300,21 +315,22 @@ export function TradingChart({ accountId }: { accountId?: string }) {
           <select
             id="trading-chart-symbol"
             value={selectedSymbol}
-            onChange={(event) => setSelectedSymbol(event.target.value)}
+            onChange={(event) => onSettingsChange({ symbol: event.target.value })}
             className="h-9 min-w-36 rounded-[4px] border border-line bg-background px-3 text-xs font-semibold text-foreground outline-none transition focus:border-accent"
           >
-            {SYMBOL_OPTIONS.map((option) => (
+            {symbolOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
           <div className="invisible-scrollbar flex max-w-full flex-nowrap gap-2 overflow-x-auto sm:flex-wrap">
-            {timeframes.map((item) => (
+            {TERMINAL_TIMEFRAMES.map((item) => (
               <button
                 key={item}
                 type="button"
-                onClick={() => setTimeframe(item)}
+                onClick={() => onSettingsChange({ timeframe: item })}
+                aria-pressed={timeframe === item}
                 className={`btn-dark h-9 px-4 text-xs ${timeframe === item ? "btn-active" : ""}`}
               >
                 {item}
@@ -322,7 +338,66 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             ))}
           </div>
         </div>
+
+        <div className="flex w-full flex-wrap items-center gap-2" role="group" aria-label="Chart panels">
+          {PANEL_TOGGLES.map((toggle) => (
+            <button
+              key={toggle.key}
+              type="button"
+              title={toggle.hint}
+              aria-pressed={panels[toggle.key]}
+              onClick={() => {
+                const next: Partial<TradingViewPanels> = {};
+                next[toggle.key] = !panels[toggle.key];
+                onSettingsChange({ panels: next });
+              }}
+              className={`btn-dark text-xs ${panels[toggle.key] ? "btn-active" : ""}`}
+            >
+              {toggle.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-expanded={editorOpen}
+            onClick={() => setEditorOpen((open) => !open)}
+            className={`btn-dark text-xs ${editorOpen ? "btn-active" : ""}`}
+          >
+            <ListChecks className="h-4 w-4" aria-hidden="true" />
+            Edit watchlist
+          </button>
+          <button
+            type="button"
+            aria-expanded={optionsOpen}
+            onClick={() => setOptionsOpen((open) => !open)}
+            className={`btn-dark text-xs ${optionsOpen ? "btn-active" : ""}`}
+          >
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            Chart options
+          </button>
+          <a
+            href={tradingViewChartUrl(tvSymbol, tvInterval)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-dark text-xs"
+          >
+            <ExternalLink className="h-4 w-4" aria-hidden="true" />
+            Open on TradingView
+          </a>
+        </div>
       </div>
+
+      {optionsOpen ? (
+        <TradingViewOptionsPanel chart={chart} onChange={(patch) => onSettingsChange({ chart: patch })} />
+      ) : null}
+
+      {editorOpen ? (
+        <TradingViewWatchlistEditor
+          watchlist={watchlist}
+          activeSymbol={selectedSymbol}
+          onChange={(next) => onSettingsChange({ watchlist: next })}
+          onSelect={(symbol) => onSettingsChange({ symbol })}
+        />
+      ) : null}
 
       <div className="px-3 py-3 sm:px-5 sm:py-5">
         <div className="relative w-full">
@@ -330,9 +405,10 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             <TradingViewAdvancedChart
               symbol={tvSymbol}
               interval={tvInterval}
-              height="clamp(520px, 78dvh, 820px)"
-              theme="dark"
-              allowSymbolChange
+              height={chartHeight}
+              watchlist={watchlist}
+              panels={panels}
+              chart={chart}
             />
           </div>
           <button
@@ -344,6 +420,33 @@ export function TradingChart({ accountId }: { accountId?: string }) {
             {ASK_ASSISTANT_LABEL}
           </button>
         </div>
+
+        <details className="mt-3 text-xs leading-5 text-muted">
+          <summary className="flex cursor-pointer items-center gap-2 font-semibold text-foreground/80 hover:text-foreground">
+            <Info className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            Why can&apos;t I sign in to my TradingView account here?
+          </summary>
+          <div className="mt-2 max-w-3xl space-y-2">
+            <p>
+              TradingView does not allow other websites to show its sign-in page, so your TradingView account - saved
+              layouts, alerts and personal watchlists - cannot be opened inside this chart. What you see is
+              TradingView&apos;s free embedded chart: live prices, the drawing tools and indicators, and the
+              watchlist you keep here in WSA. Drawings made here are not stored in a TradingView account.
+            </p>
+            <p>
+              For your own TradingView layouts and alerts use <strong>Open on TradingView</strong> (new tab). Both
+              can stay open next to each other.
+            </p>
+            <p>
+              <strong className="text-foreground/90">Your own Pine scripts</strong> cannot be loaded into this chart.
+              TradingView runs Pine only on tradingview.com; every embedded chart (this free one and the licensed
+              libraries brokers use) offers its built-in indicators and nothing else. Pick them under{" "}
+              <strong>Chart options</strong> - they are saved in your WSA profile and come back every time. Open your
+              scripts on tradingview.com with the button above; the symbol and the time frame you have here are
+              passed on.
+            </p>
+          </div>
+        </details>
       </div>
 
       {assistantOpen ? (

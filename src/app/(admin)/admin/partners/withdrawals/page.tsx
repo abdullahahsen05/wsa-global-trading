@@ -25,6 +25,29 @@ import type { PartnerTraderDto, TraderRiskStatus } from "@/lib/partner/types";
 
 type PartnerModelType = "IB" | "CPA" | "HYBRID";
 
+/**
+ * Ledger filter. Commission = WSA subscription commission rows, Rebate = IB
+ * per-lot rows (and manual adjustments), CPA = CPA payouts, WSA payout =
+ * commission that is approved or already paid out. "Hybrid" is an agreement
+ * type, not a ledger row type: its IB rows sit under Rebate and its CPA rows under CPA.
+ */
+type LedgerView = "ALL" | "COMMISSION" | "REBATE" | "CPA" | "PAYOUT";
+
+function ledgerItemInView(item: PartnerFinancialLedgerDto["items"][number], view: LedgerView): boolean {
+  switch (view) {
+    case "COMMISSION":
+      return item.type === "COMMISSION";
+    case "REBATE":
+      return item.type === "REBATE" && item.sourceType !== "CPA_TIER";
+    case "CPA":
+      return item.type === "REBATE" && item.sourceType === "CPA_TIER";
+    case "PAYOUT":
+      return item.type === "COMMISSION" && (item.status === "APPROVED" || item.status === "PAID");
+    default:
+      return true;
+  }
+}
+
 interface BrokerOption {
   id: string;
   display_name: string;
@@ -124,7 +147,7 @@ export default function AdminPartnerWithdrawalsPage() {
   const [cpaTier3Deposit, setCpaTier3Deposit] = useState("1000");
   const [cpaTier3Payout, setCpaTier3Payout] = useState("750");
   const [configActive, setConfigActive] = useState(true);
-  const [ledgerView, setLedgerView] = useState<"ALL" | "REBATE" | "CPA" | "HYBRID" | "PAYOUT">("ALL");
+  const [ledgerView, setLedgerView] = useState<LedgerView>("ALL");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -236,28 +259,34 @@ export default function AdminPartnerWithdrawalsPage() {
   const qualifiedTraderCount = partnerTraderRows.filter((trader) => trader.cpaQualified).length;
   const tradingTraderCount = partnerTraderRows.filter((trader) => trader.totalLotsTraded > 0).length;
   const syncedTraderCount = partnerTraderRows.filter((trader) => Boolean(trader.latestSyncAt)).length;
-  const walletReadyAmount = partnerTraderRows.reduce(
-    (sum, trader) => sum + trader.approvedWalletContribution.amount,
+  // Broker IB + CPA earnings of the partner's traders (reporting only) — not the WSA commission wallet.
+  const brokerApprovedAmount = partnerTraderRows.reduce(
+    (sum, trader) => sum + trader.brokerEarningsApproved.amount,
     0,
   );
-  const pendingWalletAmount = partnerTraderRows.reduce(
-    (sum, trader) => sum + trader.pendingWalletContribution.amount,
+  const brokerPendingAmount = partnerTraderRows.reduce(
+    (sum, trader) => sum + trader.brokerEarningsPending.amount,
     0,
   );
-  const filteredLedgerItems = useMemo(() => {
+  const ledgerCounts = useMemo(() => {
     const items = selectedLedger?.items ?? [];
-    if (ledgerView === "ALL") return items;
-    if (ledgerView === "PAYOUT") {
-      return items.filter((item) => item.status === "APPROVED" || item.status === "PAID");
-    }
-    if (ledgerView === "REBATE") {
-      return items.filter((item) => item.type === "REBATE" && item.sourceType !== "CPA_TIER");
-    }
-    if (ledgerView === "CPA") {
-      return items.filter((item) => item.type === "COMMISSION" || item.sourceType === "CPA_TIER");
-    }
-    return items.filter((item) => item.type === "REBATE" && item.sourceType === "CPA_TIER");
-  }, [selectedLedger?.items, ledgerView]);
+    const count = (view: LedgerView) => items.filter((item) => ledgerItemInView(item, view)).length;
+    return {
+      ALL: items.length,
+      COMMISSION: count("COMMISSION"),
+      REBATE: count("REBATE"),
+      CPA: count("CPA"),
+      PAYOUT: count("PAYOUT"),
+    };
+  }, [selectedLedger?.items]);
+  const filteredLedgerItems = useMemo(
+    () => (selectedLedger?.items ?? []).filter((item) => ledgerItemInView(item, ledgerView)),
+    [selectedLedger?.items, ledgerView],
+  );
+  const hiddenRebateRows = Math.max(
+    0,
+    (selectedLedger?.rebateRowCount ?? 0) - (selectedLedger?.rebateRowsListed ?? 0),
+  );
 
   useEffect(() => {
     if (!brokerConfig.data || configBrokerId) return;
@@ -591,8 +620,9 @@ export default function AdminPartnerWithdrawalsPage() {
             </div>
             <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Broker rebate</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney({ amount: selectedLedger.approvedUnpaidRebates, currency: selectedLedger.currency })}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">Broker rebate + CPA</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">{formatMoney({ amount: selectedLedger.approvedUnpaidRebates + selectedLedger.paidRebates, currency: selectedLedger.currency })}</p>
+                <p className="mt-1 text-[11px] text-muted">Earned, reporting only</p>
               </div>
               <div className="rounded-[4px] border border-line bg-background px-4 py-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">WSA commission</p>
@@ -621,8 +651,8 @@ export default function AdminPartnerWithdrawalsPage() {
                 { label: "Live synced", value: syncedTraderCount, tone: "accent" },
                 { label: "Trading", value: tradingTraderCount, tone: "accent" },
                 { label: "Qualified", value: qualifiedTraderCount, tone: "lime" },
-                { label: "Broker approved", value: formatMoney({ amount: walletReadyAmount, currency: selectedLedger.currency }), tone: "lime" },
-                { label: "Broker pending", value: formatMoney({ amount: pendingWalletAmount, currency: selectedLedger.currency }), tone: "accent" },
+                { label: "Broker approved", value: formatMoney({ amount: brokerApprovedAmount, currency: selectedLedger.currency }), tone: "lime" },
+                { label: "Broker pending", value: formatMoney({ amount: brokerPendingAmount, currency: selectedLedger.currency }), tone: "accent" },
               ]} />
             </div>
             <div className="mt-5 grid items-start gap-5 xl:grid-cols-3">
@@ -731,13 +761,18 @@ export default function AdminPartnerWithdrawalsPage() {
                     <div className="mb-4 rounded-[4px] border border-line bg-panel p-4">
                       <FilterChipRow
                         chips={[
-                          { label: `All (${selectedLedger.items.length})`, active: ledgerView === "ALL", onClick: () => setLedgerView("ALL") },
-                          { label: `Rebate (${selectedLedger.items.filter((item) => item.type === "REBATE" && item.sourceType !== "CPA_TIER").length})`, active: ledgerView === "REBATE", onClick: () => setLedgerView("REBATE") },
-                          { label: `CPA (${selectedLedger.items.filter((item) => item.type === "COMMISSION" || item.sourceType === "CPA_TIER").length})`, active: ledgerView === "CPA", onClick: () => setLedgerView("CPA") },
-                          { label: `Hybrid (${selectedLedger.items.filter((item) => item.type === "REBATE" && item.sourceType === "CPA_TIER").length})`, active: ledgerView === "HYBRID", onClick: () => setLedgerView("HYBRID") },
-                          { label: `WSA Payout (${selectedLedger.items.filter((item) => item.status === "APPROVED" || item.status === "PAID").length})`, active: ledgerView === "PAYOUT", onClick: () => setLedgerView("PAYOUT") },
+                          { label: `All (${ledgerCounts.ALL})`, active: ledgerView === "ALL", onClick: () => setLedgerView("ALL") },
+                          { label: `WSA commission (${ledgerCounts.COMMISSION})`, active: ledgerView === "COMMISSION", onClick: () => setLedgerView("COMMISSION") },
+                          { label: `Rebate (${ledgerCounts.REBATE})`, active: ledgerView === "REBATE", onClick: () => setLedgerView("REBATE") },
+                          { label: `CPA (${ledgerCounts.CPA})`, active: ledgerView === "CPA", onClick: () => setLedgerView("CPA") },
+                          { label: `WSA payout (${ledgerCounts.PAYOUT})`, active: ledgerView === "PAYOUT", onClick: () => setLedgerView("PAYOUT") },
                         ]}
                       />
+                      {hiddenRebateRows > 0 ? (
+                        <p className="mt-3 text-xs text-muted">
+                          The list shows the newest {selectedLedger.rebateRowsListed} of {selectedLedger.rebateRowCount} rebate rows; the amounts above include all of them.
+                        </p>
+                      ) : null}
                     </div>
                     <DataTable
                       initialPageSize={10}
@@ -786,7 +821,7 @@ export default function AdminPartnerWithdrawalsPage() {
                         initialPageSize={8}
                         pageSizeOptions={[8, 16, 32]}
                         maxBodyHeight="420px"
-                        headers={["Trader", "Pipeline", "Model", "Gross revenue", "Broker approved", "Risk", "CPA progress"]}
+                        headers={["Trader", "Pipeline", "Model", "Gross revenue", "WSA commission", "Broker approved", "Risk", "CPA progress"]}
                         rows={partnerTraderRows.map((trader) => [
                           <div key="trader" className="min-w-[180px]">
                             <p className="truncate text-sm font-semibold text-foreground">{trader.name}</p>
@@ -802,9 +837,13 @@ export default function AdminPartnerWithdrawalsPage() {
                           </div>,
                           <span key="model">{labelModel(trader.commissionModel)}</span>,
                           <span key="revenue">{formatMoney(trader.grossRevenue)}</span>,
-                          <div key="wallet" className="min-w-[120px]">
-                            <p className="text-sm font-semibold text-accent-2">{formatMoney(trader.approvedWalletContribution)}</p>
-                            <p className="text-xs text-muted">pending {formatMoney(trader.pendingWalletContribution)}</p>
+                          <div key="wsa" className="min-w-[120px]">
+                            <p className="text-sm font-semibold text-foreground">{formatMoney(trader.wsaCommissionEarned)}</p>
+                            <p className="text-xs text-muted">approved {formatMoney(trader.approvedWalletContribution)}</p>
+                          </div>,
+                          <div key="broker" className="min-w-[120px]">
+                            <p className="text-sm font-semibold text-accent-2">{formatMoney(trader.brokerEarningsApproved)}</p>
+                            <p className="text-xs text-muted">pending {formatMoney(trader.brokerEarningsPending)}</p>
                           </div>,
                           <StatusPill key="risk" tone={RISK_TONES[trader.riskStatus]}>{trader.riskStatus}</StatusPill>,
                           <div key="cpa" className="min-w-[150px]">

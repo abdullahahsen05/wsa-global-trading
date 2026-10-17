@@ -12,7 +12,11 @@ import { publicMetaApiError } from '@/lib/broker/metaApiErrors';
 import { Api2TradeBrokerAdapter } from '@/lib/broker/Api2TradeBrokerAdapter';
 import { publicBrokerConnectionError } from '@/lib/broker/api2TradeErrors';
 import { acquireOperationalLock } from '@/lib/services/operationalLockService';
+import { recordAccountSnapshot } from '@/lib/services/accountSnapshotService';
 import { calculatePartnerRebatesForTradingAccounts } from '@/lib/services/partnerRebateCalculationService';
+import { recordCashFlows } from '@/lib/services/accountCashFlowService';
+import type { BrokerCashFlow } from '@/lib/broker/orderNormalization';
+import { chunkArray, selectAllPages, selectAllPagesForIds } from '@/lib/supabase/pagedSelect';
 import {
   api2TradeUsesDashboardAccounts,
   brokerProviderConfigured,
@@ -311,49 +315,175 @@ function tradeDtoToRow(trade: TradeDto, currency: string) {
   };
 }
 
+type TradeRow = ReturnType<typeof tradeDtoToRow>;
+
+/** The columns of a stored trade that a sync can change. */
+interface StoredTradeRow {
+  id: string;
+  external_trade_id: string | null;
+  symbol: string | null;
+  side: string | null;
+  status: string | null;
+  volume: number | string | null;
+  open_price: number | string | null;
+  close_price: number | string | null;
+  profit: number | string | null;
+  currency: string | null;
+  opened_at: string | null;
+  closed_at: string | null;
+}
+
+const STORED_TRADE_COLUMNS =
+  'id, external_trade_id, symbol, side, status, volume, open_price, close_price, profit, currency, opened_at, closed_at';
+
+function sameNumber(stored: unknown, next: unknown, decimals: number): boolean {
+  if (stored === null || stored === undefined) return next === null || next === undefined;
+  if (next === null || next === undefined) return false;
+  const left = Number(stored);
+  const right = Number(next);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+  const factor = 10 ** decimals;
+  return Math.round(left * factor) === Math.round(right * factor);
+}
+
+function sameInstant(stored: unknown, next: unknown): boolean {
+  if (stored === null || stored === undefined) return next === null || next === undefined;
+  if (next === null || next === undefined) return false;
+  const left = Date.parse(String(stored));
+  const right = Date.parse(String(next));
+  return Number.isFinite(left) && Number.isFinite(right) && left === right;
+}
+
+/**
+ * True when the broker's version of a trade differs from the stored one. Column
+ * precision is respected (volume 4, prices 6, profit 2 decimals), so rounding in
+ * the database never makes an unchanged trade look changed.
+ */
+export function tradeRowChanged(stored: StoredTradeRow, next: TradeRow): boolean {
+  return (
+    stored.symbol !== next.symbol
+    || stored.side !== next.side
+    || stored.status !== next.status
+    || stored.currency !== next.currency
+    || !sameNumber(stored.volume, next.volume, 4)
+    || !sameNumber(stored.open_price, next.open_price, 6)
+    || !sameNumber(stored.close_price, next.close_price, 6)
+    || !sameNumber(stored.profit, next.profit, 2)
+    || !sameInstant(stored.opened_at, next.opened_at)
+    || !sameInstant(stored.closed_at, next.closed_at)
+  );
+}
+
+/** One row per broker trade id; a closed version wins over an open one. */
+export function dedupeTradeRows(rows: TradeRow[]): TradeRow[] {
+  const byId = new Map<string, TradeRow>();
+  for (const row of rows) {
+    if (!row.external_trade_id) continue;
+    const previous = byId.get(row.external_trade_id);
+    if (!previous || previous.status !== 'CLOSED' || row.status === 'CLOSED') byId.set(row.external_trade_id, row);
+  }
+  return [...byId.values()];
+}
+
+/** Runs `task` for every item with at most `limit` in flight; the first failure is thrown once all settled. */
+async function runPool<T>(items: T[], limit: number, task: (item: T) => Promise<void>): Promise<void> {
+  let cursor = 0;
+  let failure: unknown = null;
+  async function worker() {
+    while (cursor < items.length) {
+      const item = items[cursor];
+      cursor += 1;
+      try {
+        await task(item);
+      } catch (error) {
+        failure ??= error;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failure) throw failure;
+}
+
+const TRADE_WRITE_CHUNK = 200;
+const TRADE_UPDATE_CONCURRENCY = 6;
+
 async function persistBrokerSnapshotAndTrades(params: {
   supabase: ReturnType<typeof createAdminClient>;
   accountId: string;
   snapshot: TraderAccountSummary;
   openTrades: TradeDto[];
   closedTrades: TradeDto[];
+  /** deposits / withdrawals seen in the history (best effort, needs migration 059) */
+  cashFlows?: BrokerCashFlow[];
+  /** false when the caller has just stored this very snapshot (the risk worker does) */
+  recordSnapshot?: boolean;
 }): Promise<{ tradesUpserted: number; openPositions: number; currency: string; balance: number; equity: number }> {
   const { supabase, accountId, snapshot, openTrades, closedTrades } = params;
   const currency = snapshot.equity.currency || snapshot.balance.currency || 'USD';
   const balance = snapshot.balance.amount;
   const equity = snapshot.equity.amount;
-  const { error: snapshotError } = await supabase.rpc('record_account_snapshot', {
-    p_account_id: accountId,
-    p_balance: balance,
-    p_equity: equity,
-  });
-  if (snapshotError) throw new Error(`Failed to record account snapshot: ${snapshotError.message}`);
+  if (params.recordSnapshot !== false) {
+    const { error: snapshotError } = await recordAccountSnapshot(supabase, {
+      accountId,
+      balance,
+      equity,
+      margin: snapshot.margin,
+      freeMargin: snapshot.freeMargin,
+      marginLevel: snapshot.marginLevel,
+    });
+    if (snapshotError) throw new Error(`Failed to record account snapshot: ${snapshotError.message}`);
+  }
 
-  const rows = [
+  const rows = dedupeTradeRows([
     ...openTrades.map((trade) => tradeDtoToRow(trade, currency)),
     ...closedTrades.map((trade) => tradeDtoToRow(trade, currency)),
-  ];
-  const externalIds = [...new Set(rows.map((row) => row.external_trade_id).filter(Boolean))];
-  const existingMap = new Map<string, string>();
-  if (externalIds.length > 0) {
-    const { data: existing } = await supabase
-      .from('trades')
-      .select('id, external_trade_id')
-      .eq('trading_account_id', accountId)
-      .in('external_trade_id', externalIds);
-    for (const row of existing ?? []) {
-      if (row.external_trade_id) existingMap.set(row.external_trade_id as string, row.id as string);
-    }
+  ]);
+
+  // What is stored already. The id list is read in chunks and page by page: one
+  // `in (...)` with the whole history is rejected by PostgREST as a too long
+  // address, and a single response never holds more than 1000 rows - either made
+  // every stored trade look new, and the insert then failed on the unique key.
+  const stored = await selectAllPagesForIds<StoredTradeRow>(
+    'Trade lookup failed',
+    rows.map((row) => row.external_trade_id),
+    (idChunk, from, to) =>
+      supabase
+        .from('trades')
+        .select(STORED_TRADE_COLUMNS)
+        .eq('trading_account_id', accountId)
+        .in('external_trade_id', idChunk)
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
+  const storedByExternalId = new Map<string, StoredTradeRow>();
+  for (const row of stored) {
+    if (row.external_trade_id) storedByExternalId.set(row.external_trade_id, row);
   }
 
   let tradesUpserted = 0;
-  const toInsert = rows.filter((row) => !existingMap.has(row.external_trade_id));
-  if (toInsert.length > 0) {
-    const { data, error } = await supabase.from('trades').insert(toInsert).select('id');
+
+  // New trades: a key-based upsert, so a second process syncing the same account
+  // at the same moment can not make the insert fail on the unique key.
+  const toInsert = rows.filter((row) => !storedByExternalId.has(row.external_trade_id));
+  for (const chunk of chunkArray(toInsert, TRADE_WRITE_CHUNK)) {
+    const { data, error } = await supabase
+      .from('trades')
+      .upsert(chunk, { onConflict: 'trading_account_id,external_trade_id' })
+      .select('id');
     if (error) throw new Error(`Trade insert failed: ${error.message}`);
-    tradesUpserted += data?.length ?? 0;
+    tradesUpserted += data?.length ?? chunk.length;
   }
-  for (const row of rows.filter((item) => existingMap.has(item.external_trade_id))) {
+
+  // Known trades: only the ones the broker changed are written (the whole
+  // history used to be rewritten one request at a time on every cycle - slow, and
+  // every write woke the live subscribers of the trades table).
+  const changed = rows.filter((row) => {
+    const existing = storedByExternalId.get(row.external_trade_id);
+    return existing !== undefined && tradeRowChanged(existing, row);
+  });
+  await runPool(changed, TRADE_UPDATE_CONCURRENCY, async (row) => {
+    const existing = storedByExternalId.get(row.external_trade_id);
+    if (!existing) return;
     const { error } = await supabase
       .from('trades')
       .update({
@@ -368,22 +498,26 @@ async function persistBrokerSnapshotAndTrades(params: {
         opened_at: row.opened_at,
         closed_at: row.closed_at,
       })
-      .eq('trading_account_id', accountId)
-      .eq('external_trade_id', row.external_trade_id);
+      .eq('id', existing.id);
     if (error) throw new Error(`Trade update failed: ${error.message}`);
-    tradesUpserted++;
-  }
+  });
+  tradesUpserted += changed.length;
 
   const openExternalIds = new Set(openTrades.map((trade) => trade.id).filter(Boolean));
   const closedTradeMap = new Map(closedTrades.map((trade) => [trade.id, trade]));
-  const { data: staleOpenRows, error: staleOpenLoadError } = await supabase
-    .from('trades')
-    .select('external_trade_id, open_price')
-    .eq('trading_account_id', accountId)
-    .eq('status', 'OPEN');
-  if (staleOpenLoadError) throw new Error(`Open trade reconciliation failed: ${staleOpenLoadError.message}`);
+  const staleOpenRows = await selectAllPages<{ external_trade_id: string | null; open_price: number | string | null }>(
+    'Open trade reconciliation failed',
+    (from, to) =>
+      supabase
+        .from('trades')
+        .select('id, external_trade_id, open_price')
+        .eq('trading_account_id', accountId)
+        .eq('status', 'OPEN')
+        .order('id', { ascending: true })
+        .range(from, to),
+  );
 
-  for (const staleRow of staleOpenRows ?? []) {
+  for (const staleRow of staleOpenRows) {
     const externalTradeId = String(staleRow.external_trade_id ?? '');
     if (!externalTradeId || openExternalIds.has(externalTradeId)) continue;
 
@@ -402,6 +536,11 @@ async function persistBrokerSnapshotAndTrades(params: {
       .eq('status', 'OPEN');
     if (error) throw new Error(`Stale open trade close failed: ${error.message}`);
     tradesUpserted++;
+  }
+
+  // Deposits / withdrawals: best effort, never allowed to break the trade sync.
+  if (params.cashFlows && params.cashFlows.length > 0) {
+    await recordCashFlows(supabase, accountId, params.cashFlows, currency);
   }
 
   if (tradesUpserted > 0) {
@@ -834,6 +973,7 @@ async function runApi2TradeSync(params: {
       snapshot,
       openTrades,
       closedTrades,
+      cashFlows: adapter.takeCashFlows?.(accountId),
     });
 
     await supabase
@@ -1134,7 +1274,11 @@ export async function getBrokerConnectionStatus(
 export async function refreshAccountTrades(
   accountId: string,
   actorUserId: string | null,
-  options?: { force?: boolean },
+  options?: {
+    force?: boolean;
+    /** a broker reading the caller already stored: it is reused instead of asking the broker again */
+    snapshot?: TraderAccountSummary;
+  },
 ): Promise<TradeRefreshSummary> {
   const supabase = createAdminClient();
 
@@ -1207,8 +1351,10 @@ export async function refreshAccountTrades(
     }
     try {
       const adapter = createBrokerAdapter();
+      // The risk worker has just read and stored the snapshot: it hands it over, so the
+      // broker is asked once and the same reading is not stored twice per cycle.
       const [snapshot, openTrades, closedTrades] = await Promise.all([
-        adapter.fetchSnapshot(accountId),
+        options?.snapshot ? Promise.resolve(options.snapshot) : adapter.fetchSnapshot(accountId),
         adapter.fetchOpenTrades(accountId),
         adapter.fetchTradeHistory(accountId),
       ]);
@@ -1218,6 +1364,8 @@ export async function refreshAccountTrades(
         snapshot,
         openTrades,
         closedTrades,
+        cashFlows: adapter.takeCashFlows?.(accountId),
+        recordSnapshot: !options?.snapshot,
       });
       await supabase
         .from('trading_accounts')

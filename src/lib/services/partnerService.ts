@@ -1,10 +1,14 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mapTradeToDto } from "@/lib/mappers/tradeMapper";
 import {
-  ensurePartnerRebateLedgerCurrent,
-  listPartnerTradeRebateLogs,
+  refreshPartnerRebatesIfStale,
+  getPartnerRebateTotals,
 } from "@/lib/services/partnerRebateCalculationService";
-import { getPartnerFinancialLedger } from "@/lib/services/partnerWithdrawalService";
+import {
+  chunkArray,
+  selectAllPages,
+  selectAllPagesForIds,
+} from "@/lib/supabase/pagedSelect";
 import {
   PARTNER_ERROR,
   PartnerError,
@@ -16,6 +20,17 @@ import {
   type PartnerTraderDto,
   type TraderRiskStatus,
 } from "@/lib/partner/types";
+import {
+  EARNED_REBATE_STATUSES,
+  closedAfterAttribution,
+  cpaTierName,
+  dominantCurrency,
+  isEligibleLiveAccount,
+  pickBrokerConfiguration,
+  rebateKind,
+  roundMoney,
+  type BrokerConfigCandidate,
+} from "@/lib/partner/rebateRules";
 import type { CrmNoteDto, TradeDto } from "@/lib/domain/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,6 +41,14 @@ import type { CrmNoteDto, TradeDto } from "@/lib/domain/types";
 // is used the same way crmService/adminService use it — but ALWAYS behind an
 // explicit partner_id filter so a partner can never read another partner's or
 // an unassigned trader's data. Routes gate access with requirePartner().
+//
+// Two kinds of money, never mixed:
+//   • WSA commission — a percentage of what attributed traders pay WSA. The
+//     only balance that can be withdrawn through WSA ("wallet").
+//   • Broker earnings — IB per lot and CPA, calculated per the agreement the
+//     admin entered for the partner and broker. Reporting only.
+// Every list below is read page by page (PostgREST returns ≤ 1000 rows per
+// request), so totals stay right for partners with thousands of trades.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface TraderProfileRow {
@@ -66,14 +89,13 @@ interface AssignedContext {
   tradeLotsByTraderUserId: Map<string, number>;
   rebatesByTraderUserId: Map<string, RebateAggregate>;
   commissionsByTraderUserId: Map<string, CommissionAggregate>;
-  configByBrokerProviderId: Map<string, BrokerConfigRow>;
-  configByBrokerName: Map<string, BrokerConfigRow>;
-  fallbackConfig: BrokerConfigRow | null;
+  configs: BrokerConfigRow[];
   allAccountIds: string[];
 }
 
 interface RebateAggregate {
-  approved: number;
+  /** APPROVED + PAID broker earnings. */
+  earned: number;
   pending: number;
   ib: number;
   cpa: number;
@@ -83,11 +105,12 @@ interface CommissionAggregate {
   approved: number;
   pending: number;
   paid: number;
+  /** Everything that still counts (PENDING + APPROVED + PAID). */
   total: number;
   grossRevenue: number;
 }
 
-interface BrokerConfigRow {
+interface BrokerConfigRow extends BrokerConfigCandidate {
   broker_provider_id: string | null;
   model_type: "IB" | "CPA" | "HYBRID";
   cpa_qualification_lots: number | string;
@@ -95,15 +118,6 @@ interface BrokerConfigRow {
   cpa_tier_2_deposit: number | string;
   cpa_tier_3_deposit: number | string;
   broker_providers?: { display_name?: string | null; name?: string | null } | null;
-}
-
-function normalizeBrokerName(value: string | null | undefined): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function newestIso(values: Array<string | null | undefined>): string | null {
@@ -129,33 +143,45 @@ function detectPipelineStage(params: {
 }
 
 function cpaTierLabel(config: BrokerConfigRow | null, deposit: number): string | null {
-  if (!config) return null;
-  if (deposit >= Number(config.cpa_tier_3_deposit)) return "Tier 3";
-  if (deposit >= Number(config.cpa_tier_2_deposit)) return "Tier 2";
-  if (deposit >= Number(config.cpa_tier_1_deposit)) return "Tier 1";
-  return null;
+  if (!config || config.model_type === "IB") return null;
+  return cpaTierName(
+    [
+      { deposit: Number(config.cpa_tier_1_deposit), payout: 0 },
+      { deposit: Number(config.cpa_tier_2_deposit), payout: 0 },
+      { deposit: Number(config.cpa_tier_3_deposit), payout: 0 },
+    ],
+    deposit,
+  );
 }
 
-function isLiveCommissionAccount(account: AccountRow): boolean {
-  if (account.status !== "CONNECTED") return false;
-  return account.account_usage === "TRADER" || account.account_usage === "COPY_MASTER";
+/** The agreement that applies to a trader: one for an account's own broker wins over the "all brokers" default. */
+function configForAccounts(accounts: AccountRow[], configs: BrokerConfigRow[]): BrokerConfigRow | null {
+  let fallback: BrokerConfigRow | null = null;
+  for (const account of accounts) {
+    const picked = pickBrokerConfiguration(configs, account.broker_provider_id, account.broker_name);
+    if (picked?.brokerProviderId) return picked;
+    fallback = fallback ?? picked;
+  }
+  return fallback ?? pickBrokerConfiguration(configs, null, null);
 }
 
 /** Load the partner's assigned traders + their accounts/snapshots/risk in bounded queries. */
 async function loadAssignedContext(partnerUserId: string): Promise<AssignedContext> {
   const supabase = createAdminClient();
 
-  const { data: profileRows, error: pErr } = await supabase
-    .from("trader_profiles")
-    // trader_profiles now has TWO FKs to profiles (user_id, partner_id), so the
-    // embed must be disambiguated with the user_id column hint.
-    .select("id, user_id, segment, partner_assigned_at, profiles!user_id(full_name, email, status, created_at)")
-    .eq("partner_id", partnerUserId)
-    .order("partner_assigned_at", { ascending: false })
-    .limit(1000);
-  if (pErr) throw new Error(`Failed to fetch assigned traders: ${pErr.message}`);
-
-  const profiles = (profileRows ?? []) as unknown as TraderProfileRow[];
+  const profiles = await selectAllPages<TraderProfileRow>(
+    "Failed to fetch assigned traders",
+    (from, to) =>
+      supabase
+        .from("trader_profiles")
+        // trader_profiles now has TWO FKs to profiles (user_id, partner_id), so the
+        // embed must be disambiguated with the user_id column hint.
+        .select("id, user_id, segment, partner_assigned_at, profiles!user_id(full_name, email, status, created_at)")
+        .eq("partner_id", partnerUserId)
+        .order("partner_assigned_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+  );
   const userIds = profiles.map((p) => p.user_id);
   if (userIds.length === 0) {
     return {
@@ -167,100 +193,155 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
       tradeLotsByTraderUserId: new Map(),
       rebatesByTraderUserId: new Map(),
       commissionsByTraderUserId: new Map(),
-      configByBrokerProviderId: new Map(),
-      configByBrokerName: new Map(),
-      fallbackConfig: null,
+      configs: [],
       allAccountIds: [],
     };
   }
 
-  const { data: accountRows, error: aErr } = await supabase
-    .from("trading_accounts")
-    .select("id, user_id, status, currency, account_name, broker_name, broker_provider_id, initial_balance, last_synced_at, account_usage")
-    .in("user_id", userIds)
-    .limit(2000);
-  if (aErr) throw new Error(`Failed to fetch accounts: ${aErr.message}`);
-
-  const accounts = (accountRows ?? []) as AccountRow[];
-  const liveCommissionAccountIds = accounts.filter(isLiveCommissionAccount).map((a) => a.id);
+  const accounts = await selectAllPagesForIds<AccountRow>(
+    "Failed to fetch accounts",
+    userIds,
+    (ids, from, to) =>
+      supabase
+        .from("trading_accounts")
+        .select("id, user_id, status, currency, account_name, broker_name, broker_provider_id, initial_balance, last_synced_at, account_usage")
+        .in("user_id", ids)
+        .order("id")
+        .range(from, to),
+  );
+  const liveAccounts = accounts.filter((account) => isEligibleLiveAccount(account));
+  const liveCommissionAccountIds = liveAccounts.map((a) => a.id);
   const allAccountIds = accounts.map((a) => a.id);
   const accountToTraderUserId = new Map(accounts.map((a) => [a.id, a.user_id]));
+
+  // A trade counts for the partner only from the day its trader was attributed.
+  const assignedAtByTrader = new Map(profiles.map((p) => [p.user_id, p.partner_assigned_at]));
+  const assignedDates = profiles.map((p) => p.partner_assigned_at);
+  const earliestAssigned = assignedDates.length > 0 && assignedDates.every(Boolean)
+    ? new Date(Math.min(...assignedDates.map((value) => Date.parse(value as string)))).toISOString()
+    : null;
 
   const snapshotByAccount = new Map<string, SnapshotRow>();
   const openRiskByAccount = new Map<string, number>();
   const tradeLotsByTraderUserId = new Map<string, number>();
   const rebatesByTraderUserId = new Map<string, RebateAggregate>();
   const commissionsByTraderUserId = new Map<string, CommissionAggregate>();
-  const configByBrokerProviderId = new Map<string, BrokerConfigRow>();
-  const configByBrokerName = new Map<string, BrokerConfigRow>();
-  let fallbackConfig: BrokerConfigRow | null = null;
 
-  const [{ data: snaps }, { data: riskRows }, { data: tradeRows }, { data: rebateRows }, { data: commissionRows }, { data: configRows }] = await Promise.all([
-      allAccountIds.length
-        ? supabase
-            .from("latest_account_snapshots")
-            .select("trading_account_id, balance, equity, floating_pnl, drawdown_percent")
-            .in("trading_account_id", allAccountIds)
-        : Promise.resolve({ data: [] }),
-      allAccountIds.length
-        ? supabase
-            .from("risk_events")
-            .select("trading_account_id")
-            .is("acknowledged_at", null)
-            .in("trading_account_id", allAccountIds)
-            .limit(5000)
-        : Promise.resolve({ data: [] }),
-      liveCommissionAccountIds.length
-        ? supabase
-            .from("trades")
-            .select("trading_account_id, volume, profit")
-            .in("trading_account_id", liveCommissionAccountIds)
-            .limit(20000)
-        : Promise.resolve({ data: [] }),
+  const [snaps, riskRows, tradeRows, rebateRows, commissionRows, configRows] = await Promise.all([
+    selectAllPagesForIds<SnapshotRow>(
+      "Failed to fetch account snapshots",
+      allAccountIds,
+      (ids, from, to) =>
+        supabase
+          .from("latest_account_snapshots")
+          .select("trading_account_id, balance, equity, floating_pnl, drawdown_percent")
+          .in("trading_account_id", ids)
+          .order("trading_account_id")
+          .range(from, to),
+    ),
+    selectAllPagesForIds<{ trading_account_id: string }>(
+      "Failed to fetch risk events",
+      allAccountIds,
+      (ids, from, to) =>
+        supabase
+          .from("risk_events")
+          .select("trading_account_id")
+          .is("acknowledged_at", null)
+          .in("trading_account_id", ids)
+          .order("id")
+          .range(from, to),
+    ),
+    selectAllPagesForIds<{ trading_account_id: string; volume: number | string | null; closed_at: string | null }>(
+      "Failed to fetch trade volume",
+      liveCommissionAccountIds,
+      (ids, from, to) => {
+        let query = supabase
+          .from("trades")
+          .select("trading_account_id, volume, closed_at")
+          .in("trading_account_id", ids)
+          .eq("status", "CLOSED")
+          .not("closed_at", "is", null)
+          .neq("volume", 0);
+        if (earliestAssigned) query = query.gte("closed_at", earliestAssigned);
+        return query.order("id").range(from, to);
+      },
+    ),
+    selectAllPages<{
+      trader_id: string | null;
+      amount: number | string | null;
+      status: string;
+      calculation_type: string | null;
+      source_type: string | null;
+    }>("Failed to fetch partner rebates", (from, to) =>
       supabase
         .from("partner_rebates")
-        .select("trader_id, amount, status, calculation_type")
+        .select("trader_id, amount, status, calculation_type, source_type")
         .eq("partner_id", partnerUserId)
-        .in("trader_id", userIds)
-        .limit(10000),
+        .order("id")
+        .range(from, to),
+    ),
+    selectAllPages<{
+      trader_id: string | null;
+      gross_amount: number | string | null;
+      commission_amount: number | string | null;
+      status: string;
+    }>("Failed to fetch partner commissions", (from, to) =>
       supabase
         .from("partner_commissions")
         .select("trader_id, gross_amount, commission_amount, status")
         .eq("partner_id", partnerUserId)
-        .in("trader_id", userIds)
-        .limit(10000),
+        .order("id")
+        .range(from, to),
+    ),
+    selectAllPages<{
+      broker_provider_id: string | null;
+      model_type: "IB" | "CPA" | "HYBRID";
+      cpa_qualification_lots: number | string;
+      cpa_tier_1_deposit: number | string;
+      cpa_tier_2_deposit: number | string;
+      cpa_tier_3_deposit: number | string;
+      broker_providers?: { display_name?: string | null; name?: string | null } | null;
+    }>("Failed to fetch partner agreements", (from, to) =>
       supabase
         .from("partner_broker_configurations")
         .select("broker_provider_id, model_type, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_2_deposit, cpa_tier_3_deposit, broker_providers(display_name, name)")
         .eq("partner_id", partnerUserId)
         .eq("is_active", true)
-        .limit(200),
-    ]);
-  for (const s of (snaps ?? []) as SnapshotRow[]) snapshotByAccount.set(s.trading_account_id, s);
-  for (const r of riskRows ?? []) {
+        .order("id")
+        .range(from, to),
+    ),
+  ]);
+
+  for (const s of snaps) snapshotByAccount.set(s.trading_account_id, s);
+  for (const r of riskRows) {
     openRiskByAccount.set(r.trading_account_id, (openRiskByAccount.get(r.trading_account_id) ?? 0) + 1);
   }
-  for (const trade of tradeRows ?? []) {
-    const traderUserId = accountToTraderUserId.get(trade.trading_account_id as string);
+  for (const trade of tradeRows) {
+    const traderUserId = accountToTraderUserId.get(trade.trading_account_id);
     if (!traderUserId) continue;
+    if (!closedAfterAttribution(trade.closed_at, assignedAtByTrader.get(traderUserId))) continue;
     tradeLotsByTraderUserId.set(
       traderUserId,
       (tradeLotsByTraderUserId.get(traderUserId) ?? 0) + Math.abs(Number(trade.volume ?? 0)),
     );
   }
-  for (const rebate of rebateRows ?? []) {
-    const traderId = rebate.trader_id as string | null;
+  for (const rebate of rebateRows) {
+    const traderId = rebate.trader_id;
     if (!traderId) continue;
-    const current = rebatesByTraderUserId.get(traderId) ?? { approved: 0, pending: 0, ib: 0, cpa: 0 };
+    const current = rebatesByTraderUserId.get(traderId) ?? { earned: 0, pending: 0, ib: 0, cpa: 0 };
     const amount = Number(rebate.amount ?? 0);
-    if (rebate.status === "APPROVED" || rebate.status === "PAID") current.approved += amount;
-    else if (rebate.status === "PENDING") current.pending += amount;
-    if (rebate.calculation_type === "IB_VOLUME") current.ib += amount;
-    if (rebate.calculation_type === "CPA_TIER") current.cpa += amount;
+    if (EARNED_REBATE_STATUSES.includes(rebate.status)) {
+      current.earned += amount;
+      const kind = rebateKind(rebate);
+      if (kind === "IB") current.ib += amount;
+      else if (kind === "CPA") current.cpa += amount;
+    } else if (rebate.status === "PENDING") {
+      current.pending += amount;
+    }
     rebatesByTraderUserId.set(traderId, current);
   }
-  for (const commission of commissionRows ?? []) {
-    const traderId = commission.trader_id as string | null;
+  for (const commission of commissionRows) {
+    const traderId = commission.trader_id;
     if (!traderId) continue;
     const current = commissionsByTraderUserId.get(traderId) ?? {
       approved: 0,
@@ -270,24 +351,21 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
       grossRevenue: 0,
     };
     const amount = Number(commission.commission_amount ?? 0);
-    current.total += amount;
-    current.grossRevenue += Number(commission.gross_amount ?? 0);
+    // Cancelled / reversed commissions are not earnings.
     if (commission.status === "APPROVED") current.approved += amount;
     else if (commission.status === "PENDING") current.pending += amount;
     else if (commission.status === "PAID") current.paid += amount;
+    if (commission.status === "PENDING" || commission.status === "APPROVED" || commission.status === "PAID") {
+      current.total += amount;
+      current.grossRevenue += Number(commission.gross_amount ?? 0);
+    }
     commissionsByTraderUserId.set(traderId, current);
   }
-  for (const config of (configRows ?? []) as BrokerConfigRow[]) {
-    if (config.broker_provider_id) {
-      configByBrokerProviderId.set(config.broker_provider_id, config);
-      const displayName = normalizeBrokerName(config.broker_providers?.display_name);
-      const name = normalizeBrokerName(config.broker_providers?.name);
-      if (displayName) configByBrokerName.set(displayName, config);
-      if (name) configByBrokerName.set(name, config);
-    } else {
-      fallbackConfig = config;
-    }
-  }
+  const configs: BrokerConfigRow[] = configRows.map((config) => ({
+    ...config,
+    brokerProviderId: config.broker_provider_id,
+    brokerNames: [config.broker_providers?.display_name, config.broker_providers?.name],
+  }));
 
   return {
     profiles,
@@ -298,9 +376,7 @@ async function loadAssignedContext(partnerUserId: string): Promise<AssignedConte
     tradeLotsByTraderUserId,
     rebatesByTraderUserId,
     commissionsByTraderUserId,
-    configByBrokerProviderId,
-    configByBrokerName,
-    fallbackConfig,
+    configs,
     allAccountIds,
   };
 }
@@ -316,13 +392,11 @@ function buildTraderDto(
   let connectedAccounts = 0;
   let openRiskEvents = 0;
   let restricted = false;
-  let maxDeposit = 0;
 
   for (const acc of traderAccounts) {
     if (acc.status === "CONNECTED") connectedAccounts += 1;
     if (acc.status === "RESTRICTED") restricted = true;
     openRiskEvents += ctx.openRiskByAccount.get(acc.id) ?? 0;
-    maxDeposit = Math.max(maxDeposit, Number(acc.initial_balance ?? 0));
     const snap = ctx.snapshotByAccount.get(acc.id);
     if (snap) {
       totalEquity += Number(snap.equity);
@@ -340,7 +414,7 @@ function buildTraderDto(
   const brokerNames = [...new Set(traderAccounts.map((acc) => acc.broker_name).filter(Boolean) as string[])];
   const latestSyncAt = newestIso(traderAccounts.map((acc) => acc.last_synced_at));
   const totalLotsTraded = Number((ctx.tradeLotsByTraderUserId.get(profile.user_id) ?? 0).toFixed(2));
-  const rebates = ctx.rebatesByTraderUserId.get(profile.user_id) ?? { approved: 0, pending: 0, ib: 0, cpa: 0 };
+  const rebates = ctx.rebatesByTraderUserId.get(profile.user_id) ?? { earned: 0, pending: 0, ib: 0, cpa: 0 };
   const commissions = ctx.commissionsByTraderUserId.get(profile.user_id) ?? {
     approved: 0,
     pending: 0,
@@ -348,16 +422,16 @@ function buildTraderDto(
     total: 0,
     grossRevenue: 0,
   };
-  const config =
-    traderAccounts
-      .map((acc) => acc.broker_provider_id ? ctx.configByBrokerProviderId.get(acc.broker_provider_id) ?? null : null)
-      .find(Boolean)
-    ?? traderAccounts
-      .map((acc) => ctx.configByBrokerName.get(normalizeBrokerName(acc.broker_name)) ?? null)
-      .find(Boolean)
-    ?? ctx.fallbackConfig;
-  const qualificationTargetLots = config ? Number(config.cpa_qualification_lots) : null;
-  const cpaQualified = qualificationTargetLots != null && totalLotsTraded >= qualificationTargetLots;
+  const config = configForAccounts(traderAccounts, ctx.configs);
+  // The deposit tier is judged on the accounts the agreement applies to.
+  const configAccounts = config
+    ? traderAccounts.filter((acc) => pickBrokerConfiguration(ctx.configs, acc.broker_provider_id, acc.broker_name) === config)
+    : [];
+  const maxDeposit = configAccounts.reduce((max, acc) => Math.max(max, Number(acc.initial_balance ?? 0)), 0);
+  // CPA qualification only exists for CPA / Hybrid agreements; a pure IB agreement has no target.
+  const hasCpa = config != null && config.model_type !== "IB";
+  const qualificationTargetLots = hasCpa ? Number(config.cpa_qualification_lots) : null;
+  const cpaQualified = qualificationTargetLots != null && totalLotsTraded > 0 && totalLotsTraded >= qualificationTargetLots;
   const stage = detectPipelineStage({
     accountCount: traderAccounts.length,
     connectedAccounts,
@@ -399,18 +473,15 @@ function buildTraderDto(
     pipelineStage: stage,
     brokerNames,
     latestSyncAt,
-    grossRevenue: { amount: Number(commissions.grossRevenue.toFixed(2)), currency: "USD" },
-    approvedWalletContribution: {
-      amount: Number((rebates.approved + commissions.approved).toFixed(2)),
-      currency: "USD",
-    },
-    pendingWalletContribution: {
-      amount: Number((rebates.pending + commissions.pending).toFixed(2)),
-      currency: "USD",
-    },
-    ibRebateEarned: { amount: Number(rebates.ib.toFixed(2)), currency: "USD" },
-    cpaEarned: { amount: Number(rebates.cpa.toFixed(2)), currency: "USD" },
-    wsaCommissionEarned: { amount: Number(commissions.total.toFixed(2)), currency: "USD" },
+    grossRevenue: { amount: roundMoney(commissions.grossRevenue), currency: "USD" },
+    // WSA payout wallet = WSA subscription commission only (broker earnings are reporting).
+    approvedWalletContribution: { amount: roundMoney(commissions.approved), currency: "USD" },
+    pendingWalletContribution: { amount: roundMoney(commissions.pending), currency: "USD" },
+    brokerEarningsApproved: { amount: roundMoney(rebates.earned), currency: "USD" },
+    brokerEarningsPending: { amount: roundMoney(rebates.pending), currency: "USD" },
+    ibRebateEarned: { amount: roundMoney(rebates.ib), currency: "USD" },
+    cpaEarned: { amount: roundMoney(rebates.cpa), currency: "USD" },
+    wsaCommissionEarned: { amount: roundMoney(commissions.total), currency: "USD" },
     cpaQualified,
     cpaTierLabel: cpaTierLabel(config, maxDeposit),
     qualificationProgressLots: totalLotsTraded,
@@ -420,7 +491,7 @@ function buildTraderDto(
 }
 
 export async function getPartnerSummary(partnerUserId: string): Promise<PartnerSummaryDto> {
-  await ensurePartnerRebateLedgerCurrent(partnerUserId);
+  await refreshPartnerRebatesIfStale(partnerUserId);
   const ctx = await loadAssignedContext(partnerUserId);
   const traders = ctx.profiles.map((p) => buildTraderDto(p, ctx));
 
@@ -429,32 +500,16 @@ export async function getPartnerSummary(partnerUserId: string): Promise<PartnerS
   const connectedAccounts = traders.reduce((s, t) => s + t.connectedAccounts, 0);
   const openRiskEvents = traders.reduce((s, t) => s + t.openRiskEvents, 0);
   const activeTraders = traders.filter((t) => t.status === "ACTIVE").length;
-
-  const commission = await getPartnerCommissionSummary(partnerUserId);
-  const [rebateLogs, financialLedger] = await Promise.all([
-    listPartnerTradeRebateLogs(partnerUserId, 5000),
-    getPartnerFinancialLedger(partnerUserId, commission.currency, { includeItems: false }),
-  ]);
   const totalTeamLots = traders.reduce((sum, trader) => sum + trader.totalLotsTraded, 0);
-  const tradeIbEarnings = rebateLogs
-    .filter((row) => row.calculationType === "IB_VOLUME")
-    .reduce((sum, row) => sum + row.rebateAmount, 0);
-  const cpaEarnings = rebateLogs
-    .filter((row) => row.calculationType === "CPA_TIER")
-    .reduce((sum, row) => sum + row.rebateAmount, 0);
-  const tradeRebatesEarned = rebateLogs
-    .filter((row) => row.status === "APPROVED" || row.status === "PAID")
-    .reduce((sum, row) => sum + row.rebateAmount, 0);
-  const ledgerRebatesEarned = financialLedger.approvedUnpaidRebates + financialLedger.paidRebates;
-  const totalRebatesEarned = Math.max(tradeRebatesEarned, ledgerRebatesEarned);
-  const ibEarnings = Math.max(tradeIbEarnings, ledgerRebatesEarned - cpaEarnings);
 
   const supabase = createAdminClient();
-  const { data: profileRow } = await supabase
-    .from("partner_profiles")
-    .select("referral_code")
-    .eq("user_id", partnerUserId)
-    .maybeSingle();
+  const [commission, rebates, { data: profileRow }] = await Promise.all([
+    getPartnerCommissionSummary(partnerUserId),
+    // Totals over every rebate row (APPROVED + PAID), not just the newest page.
+    getPartnerRebateTotals(partnerUserId, "ALL"),
+    supabase.from("partner_profiles").select("referral_code").eq("user_id", partnerUserId).maybeSingle(),
+  ]);
+  const rebateCurrency = rebates.currency || commission.currency;
 
   return {
     assignedTraders: traders.length,
@@ -464,11 +519,12 @@ export async function getPartnerSummary(partnerUserId: string): Promise<PartnerS
     aggregateFloatingPnl: { amount: Number(floatingPnl.toFixed(2)), currency: "USD" },
     openRiskEvents,
     pendingCommission: commission.pending,
-    earnedCommission: { amount: commission.approved.amount + commission.paid.amount, currency: commission.currency },
+    earnedCommission: { amount: roundMoney(commission.approved.amount + commission.paid.amount), currency: commission.currency },
     totalTeamLots: Number(totalTeamLots.toFixed(2)),
-    totalRebatesEarned: { amount: Number(totalRebatesEarned.toFixed(2)), currency: financialLedger.currency ?? commission.currency },
-    ibEarnings: { amount: Number(ibEarnings.toFixed(2)), currency: financialLedger.currency ?? commission.currency },
-    cpaEarnings: { amount: Number(cpaEarnings.toFixed(2)), currency: commission.currency },
+    totalRebatesEarned: { amount: rebates.earned, currency: rebateCurrency },
+    // IB earnings include manual admin adjustments (everything that is not a CPA payout).
+    ibEarnings: { amount: roundMoney(rebates.earned - rebates.cpaEarned), currency: rebateCurrency },
+    cpaEarnings: { amount: rebates.cpaEarned, currency: rebateCurrency },
     commissionPercent: commission.commissionPercent,
     referralCode: (profileRow?.referral_code as string | null) ?? null,
   };
@@ -569,16 +625,26 @@ export async function listPartnerRiskEvents(partnerUserId: string): Promise<Part
   );
 
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("risk_events")
-    .select("id, trading_account_id, rule_name, severity, message, created_at")
-    .is("acknowledged_at", null)
-    .in("trading_account_id", ctx.allAccountIds)
-    .order("created_at", { ascending: false })
-    .limit(100);
-  if (error) throw new Error(`Failed to fetch risk events: ${error.message}`);
+  // One query per 100 accounts (URL length), each limited to the newest 100.
+  const batches = await Promise.all(
+    chunkArray(ctx.allAccountIds).map(async (ids) => {
+      const { data, error } = await supabase
+        .from("risk_events")
+        .select("id, trading_account_id, rule_name, severity, message, created_at")
+        .is("acknowledged_at", null)
+        .in("trading_account_id", ids)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) throw new Error(`Failed to fetch risk events: ${error.message}`);
+      return data ?? [];
+    }),
+  );
+  const newest = batches
+    .flat()
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .slice(0, 100);
 
-  return (data ?? []).map((r) => {
+  return newest.map((r) => {
     const traderUserId = ctx.accountToTraderUserId.get(r.trading_account_id);
     return {
       id: r.id,
@@ -609,15 +675,24 @@ export async function listPartnerActivities(partnerUserId: string): Promise<Part
   );
 
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("crm_activities")
-    .select("id, trader_profile_id, type, description, created_at")
-    .in("trader_profile_id", profileIds)
-    .order("created_at", { ascending: false })
-    .limit(50);
-  if (error) throw new Error(`Failed to fetch activities: ${error.message}`);
+  const batches = await Promise.all(
+    chunkArray(profileIds).map(async (ids) => {
+      const { data, error } = await supabase
+        .from("crm_activities")
+        .select("id, trader_profile_id, type, description, created_at")
+        .in("trader_profile_id", ids)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw new Error(`Failed to fetch activities: ${error.message}`);
+      return data ?? [];
+    }),
+  );
+  const newest = batches
+    .flat()
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .slice(0, 50);
 
-  return (data ?? []).map((a) => ({
+  return newest.map((a) => ({
     id: a.id,
     traderName: nameByProfileId.get(a.trader_profile_id) ?? "Unknown",
     type: a.type,
@@ -626,7 +701,7 @@ export async function listPartnerActivities(partnerUserId: string): Promise<Part
   }));
 }
 
-// ── Commissions ──────────────────────────────────────────────────────────────
+// ── Commissions (WSA subscription sales) ─────────────────────────────────────
 
 interface CommissionRule {
   percent: number;
@@ -652,17 +727,24 @@ export async function getPartnerCommissionSummary(
   partnerUserId: string,
 ): Promise<PartnerCommissionSummaryDto> {
   const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("partner_commissions")
-    .select("commission_amount, currency, status")
-    .eq("partner_id", partnerUserId)
-    .limit(5000);
-  if (error) throw new Error(`Failed to fetch commission summary: ${error.message}`);
+  const rows = await selectAllPages<{ commission_amount: number | string; currency: string; status: string }>(
+    "Failed to fetch commission summary",
+    (from, to) =>
+      supabase
+        .from("partner_commissions")
+        .select("commission_amount, currency, status")
+        .eq("partner_id", partnerUserId)
+        .order("id")
+        .range(from, to),
+  );
 
+  // Amounts of different currencies are never added together: the dominant currency is reported.
+  const currency = dominantCurrency(rows) ?? "USD";
   let pending = 0;
   let approved = 0;
   let paid = 0;
-  for (const row of data ?? []) {
+  for (const row of rows) {
+    if ((row.currency ?? "").toUpperCase() !== currency) continue;
     const amt = Number(row.commission_amount);
     if (row.status === "PENDING") pending += amt;
     else if (row.status === "APPROVED") approved += amt;
@@ -671,13 +753,13 @@ export async function getPartnerCommissionSummary(
   const rule = await getCommissionRule(partnerUserId);
 
   return {
-    pending: { amount: Number(pending.toFixed(2)), currency: "USD" },
-    approved: { amount: Number(approved.toFixed(2)), currency: "USD" },
-    paid: { amount: Number(paid.toFixed(2)), currency: "USD" },
+    pending: { amount: roundMoney(pending), currency },
+    approved: { amount: roundMoney(approved), currency },
+    paid: { amount: roundMoney(paid), currency },
     commissionPercent: rule.percent,
     commissionType: rule.type,
     cpaAmount: rule.cpaAmount,
-    currency: "USD",
+    currency,
   };
 }
 

@@ -57,3 +57,33 @@ export function publicBrokerConnectionError(error: unknown): string {
 
   return "Connection failed. Please verify the broker details and try again.";
 }
+
+/**
+ * Why the broker refused an order, in words a trader can act on ("Invalid stops",
+ * "No money", "Market is closed"). `publicBrokerConnectionError` turns almost every
+ * message into "Connection failed...", which is right for a login problem and
+ * useless for a rejected order, so only messages that really are about the
+ * connection or the credentials keep that wording. The text is still passed through
+ * the sanitiser that removes credentials and provider names.
+ */
+const CONNECTION_PROBLEM_HINTS = [
+  "invalid_account",
+  "invalid account",
+  "account disabled",
+  "authorization failed",
+  "authentication failed",
+  "invalid_token",
+  "forbidden",
+  "unauthorized",
+  "403",
+  "not configured",
+];
+
+export function publicTradeRejection(raw: unknown): string {
+  const sanitized = publicApi2TradeError(raw).trim();
+  const lowered = sanitized.toLowerCase();
+  if (!sanitized || CONNECTION_PROBLEM_HINTS.some((hint) => lowered.includes(hint))) {
+    return publicBrokerConnectionError(raw);
+  }
+  return sanitized;
+}

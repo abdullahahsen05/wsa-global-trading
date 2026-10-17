@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TrendingDown } from "lucide-react";
 import {
@@ -12,12 +12,12 @@ import {
   WorkspacePage,
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
-import { EquityCurve } from "@/components/dashboard/EquityCurve";
-import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
+import { AccountPerformanceChart } from "@/components/charts/AccountPerformanceChart";
+import { deriveSeries, rangeForAnalyticsPeriod } from "@/lib/charts/performanceSeries";
+import { usePerformanceSeries } from "@/hooks/usePerformanceSeries";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 import type {
   AnalyticsSummary,
-  EquityPoint,
   TraderAccountSummary,
 } from "@/lib/domain/types";
 import {
@@ -57,89 +57,6 @@ function DrawdownMeter({ value }: { value: number }) {
         <span>6%</span>
         <span>12%</span>
       </div>
-    </div>
-  );
-}
-
-function GrowthGraph({ points }: { points: EquityPoint[] }) {
-  const width = 800;
-  const height = 220;
-  const padding = 18;
-  const values = points.map((point) => point.equity);
-  const min = values.length > 0 ? Math.min(...values) - 250 : 0;
-  const max = values.length > 0 ? Math.max(...values) + 250 : 1;
-  const range = max - min || 1;
-  const coordinates = points.map((point, index) => {
-    const x =
-      padding +
-      (index / Math.max(points.length - 1, 1)) * (width - padding * 2);
-    const y =
-      height -
-      padding -
-      ((point.equity - min) / range) * (height - padding * 2);
-    return { x, y };
-  });
-  const linePath = toSmoothPath(coordinates);
-  const areaPath = toSmoothAreaPath(coordinates, height - padding);
-
-  return (
-    <div className="rounded-[4px] border border-line bg-panel p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-sm font-semibold text-foreground">
-            Historical growth
-          </h3>
-          <p className="mt-1 text-xs text-muted">
-            Equity growth across the current history
-          </p>
-        </div>
-        <StatusPill tone="accent">Updated live</StatusPill>
-      </div>
-      {points.length > 0 ? (
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="mt-4 h-[220px] w-full"
-          role="img"
-          aria-label="Historical growth graph"
-        >
-          <defs>
-            <linearGradient
-              id="analyticsGrowthGradient"
-              x1="0"
-              x2="0"
-              y1="0"
-              y2="1"
-            >
-              <stop offset="0%" stopColor="#ffcf00" stopOpacity="0.28" />
-              <stop offset="100%" stopColor="#ffcf00" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          {[0.25, 0.5, 0.75].map((ratio) => (
-            <line
-              key={ratio}
-              x1={padding}
-              x2={width - padding}
-              y1={height * ratio}
-              y2={height * ratio}
-              stroke="#1d1c17"
-              strokeDasharray="5 8"
-            />
-          ))}
-          <path d={areaPath} fill="url(#analyticsGrowthGradient)" />
-          <path
-            d={linePath}
-            fill="none"
-            stroke="#ffcf00"
-            strokeWidth="4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      ) : (
-        <div className="mt-4 h-[220px] flex items-center justify-center text-sm text-muted">
-          No data available
-        </div>
-      )}
     </div>
   );
 }
@@ -227,24 +144,20 @@ function AnalyticsContent() {
     refetchInterval: 10_000,
   });
 
-  const {
-    data: equityCurve = [],
-    isLoading: curveLoading,
-    isError: curveError,
-  } = useQuery<EquityPoint[]>({
-    queryKey: ["equity-curve", accountScope, period],
-    queryFn: async () => {
-      const res = await fetch(
-        `/api/analytics/equity-curve?accountId=${accountScope}&period=${period}`,
-      );
-      const json = await res.json();
-      if (!json.ok)
-        throw new Error(json.error?.message ?? "Failed to load equity curve");
-      return json.data;
-    },
-    enabled: !accountsLoading && connectedAccounts.length > 0,
-    refetchInterval: 10_000,
-  });
+
+  // Same query as the chart below (same key), so no extra request. The summary
+  // only sees the newest snapshots, so the deepest fall of the sampled history
+  // is taken into account as well when the scope has a longer history.
+  const { data: performanceSeries } = usePerformanceSeries(
+    accountScope,
+    rangeForAnalyticsPeriod(period),
+    { enabled: !accountsLoading && connectedAccounts.length > 0 },
+  );
+  const chartMaxDrawdown = useMemo(
+    () => (performanceSeries ? deriveSeries(performanceSeries).maxDrawdownPct : 0),
+    [performanceSeries],
+  );
+  const maxDrawdownPercent = Math.max(analyticsSummary?.maxDrawdownPercent ?? 0, chartMaxDrawdown);
   const selectedCurrency =
     analyticsSummary?.totalProfit.currency ??
     selectedAccount?.equity.currency ??
@@ -372,14 +285,14 @@ function AnalyticsContent() {
         </div>
       </div>
 
-      {analyticsError || curveError ? (
+      {analyticsError ? (
         <div className="mt-5 rounded-[4px] border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger">
           Analytics for this account scope could not be loaded. The selection
           may be unavailable or outside your access.
         </div>
       ) : null}
 
-      {analyticsLoading || curveLoading ? (
+      {analyticsLoading ? (
         <div className="mt-5 rounded-[4px] border border-line bg-panel px-4 py-3 text-sm text-muted">
           Recalculating metrics for this scope…
         </div>
@@ -403,9 +316,7 @@ function AnalyticsContent() {
             },
             {
               label: "Max drawdown",
-              value: analyticsSummary
-                ? formatPercent(analyticsSummary.maxDrawdownPercent)
-                : "—",
+              value: analyticsSummary ? formatPercent(maxDrawdownPercent) : "—",
               tone: "accent",
             },
             {
@@ -422,10 +333,22 @@ function AnalyticsContent() {
         />
       </div>
 
-      <div className="mt-5 grid gap-4 xl:grid-cols-[0.64fr_0.36fr]">
-        <EquityCurve data={equityCurve} currency={selectedCurrency} />
-        <DrawdownMeter value={analyticsSummary?.maxDrawdownPercent ?? 0} />
-      </div>
+      <AccountPerformanceChart
+        className="mt-5"
+        accountId={accountScope}
+        accountName={
+          accountScope === "ALL"
+            ? "all connected accounts"
+            : (selectedAccount?.accountName ?? "the selected account")
+        }
+        currency={selectedCurrency}
+        eyebrow="Equity history"
+        title="Account growth"
+        range={rangeForAnalyticsPeriod(period)}
+        showRangeSelector={false}
+        liveEquity={selectedAccount ? selectedAccount.equity.amount : null}
+        currentDrawdownPercent={selectedAccount ? selectedAccount.drawdownPercent : null}
+      />
 
       <div className="mt-5">
         <Panel className="h-full min-w-0 w-full">
@@ -456,7 +379,7 @@ function AnalyticsContent() {
       </div>
 
       <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-[0.58fr_0.42fr]">
-        <GrowthGraph points={equityCurve} />
+        <DrawdownMeter value={maxDrawdownPercent} />
         <Panel className="h-full">
           <div className="flex items-center justify-between gap-4">
             <div>

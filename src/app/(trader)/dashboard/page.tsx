@@ -27,12 +27,14 @@ import {
 } from "@/lib/domain/dashboard";
 import type {
   AnalyticsSummary,
-  EquityPoint,
   TraderAccountSummary,
   TradeDto,
   RiskRuleDto,
 } from "@/lib/domain/types";
 import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
+import { usePerformanceSeries } from "@/hooks/usePerformanceSeries";
+import { AccountPerformanceChart } from "@/components/charts/AccountPerformanceChart";
+import { normalizeSamples, type PerformanceRange } from "@/lib/charts/performanceSeries";
 import { getAccountDisplayIdentity } from "@/lib/domain/accountIdentity";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
@@ -44,624 +46,6 @@ const dashboardTabs: Array<{ id: DashboardView; label: string }> = [
   { id: "PROFIT_SUMMARY", label: "Profit Summary" },
   { id: "CALENDAR_TRACKER", label: "Calendar Tracker" },
 ];
-
-type ChartMetricPoint = {
-  x: number;
-  y: number;
-};
-
-type PerformanceChartTab = "CHART" | "GROWTH" | "BALANCE" | "PROFIT" | "DRAWDOWN" | "MARGIN";
-
-const performanceChartTabs: Array<{ id: PerformanceChartTab; label: string }> = [
-  { id: "CHART", label: "Chart" },
-  { id: "GROWTH", label: "Growth" },
-  { id: "BALANCE", label: "Balance" },
-  { id: "PROFIT", label: "Profit" },
-  { id: "DRAWDOWN", label: "Drawdown" },
-  { id: "MARGIN", label: "Margin" },
-];
-
-function buildNumberDomain(values: number[], options?: { includeZero?: boolean; minSpan?: number }): { min: number; max: number } {
-  const finite = values.filter(Number.isFinite);
-  if (options?.includeZero !== false) finite.push(0);
-  if (finite.length === 0) return { min: 0, max: options?.minSpan ?? 1 };
-  const rawMin = Math.min(...finite);
-  const rawMax = Math.max(...finite);
-  const minSpan = options?.minSpan ?? 1;
-  const range = Math.max(rawMax - rawMin, minSpan);
-  const midpoint = (rawMax + rawMin) / 2;
-  const padding = Math.max(range * 0.1, minSpan * 0.1);
-  return {
-    min: midpoint - range / 2 - padding,
-    max: midpoint + range / 2 + padding,
-  };
-}
-
-function buildPercentDomain(...series: number[][]): { min: number; max: number } {
-  const values = series.flat().filter(Number.isFinite);
-  const rawMin = Math.min(0, ...values);
-  const rawMax = Math.max(0, ...values);
-  const rawRange = rawMax - rawMin;
-  if (rawRange < 0.25) return { min: -0.15, max: 0.15 };
-  if (rawRange < 1) return { min: Math.min(rawMin - 0.1, -0.15), max: Math.max(rawMax + 0.1, 0.15) };
-  const padding = Math.max(rawRange * 0.12, 0.15);
-  return { min: rawMin - padding, max: rawMax + padding };
-}
-
-function formatGrowthPercent(value: number): string {
-  if (!Number.isFinite(value)) return "—";
-  if (value === 0) return "0.00%";
-  if (Math.abs(value) < 0.01) return value > 0 ? "<0.01%" : ">-0.01%";
-  if (Math.abs(value) < 1) return `${value.toFixed(2)}%`;
-  return formatPercent(value);
-}
-
-function formatAxisPercent(value: number): string {
-  if (!Number.isFinite(value)) return "—";
-  if (Math.abs(value) < 0.01) return "0%";
-  if (Math.abs(value) < 1) return `${value.toFixed(2)}%`;
-  return `${value.toFixed(1)}%`;
-}
-
-function formatCompactMoneyAmount(amount: number, currency: string): string {
-  const normalized = normalizeMoneyAmount(amount);
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    notation: Math.abs(normalized) >= 1000 ? "compact" : "standard",
-    maximumFractionDigits: Math.abs(normalized) >= 1000 ? 1 : 2,
-  }).format(normalized).replace(".0", "");
-}
-
-function formatShortDate(value: string | null | undefined): string {
-  if (!value) return "";
-  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "2-digit" });
-}
-
-function toLinearPath(points: ChartMetricPoint[]): string {
-  if (points.length === 0) return "";
-  return points
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(" ");
-}
-
-function toLinearAreaPath(points: ChartMetricPoint[], baselineY: number): string {
-  if (points.length === 0) return "";
-  if (points.length === 1) {
-    const point = points[0];
-    return `M ${point.x.toFixed(2)} ${baselineY} L ${point.x.toFixed(2)} ${point.y.toFixed(2)} L ${point.x.toFixed(2)} ${baselineY} Z`;
-  }
-  const first = points[0];
-  const last = points[points.length - 1];
-  return `${toLinearPath(points)} L ${last.x.toFixed(2)} ${baselineY} L ${first.x.toFixed(2)} ${baselineY} Z`;
-}
-
-function tradeTime(trade: TradeDto): number {
-  return new Date(trade.closedAt ?? trade.openedAt).getTime();
-}
-
-function buildDashboardPnlPoints(trades: TradeDto[], range: { start: number; end: number }): Array<{ at: number; pnl: number }> {
-  const closed = [...trades]
-    .filter((trade) => trade.status === "CLOSED")
-    .sort((a, b) => {
-      return tradeTime(a) - tradeTime(b);
-    });
-
-  const points: Array<{ at: number; pnl: number }> = [{ at: range.start, pnl: 0 }];
-  let running = 0;
-  for (const trade of closed) {
-    const at = tradeTime(trade);
-    if (!Number.isFinite(at) || at < range.start || at > range.end) continue;
-    running += normalizeMoneyAmount(trade.profit.amount);
-    points.push({ at, pnl: running });
-  }
-  if (points.at(-1)?.at !== range.end) points.push({ at: range.end, pnl: running });
-  return points;
-}
-
-function buildDashboardVolumePoints(trades: TradeDto[], range: { start: number; end: number }): Array<{ at: number; volume: number }> {
-  return trades
-    .map((trade) => ({
-      at: tradeTime(trade),
-      volume: Math.max(0, Number(trade.volume) || 0),
-    }))
-    .filter((point) => Number.isFinite(point.at) && point.at >= range.start && point.at <= range.end && point.volume > 0)
-    .sort((a, b) => a.at - b.at);
-}
-
-function chartDateLabels(equityCurve: EquityPoint[], trades: TradeDto[]): { start: string; end: string } {
-  const dates = [
-    ...equityCurve.map((point) => point.capturedAt),
-    ...trades.map((trade) => trade.closedAt ?? trade.openedAt),
-  ]
-    .map((value) => new Date(value).getTime())
-    .filter(Number.isFinite)
-    .sort((a, b) => a - b);
-
-  if (dates.length === 0) return { start: "", end: "" };
-  return {
-    start: formatShortDate(new Date(dates[0]).toISOString()),
-    end: formatShortDate(new Date(dates[dates.length - 1]).toISOString()),
-  };
-}
-
-function TraderPerformanceChart({
-  equityCurve,
-  trades,
-  currency,
-  periodProfit,
-  currentEquity,
-  winRate,
-  drawdown,
-  accountName,
-}: {
-  equityCurve: EquityPoint[];
-  trades: TradeDto[];
-  currency: string;
-  periodProfit: number;
-  currentEquity: number;
-  winRate: number;
-  drawdown: number;
-  accountName: string;
-}) {
-  const [visibleSeries, setVisibleSeries] = useState({
-    equity: true,
-    pnl: true,
-    volume: true,
-  });
-  const [activeChartTab, setActiveChartTab] = useState<PerformanceChartTab>("GROWTH");
-  const width = 1120;
-  const height = 390;
-  const paddingX = 76;
-  const paddingY = 42;
-  const plotWidth = width - paddingX * 2;
-  const plotHeight = height - paddingY * 2;
-  const validEquityCurve = equityCurve
-    .map((point) => ({
-      ...point,
-      at: new Date(point.capturedAt).getTime(),
-      equity: normalizeMoneyAmount(point.equity),
-      balance: normalizeMoneyAmount(point.balance),
-    }))
-    .filter((point) => Number.isFinite(point.at) && Number.isFinite(point.equity))
-    .sort((a, b) => a.at - b.at);
-  const liveEquityAt = Date.now();
-  const equitySamples = validEquityCurve.length > 0
-    ? validEquityCurve
-    : currentEquity > 0
-      ? [{ capturedAt: new Date(liveEquityAt).toISOString(), at: liveEquityAt, balance: currentEquity, equity: currentEquity }]
-      : [];
-  const tradeTimes = trades.map(tradeTime).filter(Number.isFinite);
-  const timelineStart = Math.min(
-    ...equitySamples.map((point) => point.at),
-    ...tradeTimes,
-  );
-  const timelineEnd = Math.max(
-    ...equitySamples.map((point) => point.at),
-    ...tradeTimes,
-    timelineStart || liveEquityAt,
-  );
-  const hasTimeline = Number.isFinite(timelineStart) && Number.isFinite(timelineEnd);
-  const rangePaddingMs = Math.max(60_000, (timelineEnd - timelineStart) * 0.03);
-  const timeRange = hasTimeline
-    ? {
-        start: timelineStart === timelineEnd ? timelineStart - rangePaddingMs : timelineStart,
-        end: timelineStart === timelineEnd ? timelineEnd + rangePaddingMs : timelineEnd,
-      }
-    : { start: liveEquityAt - 60_000, end: liveEquityAt + 60_000 };
-  const latestEquity = equitySamples.at(-1)?.equity ?? currentEquity;
-  const latestBalance = equitySamples.at(-1)?.balance ?? latestEquity;
-  const pnlTimeline = buildDashboardPnlPoints(trades, timeRange);
-  const volumeTimeline = buildDashboardVolumePoints(trades, timeRange);
-  const latestPnl = pnlTimeline.at(-1)?.pnl ?? periodProfit;
-  const startingEquity = equitySamples[0]?.equity || currentEquity || latestEquity;
-  const equityGrowthPercent = startingEquity > 0 ? ((latestEquity - startingEquity) / startingEquity) * 100 : 0;
-  const profitBaseEquity = Math.max(startingEquity, 1);
-  const profitGrowthPercent = profitBaseEquity > 0 ? (latestPnl / profitBaseEquity) * 100 : 0;
-  const growthPercent = Math.abs(equityGrowthPercent) > 0.005 ? equityGrowthPercent : profitGrowthPercent;
-  const equityGrowthValues = equitySamples.map((point) => (startingEquity > 0 ? ((point.equity - startingEquity) / startingEquity) * 100 : 0));
-  const pnlGrowthValues = pnlTimeline.map((point) => (profitBaseEquity > 0 ? (point.pnl / profitBaseEquity) * 100 : 0));
-  const percentDomain = buildPercentDomain(equityGrowthValues, pnlGrowthValues);
-  const scaleX = (at: number) => paddingX + ((at - timeRange.start) / Math.max(timeRange.end - timeRange.start, 1)) * plotWidth;
-  const scaleY = (value: number) => height - paddingY - ((value - percentDomain.min) / Math.max(percentDomain.max - percentDomain.min, 1)) * plotHeight;
-  const equityPoints = equitySamples.map((point) => ({
-    x: scaleX(point.at),
-    y: scaleY(startingEquity > 0 ? ((point.equity - startingEquity) / startingEquity) * 100 : 0),
-  }));
-  const pnlPoints = pnlTimeline.map((point) => ({
-    x: scaleX(point.at),
-    y: scaleY(profitBaseEquity > 0 ? (point.pnl / profitBaseEquity) * 100 : 0),
-  }));
-  const balanceDomain = buildNumberDomain(
-    equitySamples.flatMap((point) => [point.balance, point.equity]),
-    { includeZero: false, minSpan: Math.max(latestEquity * 0.002, 100) },
-  );
-  const profitDomain = buildNumberDomain(pnlTimeline.map((point) => point.pnl), { includeZero: true, minSpan: 100 });
-  let runningEquityPeak = 0;
-  const drawdownTimeline = equitySamples.map((point) => {
-    runningEquityPeak = Math.max(runningEquityPeak, point.equity);
-    const drawdownValue = runningEquityPeak > 0 ? Math.max(0, ((runningEquityPeak - point.equity) / runningEquityPeak) * 100) : 0;
-    return { at: point.at, drawdown: drawdownValue };
-  });
-  const drawdownDomain = buildNumberDomain([...drawdownTimeline.map((point) => point.drawdown), drawdown], { includeZero: true, minSpan: 1 });
-  const scaleBalanceY = (value: number) => height - paddingY - ((value - balanceDomain.min) / Math.max(balanceDomain.max - balanceDomain.min, 1)) * plotHeight;
-  const scaleProfitY = (value: number) => height - paddingY - ((value - profitDomain.min) / Math.max(profitDomain.max - profitDomain.min, 1)) * plotHeight;
-  const scaleDrawdownY = (value: number) => height - paddingY - ((value - drawdownDomain.min) / Math.max(drawdownDomain.max - drawdownDomain.min, 1)) * plotHeight;
-  const balancePoints = equitySamples.map((point) => ({ x: scaleX(point.at), y: scaleBalanceY(point.balance) }));
-  const equityMoneyPoints = equitySamples.map((point) => ({ x: scaleX(point.at), y: scaleBalanceY(point.equity) }));
-  const profitPoints = pnlTimeline.map((point) => ({ x: scaleX(point.at), y: scaleProfitY(point.pnl) }));
-  const drawdownPoints = drawdownTimeline.map((point) => ({ x: scaleX(point.at), y: scaleDrawdownY(point.drawdown) }));
-  const zeroY = scaleY(0);
-  const equityPath = toLinearPath(equityPoints);
-  const equityArea = toLinearAreaPath(equityPoints, zeroY);
-  const pnlPath = toLinearPath(pnlPoints);
-  const balancePath = toLinearPath(balancePoints);
-  const equityMoneyPath = toLinearPath(equityMoneyPoints);
-  const profitPath = toLinearPath(profitPoints);
-  const drawdownPath = toLinearPath(drawdownPoints);
-  const maxVolume = Math.max(...volumeTimeline.map((point) => point.volume), 1);
-  const dateLabels = chartDateLabels(equityCurve, trades);
-  const effectiveDateLabels = dateLabels.start
-    ? dateLabels
-    : {
-        start: formatShortDate(new Date(timeRange.start).toISOString()),
-        end: formatShortDate(new Date(timeRange.end).toISOString()),
-      };
-  const axisTicks = [1, 0.75, 0.5, 0.25, 0];
-  const domainValueAt = (ratio: number) => percentDomain.min + (percentDomain.max - percentDomain.min) * ratio;
-  const moneyValueAt = (ratio: number) => (domainValueAt(ratio) / 100) * profitBaseEquity;
-  const latestEquityGrowth = equityGrowthValues.at(-1) ?? growthPercent;
-  const latestPnlGrowth = pnlGrowthValues.at(-1) ?? growthPercent;
-  const latestDrawdown = drawdownTimeline.at(-1)?.drawdown ?? drawdown;
-  const needsMoreSamples = equitySamples.length < 2 && pnlTimeline.length <= 2;
-  const combinedMode = activeChartTab === "CHART" || activeChartTab === "GROWTH";
-  const marginUnavailable = activeChartTab === "MARGIN";
-  const axisLabel = activeChartTab === "BALANCE"
-    ? "Balance / Equity"
-    : activeChartTab === "PROFIT"
-      ? "Closed P&L"
-      : activeChartTab === "DRAWDOWN"
-        ? "Drawdown %"
-        : "Growth %";
-  const axisValueAt = (ratio: number) => {
-    if (activeChartTab === "BALANCE") return balanceDomain.min + (balanceDomain.max - balanceDomain.min) * ratio;
-    if (activeChartTab === "PROFIT") return profitDomain.min + (profitDomain.max - profitDomain.min) * ratio;
-    if (activeChartTab === "DRAWDOWN") return drawdownDomain.min + (drawdownDomain.max - drawdownDomain.min) * ratio;
-    return domainValueAt(ratio);
-  };
-  const formatAxisValue = (value: number) => {
-    if (activeChartTab === "BALANCE" || activeChartTab === "PROFIT") return formatCompactMoneyAmount(value, currency);
-    return formatAxisPercent(value);
-  };
-  const toggleSeries = (series: keyof typeof visibleSeries) => {
-    setVisibleSeries((current) => {
-      const next = { ...current, [series]: !current[series] };
-      return next.equity || next.pnl || next.volume ? next : current;
-    });
-  };
-  const legendItems = [
-    {
-      key: "equity" as const,
-      label: "Equity curve",
-      helper: "Live account balance/equity points",
-      tone: "bg-accent-2",
-      active: visibleSeries.equity,
-    },
-    {
-      key: "pnl" as const,
-      label: "Closed P&L curve",
-      helper: "Cumulative closed-trade profit",
-      tone: "bg-accent",
-      active: visibleSeries.pnl,
-    },
-    {
-      key: "volume" as const,
-      label: "Volume bars",
-      helper: "Recent traded lot volume",
-      tone: "bg-accent/50",
-      active: visibleSeries.volume,
-    },
-  ];
-
-  return (
-    <Panel className="mt-4 overflow-hidden p-0">
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-5">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-accent">Performance analytics</p>
-          <h2 className="mt-2 text-lg font-semibold text-foreground">Account performance curve</h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            MT5-synced equity growth, closed P&L, and traded volume from {accountName}, shown with percentage and money scales.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 overflow-hidden rounded-[4px] border border-line bg-background text-right sm:grid-cols-4">
-          {[
-            ["Equity", formatMoney({ amount: latestEquity, currency }), "text-accent"],
-            ["Closed P&L", formatMoney({ amount: latestPnl, currency }), latestPnl >= 0 ? "text-accent-2" : "text-danger"],
-            ["% Growth", formatGrowthPercent(growthPercent), growthPercent >= 0 ? "text-accent-2" : "text-danger"],
-            ["Win rate", formatPercent(winRate), "text-foreground"],
-          ].map(([label, value, tone]) => (
-            <div key={label} className="min-w-28 border-r border-line px-4 py-3 last:border-r-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted">{label}</p>
-              <p className={`mt-1 text-sm font-semibold tabular-nums ${tone}`}>{value}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="px-4 pb-5 pt-4 sm:px-5">
-        <div className="mb-3 flex flex-wrap items-center gap-1 rounded-[4px] border border-line bg-background p-1">
-          {performanceChartTabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveChartTab(tab.id)}
-              className={`rounded-[3px] px-3 py-2 text-xs font-semibold transition ${
-                activeChartTab === tab.id
-                  ? "bg-accent text-background"
-                  : "text-muted hover:bg-panel hover:text-foreground"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="relative overflow-hidden rounded-[4px] border border-line bg-background">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,207,0,0.12),transparent_34%),radial-gradient(circle_at_75%_70%,rgba(33,209,159,0.12),transparent_30%)]" />
-          <svg
-            viewBox={`0 0 ${width} ${height}`}
-            className="relative h-[390px] w-full"
-            role="img"
-            aria-label="Trader dashboard performance chart"
-          >
-            <defs>
-              <linearGradient id="dashboardEquityFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#21d19f" stopOpacity="0.28" />
-                <stop offset="100%" stopColor="#21d19f" stopOpacity="0" />
-              </linearGradient>
-              <linearGradient id="dashboardPnlStroke" x1="0" x2="1" y1="0" y2="0">
-                <stop offset="0%" stopColor="#ffcf00" />
-                <stop offset="100%" stopColor="#ffef8a" />
-              </linearGradient>
-            </defs>
-            <line x1={paddingX} x2={paddingX} y1={paddingY} y2={height - paddingY} stroke="rgba(255,255,255,0.12)" />
-            <line x1={width - paddingX} x2={width - paddingX} y1={paddingY} y2={height - paddingY} stroke="rgba(255,255,255,0.12)" />
-            <line x1={paddingX} x2={width - paddingX} y1={height - paddingY} y2={height - paddingY} stroke="rgba(255,255,255,0.12)" />
-            {axisTicks.map((ratio) => {
-              const y = height - paddingY - ratio * (height - paddingY * 2);
-              return (
-                <g key={ratio}>
-                  <line
-                    x1={paddingX}
-                    x2={width - paddingX}
-                    y1={y}
-                    y2={y}
-                    stroke="rgba(255,255,255,0.08)"
-                    strokeDasharray="7 10"
-                  />
-                  <text x={paddingX - 12} y={y + 4} textAnchor="end" className="fill-muted text-[10px] font-semibold tabular-nums">
-                    {formatAxisValue(axisValueAt(ratio))}
-                  </text>
-                  {combinedMode ? (
-                    <text x={width - paddingX + 12} y={y + 4} textAnchor="start" className="fill-muted text-[10px] font-semibold tabular-nums">
-                      {formatCompactMoneyAmount(moneyValueAt(ratio), currency)}
-                    </text>
-                  ) : null}
-                </g>
-              );
-            })}
-            <text x={paddingX} y={24} textAnchor="start" className="fill-accent-2 text-[10px] font-bold uppercase tracking-[0.16em]">
-              {axisLabel}
-            </text>
-            {combinedMode ? <text x={width - paddingX} y={24} textAnchor="end" className="fill-accent text-[10px] font-bold uppercase tracking-[0.16em]">
-              Closed P&L
-            </text> : null}
-            {(combinedMode && visibleSeries.volume) || activeChartTab === "PROFIT" ? volumeTimeline.map((point, index) => {
-              const barWidth = Math.max(6, Math.min(22, plotWidth / Math.max(volumeTimeline.length, 1) - 6));
-              const x = Math.max(paddingX, Math.min(width - paddingX - barWidth, scaleX(point.at) - barWidth / 2));
-              const barHeight = Math.max(6, (point.volume / maxVolume) * 84);
-              return (
-                <rect
-                  key={`${point.at}-${index}`}
-                  x={x}
-                  y={height - paddingY - barHeight}
-                  width={barWidth}
-                  height={barHeight}
-                  rx="4"
-                  fill="rgba(255,207,0,0.18)"
-                />
-              );
-            }) : null}
-            {combinedMode ? <line
-              x1={paddingX}
-              x2={width - paddingX}
-              y1={zeroY}
-              y2={zeroY}
-              stroke="rgba(255,255,255,0.16)"
-            /> : null}
-            {combinedMode && visibleSeries.equity && equityPoints.length > 1 ? <path d={equityArea} fill="url(#dashboardEquityFill)" /> : null}
-            {combinedMode && visibleSeries.equity && equityPoints.length > 1 ? (
-              <path
-                d={equityPath}
-                fill="none"
-                stroke="#21d19f"
-                strokeWidth="4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            ) : null}
-            {combinedMode && visibleSeries.pnl && pnlPoints.length > 1 ? (
-              <path
-                d={pnlPath}
-                fill="none"
-                stroke="url(#dashboardPnlStroke)"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeDasharray="9 9"
-              />
-            ) : null}
-            {activeChartTab === "BALANCE" && balancePoints.length > 1 ? (
-              <>
-                <path d={toLinearAreaPath(equityMoneyPoints, height - paddingY)} fill="url(#dashboardEquityFill)" />
-                <path d={balancePath} fill="none" stroke="#ffcf00" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                <path d={equityMoneyPath} fill="none" stroke="#21d19f" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-              </>
-            ) : null}
-            {activeChartTab === "PROFIT" && profitPoints.length > 1 ? (
-              <path d={profitPath} fill="none" stroke="#ffcf00" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            ) : null}
-            {activeChartTab === "DRAWDOWN" && drawdownPoints.length > 1 ? (
-              <path d={drawdownPath} fill="none" stroke="#ff5f56" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            ) : null}
-            {combinedMode && visibleSeries.equity && equityPoints.at(-1) ? (
-              <circle
-                cx={equityPoints.at(-1)!.x}
-                cy={equityPoints.at(-1)!.y}
-                r="6"
-                fill="#050505"
-                stroke="#21d19f"
-                strokeWidth="3"
-              />
-            ) : null}
-            {activeChartTab === "BALANCE" && equityMoneyPoints.at(-1) ? (
-              <circle cx={equityMoneyPoints.at(-1)!.x} cy={equityMoneyPoints.at(-1)!.y} r="5" fill="#050505" stroke="#21d19f" strokeWidth="3" />
-            ) : null}
-            {activeChartTab === "PROFIT" && profitPoints.at(-1) ? (
-              <circle cx={profitPoints.at(-1)!.x} cy={profitPoints.at(-1)!.y} r="5" fill="#ffcf00" />
-            ) : null}
-            {activeChartTab === "DRAWDOWN" && drawdownPoints.at(-1) ? (
-              <circle cx={drawdownPoints.at(-1)!.x} cy={drawdownPoints.at(-1)!.y} r="5" fill="#ff5f56" />
-            ) : null}
-            {marginUnavailable ? (
-              <text x={width / 2} y={height / 2} textAnchor="middle" className="fill-muted text-[13px] font-semibold">
-                Margin history is not captured yet. Add margin fields to live snapshots before plotting this tab.
-              </text>
-            ) : needsMoreSamples ? (
-              <text x={width / 2} y={height / 2 + 58} textAnchor="middle" className="fill-muted text-[12px] font-semibold">
-                Waiting for more live MT5 samples — chart will update as new snapshots/trades arrive.
-              </text>
-            ) : null}
-            {combinedMode && visibleSeries.pnl && pnlPoints.at(-1) ? (
-              <g>
-                <circle cx={pnlPoints.at(-1)!.x} cy={pnlPoints.at(-1)!.y} r="4" fill="#ffcf00" />
-                <text x={Math.min(pnlPoints.at(-1)!.x + 12, width - paddingX - 90)} y={pnlPoints.at(-1)!.y - 10} className="fill-accent text-[11px] font-bold tabular-nums">
-                  {formatMoney({ amount: latestPnl, currency })} / {formatGrowthPercent(latestPnlGrowth)}
-                </text>
-              </g>
-            ) : null}
-            {combinedMode && visibleSeries.equity && equityPoints.at(-1) ? (
-              <text x={Math.min(equityPoints.at(-1)!.x + 12, width - paddingX - 86)} y={equityPoints.at(-1)!.y + 20} className="fill-accent-2 text-[11px] font-bold tabular-nums">
-                {formatGrowthPercent(latestEquityGrowth)}
-              </text>
-            ) : null}
-            {effectiveDateLabels.start ? (
-              <text x={paddingX} y={height - 14} textAnchor="start" className="fill-muted text-[10px] font-semibold tabular-nums">
-                {effectiveDateLabels.start}
-              </text>
-            ) : null}
-            {effectiveDateLabels.end ? (
-              <text x={width - paddingX} y={height - 14} textAnchor="end" className="fill-muted text-[10px] font-semibold tabular-nums">
-                {effectiveDateLabels.end}
-              </text>
-            ) : null}
-          </svg>
-        </div>
-        {combinedMode ? (
-          <div className="mt-4 grid gap-3 text-xs text-muted sm:grid-cols-4">
-            {legendItems.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => toggleSeries(item.key)}
-                className={`rounded-[4px] border px-3 py-3 text-left transition ${
-                  item.active
-                    ? "border-line bg-panel text-muted"
-                    : "border-line/60 bg-background text-muted/60 opacity-70"
-                }`}
-                aria-pressed={item.active}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-2">
-                    <span className={`h-2 w-2 rounded-full ${item.active ? item.tone : "bg-muted/40"}`} />
-                    <span className="font-semibold text-foreground">{item.label}</span>
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted">
-                    {item.active ? "Shown" : "Hidden"}
-                  </span>
-                </div>
-                <p className="mt-1">{item.helper}</p>
-              </button>
-            ))}
-            <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
-              <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${drawdown > 0 ? "bg-danger" : "bg-muted"}`} />
-                <span className="font-semibold text-foreground">Drawdown</span>
-              </div>
-              <p className="mt-1">{formatPercent(drawdown)}</p>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 grid gap-3 text-xs text-muted sm:grid-cols-3">
-            {activeChartTab === "BALANCE" ? (
-              <>
-                <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-accent" />
-                    <span className="font-semibold text-foreground">Balance</span>
-                  </div>
-                  <p className="mt-1">{formatMoney({ amount: latestBalance, currency })}</p>
-                </div>
-                <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-accent-2" />
-                    <span className="font-semibold text-foreground">Equity</span>
-                  </div>
-                  <p className="mt-1">{formatMoney({ amount: latestEquity, currency })}</p>
-                </div>
-              </>
-            ) : null}
-            {activeChartTab === "PROFIT" ? (
-              <>
-                <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-accent" />
-                    <span className="font-semibold text-foreground">Closed P&L</span>
-                  </div>
-                  <p className="mt-1">{formatMoney({ amount: latestPnl, currency })}</p>
-                </div>
-                <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-accent/50" />
-                    <span className="font-semibold text-foreground">Volume bars</span>
-                  </div>
-                  <p className="mt-1">Recent traded lot volume</p>
-                </div>
-              </>
-            ) : null}
-            {activeChartTab === "DRAWDOWN" ? (
-              <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${latestDrawdown > 0 ? "bg-danger" : "bg-muted"}`} />
-                  <span className="font-semibold text-foreground">Drawdown</span>
-                </div>
-                <p className="mt-1">{formatPercent(latestDrawdown)}</p>
-              </div>
-            ) : null}
-            {activeChartTab === "MARGIN" ? (
-              <div className="rounded-[4px] border border-line bg-panel px-3 py-3">
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-muted" />
-                  <span className="font-semibold text-foreground">Margin</span>
-                </div>
-                <p className="mt-1">Waiting for margin history in live snapshots.</p>
-              </div>
-            ) : null}
-          </div>
-        )}
-      </div>
-    </Panel>
-  );
-}
 
 function formatSyncTime(value: string | null | undefined): string {
   if (!value) return "Not synced";
@@ -716,6 +100,7 @@ function TraderDashboardContent() {
   const [activeOverlay, setActiveOverlay] = useState<DashboardView | null>(null);
   const [statsNow, setStatsNow] = useState(() => new Date());
   const [subModalOpen, setSubModalOpen] = useState(false);
+  const [chartRange, setChartRange] = useState<PerformanceRange>("ALL");
   const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
 
   const { data: sessionUser } = useQuery<SessionUser>({
@@ -884,27 +269,18 @@ function TraderDashboardContent() {
     refetchOnReconnect: "always",
   });
 
-  const { data: equityCurve = [] } = useQuery<EquityPoint[]>({
-    queryKey: ["dashboard-equity-curve", baseAccount?.accountId, selectedPeriod],
-    queryFn: async () => {
-      const params = new URLSearchParams({
-        accountId: baseAccount!.accountId,
-        period: selectedPeriod,
-      });
-      const res = await fetch(`/api/analytics/equity-curve?${params.toString()}`, {
-        cache: "no-store",
-      });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load equity curve");
-      return json.data;
-    },
-    enabled: Boolean(baseAccount?.accountId),
-    staleTime: 3_000,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: "always",
-    refetchOnReconnect: "always",
-  });
+  // Sampled balance/equity history of the selected account. The chart below
+  // reads the very same query (same key), so this costs no extra request; the
+  // KPI sparklines are drawn from the recorded samples of the same range.
+  const { data: performanceSeries } = usePerformanceSeries(baseAccount?.accountId, chartRange);
+  const kpiSparklines = useMemo(() => {
+    const samples = performanceSeries ? normalizeSamples(performanceSeries.samples) : [];
+    return {
+      balance: samples.map((sample) => sample.balance),
+      equity: samples.map((sample) => sample.equity),
+      floating: samples.map((sample) => sample.equity - sample.balance),
+    };
+  }, [performanceSeries]);
 
   // Subscribe to realtime updates
 
@@ -1053,7 +429,7 @@ function TraderDashboardContent() {
       tone: "accent" as const,
       status: baseAccount?.status ?? "Unavailable",
       statusTone: "lime" as const,
-      sparkline: [],
+      sparkline: kpiSparklines.balance,
     },
     {
       label: "Equity",
@@ -1062,7 +438,7 @@ function TraderDashboardContent() {
       tone: "lime" as const,
       status: `Drawdown ${formatPercent(accountDrawdown)}`,
       statusTone: riskState.drawdownBreached ? ("danger" as const) : ("lime" as const),
-      sparkline: [],
+      sparkline: kpiSparklines.equity,
     },
     {
       label: "Floating PnL",
@@ -1081,7 +457,7 @@ function TraderDashboardContent() {
           : live.pnl < 0
             ? ("danger" as const)
             : ("muted" as const),
-      sparkline: [],
+      sparkline: kpiSparklines.floating,
     },
   ];
 
@@ -1245,15 +621,15 @@ function TraderDashboardContent() {
             </div>
             <PerformanceRings items={performanceRings} />
           </Panel>
-          <TraderPerformanceChart
-            equityCurve={equityCurve}
-            trades={periodTrades}
-            currency={accountCurrency}
-            periodProfit={periodStats.totalProfit}
-            currentEquity={live.equity}
-            winRate={periodStats.winRate}
-            drawdown={accountDrawdown}
+          <AccountPerformanceChart
+            className="mt-4"
+            accountId={baseAccount?.accountId}
             accountName={baseAccount?.accountName ?? "your selected account"}
+            currency={accountCurrency}
+            range={chartRange}
+            onRangeChange={setChartRange}
+            liveEquity={baseAccount ? live.equity : null}
+            currentDrawdownPercent={baseAccount ? accountDrawdown : null}
           />
           <DashboardModeOverlay
             open={activeOverlay !== null}

@@ -3,6 +3,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
+  ChevronDown,
+  ChevronUp,
   Link2,
   Pause,
   Play,
@@ -13,6 +15,16 @@ import {
 } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { AccountCombobox } from "@/components/copy/AccountCombobox";
+import { CopyCalibrationFields } from "@/components/copy/CopyCalibrationFields";
+import { SelfCopyPlatformBanner } from "@/components/copy/SelfCopyPlatformBanner";
+import { SelfCopyRouteDetails } from "@/components/copy/SelfCopyRouteDetails";
+import {
+  selfCopyApi as api,
+  type SelfCopyMode,
+  type SelfCopyRelationship,
+  type SelfCopyResponse,
+  type SelfCopySettings,
+} from "@/components/copy/selfCopyClient";
 import {
   SearchField,
   SelectField,
@@ -27,58 +39,30 @@ import {
   PrimaryButton,
   StatusPill,
 } from "@/components/app/WorkspaceUI";
+import {
+  calibrationFromForm,
+  calibrationToForm,
+  EMPTY_CALIBRATION_FORM,
+  engineBadge,
+  lastActivityLine,
+  type CalibrationForm,
+  type ViewTone,
+} from "@/lib/copy/selfCopyView";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 
-type SelfCopyMode =
-  "BALANCE_RATIO" | "LOT_MULTIPLIER" | "FIXED_LOT" | "RISK_PERCENT";
+// the copy page imports these two from here
+export type { SelfCopyRelationship, SelfCopyResponse };
+
 type SelfCopyFilter = "ALL" | "LIVE" | "PAUSED";
-
-interface SelfCopySettings {
-  copyEnabled: boolean;
-  copyMode: SelfCopyMode;
-  fixedLot: number | null;
-  lotMultiplier: number | null;
-  riskPercent: number | null;
-  minLot: number | null;
-  maxLot: number | null;
-  maxOpenTrades: number | null;
-  maxDailyLossPercent: number | null;
-  maxDrawdownPercent: number | null;
-  allowedSymbols: string[] | null;
-  blockedSymbols: string[] | null;
-  symbolMapping: Record<string, string>;
-  copyNewTradesOnly: true;
-  reverseCopy: boolean;
-  pauseOnDisconnect: boolean;
-  emergencyStop: boolean;
-}
-
-export interface SelfCopyRelationship {
-  id: string;
-  sourceAccountId: string;
-  sourceAccountName: string;
-  sourceStatus: string;
-  followerAccountId: string;
-  followerAccountName: string;
-  followerStatus: string;
-  status: "LIVE" | "PAUSED";
-  copySettings: SelfCopySettings;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface SelfCopyResponse {
-  relationships: SelfCopyRelationship[];
-}
 
 const EMPTY_RELATIONSHIPS: SelfCopyRelationship[] = [];
 
-async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const payload = await response.json();
-  if (!payload.ok) throw new Error(payload.error?.message ?? "Request failed.");
-  return payload.data as T;
-}
+const TONE_TEXT: Record<ViewTone, string> = {
+  lime: "text-lime",
+  accent: "text-accent",
+  muted: "text-muted",
+  danger: "text-danger",
+};
 
 function numberOrNull(value: string) {
   return value.trim() ? Number(value) : null;
@@ -128,7 +112,13 @@ export function SelfCopyPanel({
   const [blockedSymbols, setBlockedSymbols] = useState("");
   const [reverseCopy, setReverseCopy] = useState(false);
   const [pauseOnDisconnect, setPauseOnDisconnect] = useState(true);
+  const [calibrationForm, setCalibrationForm] = useState<CalibrationForm>(
+    EMPTY_CALIBRATION_FORM,
+  );
+  const [formError, setFormError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // one route's details (check + activity) open at a time, so only one activity list is polled
+  const [detailsId, setDetailsId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<SelfCopyFilter>("ALL");
   const [page, setPage] = useState(1);
@@ -141,6 +131,8 @@ export function SelfCopyPanel({
   const relationships = useQuery<SelfCopyResponse>({
     queryKey: ["self-copy-relationships"],
     queryFn: () => api("/api/copy-trading/self-copy"),
+    // a worker that has stopped changes nothing in the database, so the "Worker silent" badge needs a clock
+    refetchInterval: 30_000,
   });
 
   const action = useMutation({
@@ -221,9 +213,18 @@ export function SelfCopyPanel({
     setBlockedSymbols("");
     setReverseCopy(false);
     setPauseOnDisconnect(true);
+    setCalibrationForm(EMPTY_CALIBRATION_FORM);
+    setFormError(null);
   }
 
-  function settingsPayload(): SelfCopySettings {
+  /** The form as the settings the server stores, or null after showing what has to be fixed. */
+  function settingsPayload(): SelfCopySettings | null {
+    const calibration = calibrationFromForm(calibrationForm);
+    if (!calibration.ok) {
+      setFormError(calibration.error);
+      return null;
+    }
+    setFormError(null);
     return {
       copyEnabled: true,
       copyMode,
@@ -239,17 +240,19 @@ export function SelfCopyPanel({
       maxDrawdownPercent: numberOrNull(maxDrawdown),
       allowedSymbols: symbolList(allowedSymbols),
       blockedSymbols: symbolList(blockedSymbols),
-      symbolMapping: {},
+      symbolMapping: calibration.symbolMapping,
       copyNewTradesOnly: true,
       reverseCopy,
       pauseOnDisconnect,
       emergencyStop: false,
+      calibration: calibration.calibration,
     };
   }
 
   function save(event: FormEvent) {
     event.preventDefault();
     const copySettings = settingsPayload();
+    if (!copySettings) return;
     if (editingId) {
       action.mutate({
         url: `/api/copy-trading/self-copy/${editingId}`,
@@ -285,6 +288,10 @@ export function SelfCopyPanel({
     setBlockedSymbols(settings.blockedSymbols?.join(", ") ?? "");
     setReverseCopy(Boolean(settings.reverseCopy));
     setPauseOnDisconnect(settings.pauseOnDisconnect !== false);
+    setCalibrationForm(
+      calibrationToForm(settings.calibration, settings.symbolMapping),
+    );
+    setFormError(null);
     setNotice(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -321,6 +328,8 @@ export function SelfCopyPanel({
           },
         ]}
       />
+
+      <SelfCopyPlatformBanner platform={relationships.data?.platform} />
 
       {notice ? (
         <div
@@ -526,10 +535,25 @@ export function SelfCopyPanel({
             />
           </div>
 
+          <CopyCalibrationFields
+            value={calibrationForm}
+            onChange={(next) => {
+              setCalibrationForm(next);
+              setFormError(null);
+            }}
+          />
+
+          {formError ? (
+            <p role="alert" className="text-sm text-danger">
+              {formError}
+            </p>
+          ) : null}
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5">
             <p className="max-w-2xl text-xs leading-5 text-muted">
-              Only trades opened after this route becomes live are copied.
-              Existing source positions are not imported.
+              {calibrationForm.copyExisting
+                ? "Trades that are already open on the source are copied as well, on top of everything it opens after this route goes live."
+                : "Only trades opened after this route goes live are copied. Trades that are already open on the source are not imported."}
             </p>
             <div className="flex flex-wrap gap-2">
               {editingId ? (
@@ -632,7 +656,14 @@ export function SelfCopyPanel({
         ) : visibleRelationships.length ? (
           <div>
             <div className="divide-y divide-line">
-              {visibleRelationships.map((relationship) => (
+              {visibleRelationships.map((relationship) => {
+                const detailsOpen = detailsId === relationship.id;
+                const engine =
+                  relationship.status === "LIVE"
+                    ? engineBadge(relationship.engine)
+                    : null;
+                const last = lastActivityLine(relationship.lastActivity);
+                return (
                 <div
                   key={relationship.id}
                   className="grid gap-4 px-5 py-4 transition-colors hover:bg-white/[0.02] xl:grid-cols-[minmax(0,1.3fr)_minmax(220px,0.7fr)_minmax(220px,auto)] xl:items-center"
@@ -656,9 +687,19 @@ export function SelfCopyPanel({
                         {relationship.followerStatus} follower · updated{" "}
                         {new Date(relationship.updatedAt).toLocaleString()}
                       </p>
+                      <p
+                        className={`mt-1 line-clamp-2 break-words text-xs ${TONE_TEXT[last.tone]}`}
+                      >
+                        {last.text}
+                      </p>
                     </div>
                   </div>
                   <div className="flex min-w-0 flex-wrap gap-2 xl:justify-end">
+                    {engine ? (
+                      <span title={engine.hint}>
+                        <StatusPill tone={engine.tone}>{engine.label}</StatusPill>
+                      </span>
+                    ) : null}
                     <StatusPill tone="muted">
                       {modeLabel(relationship.copySettings.copyMode)}
                     </StatusPill>
@@ -677,6 +718,20 @@ export function SelfCopyPanel({
                     </StatusPill>
                   </div>
                   <div className="flex flex-wrap gap-2 xl:justify-end">
+                    <GhostButton
+                      type="button"
+                      aria-expanded={detailsOpen}
+                      onClick={() =>
+                        setDetailsId(detailsOpen ? null : relationship.id)
+                      }
+                    >
+                      {detailsOpen ? (
+                        <ChevronUp className="mr-2 inline-block h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="mr-2 inline-block h-4 w-4" />
+                      )}
+                      Details
+                    </GhostButton>
                     <GhostButton
                       type="button"
                       disabled={action.isPending}
@@ -733,8 +788,14 @@ export function SelfCopyPanel({
                       Remove
                     </GhostButton>
                   </div>
+                  {detailsOpen ? (
+                    <div className="-mx-5 -mb-4 xl:col-span-3">
+                      <SelfCopyRouteDetails routeId={relationship.id} />
+                    </div>
+                  ) : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div className="px-5 pb-4">
               <PaginationControls

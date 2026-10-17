@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import {
@@ -17,6 +17,7 @@ import {
 } from "@/components/app/WorkspaceUI";
 import { formatMoney } from "@/lib/utils/format";
 import type { PartnerCommissionDto, PartnerCommissionSummaryDto } from "@/lib/partner/types";
+import type { RebateTotals } from "@/lib/partner/rebateRules";
 import type {
   PartnerFinancialLedgerDto,
   PartnerWithdrawalBalanceDto,
@@ -52,11 +53,37 @@ type PartnerTradeRebateLogDto = {
   createdAt: string;
 };
 
+/** Newest rebate rows of one view plus totals over every row of that view (server side). */
+type RebatesResponse = {
+  records: PartnerTradeRebateLogDto[];
+  totals: RebateTotals & { currency: string };
+  truncated: boolean;
+};
+
+type CommissionStatusFilter = "ALL" | PartnerCommissionDto["status"];
+
+const COMMISSION_STATUS_FILTERS: readonly CommissionStatusFilter[] = [
+  "ALL",
+  "PENDING",
+  "APPROVED",
+  "PAID",
+  "CANCELLED",
+  "REVERSED",
+];
+
+type StatusItem = {
+  label: string;
+  value: ReactNode;
+  helper?: ReactNode;
+  tone?: "default" | "accent" | "lime" | "danger";
+};
+
 const STATUS_TONE: Record<PartnerCommissionDto["status"], "lime" | "accent" | "danger" | "muted"> = {
   PENDING: "accent",
   APPROVED: "lime",
   PAID: "lime",
   CANCELLED: "muted",
+  REVERSED: "muted",
 };
 
 const WITHDRAWAL_TONE: Record<string, "lime" | "accent" | "danger" | "muted"> = {
@@ -77,40 +104,16 @@ function titleFor(mode: FinanceMode) {
 function descriptionFor(mode: FinanceMode) {
   switch (mode) {
     case "REBATE":
-      return "Track broker-side, lot-based rebate earnings from referred trader trading activity.";
+      return "Track broker-side, lot-based IB rebate earnings from the trades your referred clients closed after joining you.";
     case "CPA":
-      return "Review broker-side CPA performance as read-only partner reporting.";
+      return "Review broker-side CPA payouts (one per qualified client) as read-only partner reporting.";
     case "HYBRID":
-      return "Monitor broker setups where rebate and CPA logic both contribute to partner earnings.";
+      return "Monitor brokers where your agreement is Hybrid: IB rebate per lot and CPA payouts both contribute.";
     case "COMMISSION":
       return "See WSA platform-subscription affiliate commission, separate from broker rebate/CPA/hybrid calculations.";
     case "PAYOUT":
       return "Review WSA commission balance, withdrawable funds, and every payout request step.";
   }
-}
-
-function isRebateTrade(row: PartnerTradeRebateLogDto) {
-  return row.calculationType === "IB_VOLUME" || row.modelType === "IB";
-}
-
-function isCpaTrade(row: PartnerTradeRebateLogDto) {
-  return row.calculationType === "CPA_TIER" || row.modelType === "CPA";
-}
-
-function isHybridTrade(row: PartnerTradeRebateLogDto) {
-  return row.modelType === "HYBRID";
-}
-
-function isRebateLedgerItem(item: PartnerFinancialLedgerDto["items"][number]) {
-  return item.type === "REBATE" && item.sourceType !== "CPA_TIER";
-}
-
-function isCpaLedgerItem(item: PartnerFinancialLedgerDto["items"][number]) {
-  return item.type === "COMMISSION" || item.sourceType === "CPA_TIER";
-}
-
-function isHybridLedgerItem(item: PartnerFinancialLedgerDto["items"][number]) {
-  return item.type === "REBATE" && item.sourceType === "CPA_TIER";
 }
 
 async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -170,64 +173,80 @@ function FinanceLedgerTable({ items }: { items: PartnerFinancialLedgerDto["items
 }
 
 function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "APPROVED" | "PAID" | "CANCELLED">("ALL");
+  const [statusFilter, setStatusFilter] = useState<CommissionStatusFilter>("ALL");
+  const isCommissionMode = mode === "COMMISSION";
   const commissionQuery = useQuery<CommissionsResponse>({
     queryKey: ["partner", "commissions"],
     queryFn: () => getJson("/api/partner/commissions"),
+    enabled: isCommissionMode,
   });
-  const rebateQuery = useQuery<{ records: PartnerTradeRebateLogDto[] }>({
-    queryKey: ["partner", "rebate-trade-log"],
-    queryFn: () => getJson("/api/partner/rebates"),
-  });
-  const withdrawalQuery = useQuery<WithdrawalResponse>({
-    queryKey: ["partner-withdrawals"],
-    queryFn: () => getJson("/api/partner/withdrawals"),
-  });
-
-  const data: CommissionsResponse | undefined = commissionQuery.data;
-  const rebateData: { records: PartnerTradeRebateLogDto[] } | undefined = rebateQuery.data;
-  const withdrawalData: WithdrawalResponse | undefined = withdrawalQuery.data;
-  const isLoading = commissionQuery.isLoading;
-  const isError = commissionQuery.isError;
-  const summary: PartnerCommissionSummaryDto | undefined = data?.summary;
-  const allCommissionRecords: PartnerCommissionDto[] = data?.records ?? [];
-  const tradeRows: PartnerTradeRebateLogDto[] = rebateData?.records ?? [];
-  const ledgerItems: PartnerFinancialLedgerDto["items"] = withdrawalData?.ledger.items ?? [];
-
-  const filteredTradeRows = tradeRows.filter((row: PartnerTradeRebateLogDto) => {
-    if (mode === "REBATE") return isRebateTrade(row) || isHybridTrade(row);
-    if (mode === "CPA") return isCpaTrade(row) || isHybridTrade(row);
-    if (mode === "HYBRID") return isHybridTrade(row);
-    return true;
+  // Rebate, CPA and Hybrid each read their own view: the server returns the
+  // newest rows of that view and totals over EVERY row of it (never only the
+  // rows that fit in one response).
+  const rebateQuery = useQuery<RebatesResponse>({
+    queryKey: ["partner", "rebate-trade-log", mode],
+    queryFn: () => getJson(`/api/partner/rebates?view=${mode}`),
+    enabled: !isCommissionMode,
   });
 
-  const filteredLedgerItems = ledgerItems.filter((item: PartnerFinancialLedgerDto["items"][number]) => {
-    if (mode === "REBATE") return isRebateLedgerItem(item);
-    if (mode === "CPA") return isCpaLedgerItem(item);
-    if (mode === "HYBRID") return isHybridLedgerItem(item);
-    return item.type === "COMMISSION" || item.type === "REBATE";
-  });
+  const isLoading = isCommissionMode ? commissionQuery.isLoading : rebateQuery.isLoading;
+  const isError = isCommissionMode ? commissionQuery.isError : rebateQuery.isError;
+  const summary: PartnerCommissionSummaryDto | undefined = commissionQuery.data?.summary;
+  const allCommissionRecords: PartnerCommissionDto[] = commissionQuery.data?.records ?? [];
+  const tradeRows: PartnerTradeRebateLogDto[] = rebateQuery.data?.records ?? [];
+  const totals = rebateQuery.data?.totals;
+  const truncated = rebateQuery.data?.truncated ?? false;
+  const money = (amount: number) => formatMoney({ amount, currency: totals?.currency ?? "USD" });
 
-  const filteredCommissionRecords = (mode === "COMMISSION"
+  const filteredCommissionRecords = statusFilter === "ALL"
     ? allCommissionRecords
-    : allCommissionRecords.filter((record: PartnerCommissionDto) => {
-        if (mode === "CPA") return summary?.commissionType === "CPA" || record.sourceType.includes("CPA");
-        if (mode === "REBATE") return summary?.commissionType === "REBATE" || !record.sourceType.includes("CPA");
-        return true;
-      }))
-    .filter((record: PartnerCommissionDto) => statusFilter === "ALL" ? true : record.status === statusFilter);
-
-  const tradeLots = filteredTradeRows.reduce((sum, row) => sum + row.lots, 0);
-  const tradeEarnings = filteredTradeRows.reduce((sum, row) => sum + row.rebateAmount, 0);
-  const activeBrokerCount = new Set(filteredTradeRows.map((row) => row.brokerName).filter(Boolean)).size;
-  const activeTraderCount = new Set(filteredTradeRows.map((row) => row.traderName).filter(Boolean)).size;
-  const qualifiedTradeCount = filteredTradeRows.filter((row) => row.status === "APPROVED" || row.status === "PAID").length;
-  const ibRows = filteredTradeRows.filter((row) => row.calculationType === "IB_VOLUME" || row.modelType === "IB");
-  const cpaRows = filteredTradeRows.filter((row) => row.calculationType === "CPA_TIER" || row.modelType === "CPA");
-  const ibTotal = ibRows.reduce((sum, row) => sum + row.rebateAmount, 0);
-  const cpaTotal = cpaRows.reduce((sum, row) => sum + row.rebateAmount, 0);
+    : allCommissionRecords.filter((record: PartnerCommissionDto) => record.status === statusFilter);
 
   const title = titleFor(mode);
+
+  const brokerStrip: StatusItem[] = [
+    {
+      label: mode === "CPA" ? "CPA payouts" : mode === "HYBRID" ? "Hybrid records" : "Rebate records",
+      value: totals ? totals.records : "…",
+      tone: "accent",
+    },
+    { label: "Brokers", value: totals ? totals.brokers : "…" },
+    { label: mode === "REBATE" ? "Traders" : "Clients", value: totals ? totals.traders : "…" },
+    {
+      label: mode === "CPA" ? "Qualifying lots" : "Lots",
+      value: totals ? totals.lots.toFixed(2) : "…",
+      tone: "accent",
+    },
+    ...(mode === "CPA"
+      ? [
+          { label: "Qualified", value: totals ? totals.qualified : "…", tone: "lime" as const },
+          { label: "CPA earned", value: totals ? money(totals.cpaEarned) : "…", tone: "lime" as const },
+        ]
+      : mode === "HYBRID"
+        ? [
+            { label: "IB earned", value: totals ? money(totals.ibEarned) : "…", tone: "lime" as const },
+            { label: "CPA earned", value: totals ? money(totals.cpaEarned) : "…", tone: "lime" as const },
+          ]
+        : [
+            { label: "Rebate earned", value: totals ? money(totals.earned) : "…", tone: "lime" as const },
+          ]),
+    ...(totals && totals.pending > 0
+      ? [{ label: "Pending", value: money(totals.pending), tone: "accent" as const }]
+      : []),
+  ];
+
+  const commissionStrip: StatusItem[] = [
+    { label: "WSA commission %", value: `${summary?.commissionPercent ?? 0}%`, tone: "accent" },
+    { label: "Pending", value: summary ? formatMoney(summary.pending) : "-", tone: "accent" },
+    { label: "Approved", value: summary ? formatMoney(summary.approved) : "-", tone: "lime" },
+    { label: "Paid", value: summary ? formatMoney(summary.paid) : "-", tone: "lime" },
+  ];
+
+  const emptyDescription = mode === "REBATE"
+    ? "Rebate rows appear once your clients close trades after they joined you and an IB agreement exists for their broker."
+    : mode === "CPA"
+      ? "A CPA payout appears once a client reaches the qualification lots and the first deposit tier of your CPA agreement."
+      : "Hybrid rows appear for brokers where your agreement is set to Hybrid (IB rebate plus CPA).";
 
   return (
     <WorkspacePage
@@ -235,7 +254,7 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
       title={title}
       description={descriptionFor(mode)}
       action={
-        mode === "COMMISSION" ? (
+        isCommissionMode ? (
           <PageActionGroup>
             <a href="/api/partner/commissions/export" download>
               <GhostButton type="button" disabled={filteredCommissionRecords.length === 0}>
@@ -247,92 +266,42 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
         ) : undefined
       }
     >
-      <InlineStatusStrip
-        items={mode === "COMMISSION" ? [
-          {
-            label: "WSA commission %",
-            value: `${summary?.commissionPercent ?? 0}%`,
-            tone: "accent",
-          },
-          {
-            label: "Pending",
-            value: summary ? formatMoney(summary.pending) : "-",
-            tone: "accent",
-          },
-          {
-            label: "Approved",
-            value: summary ? formatMoney(summary.approved) : "-",
-            tone: "lime",
-          },
-          {
-            label: "Paid",
-            value: summary ? formatMoney(summary.paid) : "-",
-            tone: "lime",
-          },
-        ] : mode === "CPA" ? [
-          { label: "CPA records", value: filteredTradeRows.length, tone: "accent" },
-          { label: "Brokers", value: activeBrokerCount },
-          { label: "Clients", value: activeTraderCount },
-          { label: "Lots", value: tradeLots.toFixed(2), tone: "accent" },
-          { label: "Qualified", value: qualifiedTradeCount, tone: "lime" },
-          {
-            label: "Total CPA",
-            value: formatMoney({ amount: tradeEarnings, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
-            tone: "lime",
-          },
-        ] : mode === "HYBRID" ? [
-          { label: "Hybrid records", value: filteredTradeRows.length, tone: "accent" },
-          { label: "Brokers", value: activeBrokerCount },
-          { label: "Clients", value: activeTraderCount },
-          { label: "Lots", value: tradeLots.toFixed(2), tone: "accent" },
-          {
-            label: "IB",
-            value: formatMoney({ amount: ibTotal, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
-            tone: "lime",
-          },
-          {
-            label: "CPA",
-            value: formatMoney({ amount: cpaTotal, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
-            tone: "lime",
-          },
-        ] : [
-          { label: "Broker records", value: filteredTradeRows.length, tone: "accent" },
-          { label: "Brokers", value: activeBrokerCount },
-          { label: "Traders", value: activeTraderCount },
-          { label: "Lots", value: tradeLots.toFixed(2), tone: "accent" },
-          {
-            label: mode === "REBATE" ? "Rebate earned" : mode === "CPA" ? "CPA earned" : "Hybrid earned",
-            value: formatMoney({ amount: tradeEarnings, currency: filteredTradeRows[0]?.currency ?? summary?.currency ?? "USD" }),
-            tone: "lime",
-          },
-        ]}
-      />
+      <InlineStatusStrip items={isCommissionMode ? commissionStrip : brokerStrip} />
 
-      {mode === "COMMISSION" && summary ? <CommissionRulePanel summary={summary} /> : null}
+      {isCommissionMode && summary ? <CommissionRulePanel summary={summary} /> : null}
 
-      <div className={mode === "REBATE" || mode === "CPA" || mode === "HYBRID" ? "mt-5 grid gap-5" : "mt-5 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]"}>
+      <div className={isCommissionMode ? "mt-5 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]" : "mt-5 grid gap-5"}>
         <Panel className="min-w-0">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-foreground">
-                {mode === "REBATE" ? "Rebate performance" : mode === "CPA" ? "CPA performance" : mode === "HYBRID" ? "Hybrid performance" : mode === "COMMISSION" ? "Commission ledger" : `${title} activity`}
+                {mode === "REBATE" ? "Rebate performance" : mode === "CPA" ? "CPA performance" : mode === "HYBRID" ? "Hybrid performance" : "Commission ledger"}
               </h2>
               <p className="mt-1 text-sm text-muted">
                 {mode === "REBATE"
-                  ? "Only rebate performance is shown here."
+                  ? "Per-lot IB rebate rows, one per closed trade of a referred client."
                   : mode === "CPA"
-                    ? "Only CPA performance is shown here."
+                    ? "One CPA payout per qualified client and broker."
                     : mode === "HYBRID"
-                      ? "Only hybrid performance is shown here."
+                      ? "IB rebate rows and CPA payouts of brokers where your agreement is Hybrid."
                       : "Platform subscription commission records generated for the partner account."}
               </p>
             </div>
             <StatusPill tone="accent">
-              {mode === "COMMISSION" ? filteredCommissionRecords.length : filteredTradeRows.length} shown
+              {isCommissionMode
+                ? `${filteredCommissionRecords.length} shown`
+                : truncated && totals
+                  ? `${tradeRows.length} of ${totals.records} shown`
+                  : `${tradeRows.length} shown`}
             </StatusPill>
           </div>
+          {truncated && totals ? (
+            <p className="mt-3 text-xs text-muted">
+              The table lists the newest {tradeRows.length} of {totals.records} records. The figures above include every record.
+            </p>
+          ) : null}
           <div className="mt-4">
-            {mode === "COMMISSION" ? (
+            {isCommissionMode ? (
               filteredCommissionRecords.length === 0 ? (
                 <EmptyState title="No commission records yet" description="Commission records will appear here once earnings are generated." />
               ) : (
@@ -347,23 +316,14 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
                     <span key="commission" className="font-semibold text-foreground">
                       {formatMoney({ amount: record.commissionAmount, currency: record.currency })}
                     </span>,
-                    <StatusPill key="status" tone={STATUS_TONE[record.status]}>
+                    <StatusPill key="status" tone={STATUS_TONE[record.status] ?? "muted"}>
                       {record.status}
                     </StatusPill>,
                   ])}
                 />
               )
-            ) : filteredTradeRows.length === 0 ? (
-              <EmptyState
-                title={`No ${title.toLowerCase()} records yet`}
-                description={mode === "REBATE"
-                  ? "Only rebate performance is shown here."
-                  : mode === "CPA"
-                    ? "Only CPA performance is shown here."
-                    : mode === "HYBRID"
-                      ? "Only hybrid performance is shown here."
-                  : `When ${title.toLowerCase()} activity is created for your traders, it will appear here.`}
-              />
+            ) : tradeRows.length === 0 ? (
+              <EmptyState title={`No ${title.toLowerCase()} records yet`} description={emptyDescription} />
             ) : (
               <DataTable
                 initialPageSize={10}
@@ -374,7 +334,7 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
                   : mode === "CPA"
                     ? ["Broker", "Client", "Symbol", "Lots", "Qualified", "Total", "Status"]
                     : ["Broker", "Client", "Symbol", "Lots", "IB", "CPA", "Status"]}
-                rows={filteredTradeRows.map((row: PartnerTradeRebateLogDto) => [
+                rows={tradeRows.map((row: PartnerTradeRebateLogDto) => [
                   <span key="broker" className="text-xs text-muted">{row.brokerName ?? "All brokers"}</span>,
                   <span key="trader">{row.traderName ?? (mode === "CPA" || mode === "HYBRID" ? "Client" : "Trader")}</span>,
                   <span key="symbol" className="font-semibold text-foreground">{row.symbol ?? "—"}</span>,
@@ -384,7 +344,7 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
                   ] : []),
                   ...(mode === "CPA" ? [
                     <StatusPill key="qualified" tone={row.status === "APPROVED" || row.status === "PAID" ? "lime" : row.status === "PENDING" ? "accent" : "muted"}>
-                      {row.status === "APPROVED" || row.status === "PAID" ? "Qualified" : "Pending"}
+                      {row.status === "APPROVED" || row.status === "PAID" ? "Qualified" : row.status === "PENDING" ? "Pending" : "Not paid"}
                     </StatusPill>,
                   ] : []),
                   ...(mode === "HYBRID" ? [
@@ -408,55 +368,41 @@ function FinanceModePage({ mode }: { mode: Exclude<FinanceMode, "PAYOUT"> }) {
           </div>
         </Panel>
 
-        {mode !== "REBATE" && mode !== "CPA" && mode !== "HYBRID" ? <Panel className="min-w-0">
-          <h2 className="text-lg font-semibold text-foreground">
-            {mode === "COMMISSION" ? "Commission mix" : `${title} ledger`}
-          </h2>
+        {isCommissionMode ? <Panel className="min-w-0">
+          <h2 className="text-lg font-semibold text-foreground">Commission mix</h2>
           <p className="mt-1 text-sm text-muted">
-            {mode === "COMMISSION"
-              ? "Current platform subscription commission rules, pending balances, and what has already cleared."
-              : "Server-calculated ledger items used to make wallet and payout balances accurate."}
+            Current platform subscription commission rules, pending balances, and what has already cleared.
           </p>
-          {mode === "COMMISSION" ? (
-            <div className="mt-4 space-y-3">
-              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">WSA commission %</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">{summary ? `${summary.commissionPercent}%` : "Loading…"}</p>
-              </div>
-              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Approved for WSA payout</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">
-                  {summary ? formatMoney(summary.approved) : "Loading…"}
-                </p>
-              </div>
-              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Paid WSA commission</p>
-                <p className="mt-1 text-sm font-semibold text-foreground">
-                  {summary ? formatMoney(summary.paid) : "Loading…"}
-                </p>
-              </div>
-              <div className="rounded-[4px] border border-line bg-background px-4 py-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Payout rule</p>
-                <p className="mt-1 text-sm leading-6 text-muted">
-                  Only WSA commission is eligible for WSA payout. Broker Rebate, CPA, and Hybrid are shown separately as broker performance.
-                </p>
-              </div>
+          <div className="mt-4 space-y-3">
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">WSA commission %</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{summary ? `${summary.commissionPercent}%` : "Loading…"}</p>
             </div>
-          ) : filteredLedgerItems.length === 0 ? (
-            <div className="mt-4">
-              <EmptyState title="No ledger items yet" description="Once earnings are generated, the matching ledger entries will appear here." />
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Approved for WSA payout</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">
+                {summary ? formatMoney(summary.approved) : "Loading…"}
+              </p>
             </div>
-          ) : (
-            <div className="mt-4">
-              <FinanceLedgerTable items={filteredLedgerItems.slice(0, 100)} />
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Paid WSA commission</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">
+                {summary ? formatMoney(summary.paid) : "Loading…"}
+              </p>
             </div>
-          )}
+            <div className="rounded-[4px] border border-line bg-background px-4 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">Payout rule</p>
+              <p className="mt-1 text-sm leading-6 text-muted">
+                Only WSA commission is eligible for WSA payout. Broker Rebate, CPA, and Hybrid are shown separately as broker performance. A refunded sale takes its commission back unless it is already paid out.
+              </p>
+            </div>
+          </div>
         </Panel> : null}
       </div>
 
-      {mode === "COMMISSION" ? <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
+      {isCommissionMode ? <div className="mt-5 rounded-[4px] border border-line bg-panel p-4">
         <FilterChipRow
-          chips={(["ALL", "PENDING", "APPROVED", "PAID", "CANCELLED"] as const).map((status) => ({
+          chips={COMMISSION_STATUS_FILTERS.map((status) => ({
             label: status === "ALL"
               ? `All (${allCommissionRecords.length})`
               : `${status} (${allCommissionRecords.filter((record: PartnerCommissionDto) => record.status === status).length})`,

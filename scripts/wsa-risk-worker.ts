@@ -9,6 +9,7 @@ import { publicMetaApiError } from "../src/lib/broker/metaApiErrors";
 import { publicApi2TradeError } from "../src/lib/broker/api2TradeErrors";
 import { createBrokerAdapter } from "../src/lib/broker/provider";
 import { refreshAccountTrades } from "../src/lib/services/brokerSyncService";
+import { recordAccountSnapshot } from "../src/lib/services/accountSnapshotService";
 import { hasExecutionPriority } from "../src/lib/copy/executionPriority";
 import { calculatePartnerRebatesForTradingAccounts } from "../src/lib/services/partnerRebateCalculationService";
 
@@ -631,10 +632,13 @@ async function reconcileApi2TradeRiskAccounts() {
     if (hasExecutionPriority(accountRow.id)) continue;
     try {
       const snapshot = await adapter.fetchSnapshot(accountRow.id);
-      const { error: snapshotError } = await supabase.rpc("record_account_snapshot", {
-        p_account_id: accountRow.id,
-        p_balance: snapshot.balance.amount,
-        p_equity: snapshot.equity.amount,
+      const { error: snapshotError } = await recordAccountSnapshot(supabase, {
+        accountId: accountRow.id,
+        balance: snapshot.balance.amount,
+        equity: snapshot.equity.amount,
+        margin: snapshot.margin,
+        freeMargin: snapshot.freeMargin,
+        marginLevel: snapshot.marginLevel,
       });
       if (snapshotError) throw snapshotError;
       await supabase
@@ -661,7 +665,9 @@ async function reconcileApi2TradeRiskAccounts() {
       const lastRefreshAt = api2TradeLastRefreshAt.get(accountRow.id) ?? 0;
       if (Date.now() - lastRefreshAt >= tradeReconcileMs) {
         api2TradeLastRefreshAt.set(accountRow.id, Date.now());
-        const refresh = await refreshAccountTrades(accountRow.id, null, { force: true });
+        // The reading stored a moment ago is handed over: the broker is asked once and the
+        // same values are not written to the history a second time.
+        const refresh = await refreshAccountTrades(accountRow.id, null, { force: true, snapshot });
         if (refresh.error) {
           throw new Error(refresh.error);
         }

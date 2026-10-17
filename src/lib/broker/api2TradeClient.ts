@@ -3,11 +3,86 @@ if (typeof window !== "undefined") {
 }
 
 import { publicApi2TradeError } from "./api2TradeErrors";
+import { brokerFetch } from "./api2TradeTransport";
+import { parseSymbolList, type ParsedSymbol } from "./symbolList";
 import {
   api2TradeUsesApiKeyAuth,
   getResolvedApi2TradeBaseUrl,
   getResolvedApi2TradeEventsUrl,
 } from "./provider";
+
+// ── time limits ──────────────────────────────────────────────────────────────
+// A request used to wait for as long as the network allowed, and one hung call stalls
+// whatever awaits it (the copy worker's detection loop, a follower's order). Every call
+// now has a limit; an answer that comes later is thrown away.
+//   API2TRADE_REQUEST_TIMEOUT_MS  everything else                       (default 12 s)
+//   API2TRADE_POLL_TIMEOUT_MS     OpenedOrders, read ~3 times a second   (default 5 s)
+//   API2TRADE_ORDER_TIMEOUT_MS    OrderSend / Close / Modify / Delete   (default 20 s)
+// An order that hits its limit may still have been executed at the broker - the caller
+// reports it as failed to answer, it never retries it by itself.
+function timeoutFromEnv(name: string, fallback: number, min: number, max: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+export function requestTimeoutMs(endpoint: string): number {
+  if (/^Order(Send|Close|Modify|Delete)/i.test(endpoint)) {
+    return timeoutFromEnv("API2TRADE_ORDER_TIMEOUT_MS", 20_000, 3_000, 120_000);
+  }
+  if (/^OpenedOrders$/i.test(endpoint)) {
+    return timeoutFromEnv("API2TRADE_POLL_TIMEOUT_MS", 5_000, 500, 60_000);
+  }
+  return timeoutFromEnv("API2TRADE_REQUEST_TIMEOUT_MS", 12_000, 1_000, 120_000);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
+// ── symbol specification endpoints ───────────────────────────────────────────
+const SYMBOL_ENDPOINTS = ["SymbolInfo", "SymbolParams", "SymbolSpecification", "GetSymbolInfo", "MarketInfo"] as const;
+const SYMBOL_ENDPOINT_MISSING_TTL_MS = 10 * 60_000;
+let knownSymbolEndpoint: string | null = null;
+const missingSymbolEndpoints = new Map<string, number>();
+
+/** The HTTP answer of a path the server does not have (a plain "symbol not found" is not that). */
+function answeredNoSuchEndpoint(error: unknown): boolean {
+  return /request failed \((404|405|501)\)/i.test(publicApi2TradeError(error));
+}
+
+// ── symbol list and pending-order cancel endpoints ───────────────────────────
+// Neither is documented where we could read it, so a short list is tried. The one that
+// answered goes first next time, and a path the server answered "no such endpoint" for is
+// skipped for ten minutes.
+const SYMBOL_LIST_ENDPOINTS = ["SymbolList", "Symbols", "GetSymbols"] as const;
+const CANCEL_ENDPOINTS = ["OrderDelete", "OrderDeleteSafe", "OrderCloseSafe"] as const;
+let knownSymbolListEndpoint: string | null = null;
+let knownCancelEndpoint: string | null = null;
+const missingListEndpoints = new Map<string, number>();
+
+/** Endpoints to try, the remembered one first, the ones known to be missing left out. */
+function endpointsToTry(all: ReadonlyArray<string>, known: string | null, missing: Map<string, number>): string[] {
+  const now = Date.now();
+  const list = [
+    ...(known ? [known] : []),
+    ...all.filter((endpoint) => endpoint !== known && (missing.get(endpoint) ?? 0) <= now),
+  ];
+  return list.length > 0 ? list : [...all];
+}
+
+/** Test hook: forget which symbol endpoint answered. */
+export function resetSymbolEndpointMemory(): void {
+  knownSymbolEndpoint = null;
+  missingSymbolEndpoints.clear();
+  knownSymbolListEndpoint = null;
+  knownCancelEndpoint = null;
+  missingListEndpoints.clear();
+}
+
+/** The operation codes of the bridge's order calls (MetaTrader's own numbering). */
+const OPERATION_CODES = { Buy: 0, Sell: 1, BuyLimit: 2, SellLimit: 3, BuyStop: 4, SellStop: 5 } as const;
+export type Api2TradeOperation = keyof typeof OPERATION_CODES;
 
 export interface Api2TradeConfig {
   baseUrl: string;
@@ -67,6 +142,10 @@ export interface Api2TradeOrder {
   takeProfit?: number;
   comment?: string;
   profit?: number;
+  /** signed charges of the order (a cost is negative); `profit` alone is the gross result */
+  commission?: number;
+  swap?: number;
+  fee?: number;
   state?: string | number;
   openTimestampUTC?: number;
   closeTimestampUTC?: number;
@@ -118,11 +197,15 @@ export interface Api2TradeExecutionResponse {
   orderId?: number | string;
   positionId?: number | string;
   message?: string;
+  /** the trade server's own words ("Invalid stops", "No money") */
+  comment?: string;
   error?: string;
   retcode?: number | string;
   code?: number | string;
   done?: boolean;
   success?: boolean;
+  volume?: number;
+  price?: number;
 }
 
 export interface Api2TradeRegisteredAccount {
@@ -330,13 +413,27 @@ export class Api2TradeClient {
       headers["Content-Type"] = "application/json";
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body,
-      cache: "no-store",
-    });
-    const bodyText = await response.text();
+    const timeoutMs = requestTimeoutMs(endpoint);
+    let response: Response;
+    let bodyText: string;
+    try {
+      // one signal covers the connection, the headers and the body
+      response = await brokerFetch(url, {
+        method,
+        headers,
+        body,
+        cache: "no-store",
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      bodyText = await response.text();
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw new Error(
+          publicApi2TradeError(`Broker service did not answer ${endpoint} within ${Math.round(timeoutMs / 1000)}s.`),
+        );
+      }
+      throw error;
+    }
     if (!response.ok) {
       throw new Error(publicApi2TradeError(`Broker service request failed (${response.status}): ${bodyText}`));
     }
@@ -481,17 +578,25 @@ export class Api2TradeClient {
       ...this.accountParams(accountId),
       symbol,
     };
+    // The bridge's endpoint for this is not documented, so a list is tried. The one that
+    // answered last goes first, and an endpoint that answered "no such endpoint" before
+    // another one gave a real answer is skipped for ten minutes - the first copy of a
+    // symbol used to pay for every failed probe, one after the other.
+    const now = Date.now();
     const endpoints = [
-      "SymbolInfo",
-      "SymbolParams",
-      "SymbolSpecification",
-      "GetSymbolInfo",
-      "MarketInfo",
+      ...(knownSymbolEndpoint ? [knownSymbolEndpoint] : []),
+      ...SYMBOL_ENDPOINTS.filter(
+        (endpoint) => endpoint !== knownSymbolEndpoint && (missingSymbolEndpoints.get(endpoint) ?? 0) <= now,
+      ),
     ];
+    if (endpoints.length === 0) endpoints.push(...SYMBOL_ENDPOINTS);
+    const failedWithoutEndpoint: string[] = [];
     let lastError: unknown = null;
     for (const endpoint of endpoints) {
       try {
         const result = await this.request<unknown>("GET", endpoint, params);
+        knownSymbolEndpoint = endpoint;
+        for (const failed of failedWithoutEndpoint) missingSymbolEndpoints.set(failed, now + SYMBOL_ENDPOINT_MISSING_TTL_MS);
         if (Array.isArray(result)) {
           const match = result.find((item) => {
             if (typeof item !== "object" || item === null) return false;
@@ -502,6 +607,7 @@ export class Api2TradeClient {
         }
         return typeof result === "object" && result !== null ? result as Api2TradeSymbolSpecifications : null;
       } catch (error) {
+        if (answeredNoSuchEndpoint(error)) failedWithoutEndpoint.push(endpoint);
         lastError = error;
       }
     }
@@ -509,9 +615,57 @@ export class Api2TradeClient {
     return null;
   }
 
+  /**
+   * Every symbol the account can trade, spelled the way its broker spells it. Throws only
+   * when no endpoint answered at all; an answer that holds no symbol is an empty list.
+   */
+  async symbolList(accountId: string): Promise<ParsedSymbol[]> {
+    const params = this.accountParams(accountId);
+    const failedWithoutEndpoint: string[] = [];
+    let lastError: unknown = null;
+    for (const endpoint of endpointsToTry(SYMBOL_LIST_ENDPOINTS, knownSymbolListEndpoint, missingListEndpoints)) {
+      try {
+        const result = await this.request<unknown>("GET", endpoint, params);
+        knownSymbolListEndpoint = endpoint;
+        const now = Date.now();
+        for (const failed of failedWithoutEndpoint) missingListEndpoints.set(failed, now + SYMBOL_ENDPOINT_MISSING_TTL_MS);
+        return parseSymbolList(result);
+      } catch (error) {
+        if (answeredNoSuchEndpoint(error)) failedWithoutEndpoint.push(endpoint);
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("The broker service has no list of symbols.");
+  }
+
   async openedOrders(accountId: string): Promise<Api2TradeOrder[]> {
     const result = await this.request<unknown>("GET", "OpenedOrders", this.accountParams(accountId));
     return Array.isArray(result) ? result as Api2TradeOrder[] : [];
+  }
+
+  /**
+   * The same call for the copy engine, which treats the answer as THE list of open
+   * positions: an answer that says something else (a text such as "not connected", an
+   * object) is an error here instead of "no open orders" - otherwise one bad answer
+   * would look like the master closing every trade at once. A completely empty body
+   * (some bridges answer that way when nothing is open) is still an empty list, as it
+   * always was.
+   */
+  async openedOrdersChecked(accountId: string): Promise<Api2TradeOrder[]> {
+    const result = await this.request<unknown>("GET", "OpenedOrders", this.accountParams(accountId));
+    if (result === null || result === undefined) return [];
+    if (!Array.isArray(result)) {
+      throw new Error("Broker service returned an unexpected answer for the open positions.");
+    }
+    return result as Api2TradeOrder[];
+  }
+
+  /**
+   * Raw answer of one price endpoint (`quote.ts` reads it). Which endpoint exists
+   * is not documented anywhere we could read, so the adapter tries a short list.
+   */
+  async quoteVia(endpoint: string, accountId: string, symbol: string): Promise<unknown> {
+    return this.request<unknown>("GET", endpoint, { ...this.accountParams(accountId), symbol });
   }
 
   async closedOrders(accountId: string): Promise<Api2TradeOrder[]> {
@@ -550,19 +704,23 @@ export class Api2TradeClient {
   async orderSend(params: {
     accountId: string;
     symbol: string;
-    operation: "Buy" | "Sell";
+    operation: Api2TradeOperation;
     volume: number;
+    /** entry price of a pending order (BuyLimit ... SellStop); a market order takes the current price */
+    price?: number | null;
     stopLoss?: number | null;
     takeProfit?: number | null;
     comment?: string | null;
     slippage?: number | null;
   }): Promise<Api2TradeExecutionResponse> {
+    const operation = OPERATION_CODES[params.operation];
     if (!this.usesApiKeyAuth()) {
       const result = await this.request<unknown>("GET", "OrderSendSafe", {
         ...this.accountParams(params.accountId),
         symbol: params.symbol,
-        operation: params.operation === "Buy" ? 0 : 1,
+        operation,
         volume: params.volume,
+        price: params.price,
         stoploss: params.stopLoss,
         takeprofit: params.takeProfit,
         comment: params.comment,
@@ -577,8 +735,9 @@ export class Api2TradeClient {
       this.accountParams(params.accountId),
       {
         symbol: params.symbol,
-        operation: params.operation === "Buy" ? 0 : 1,
+        operation,
         volume: params.volume,
+        price: params.price,
         stopLoss: params.stopLoss,
         takeProfit: params.takeProfit,
         comment: params.comment,
@@ -586,8 +745,9 @@ export class Api2TradeClient {
       },
       {
         symbol: params.symbol,
-        operation: params.operation === "Buy" ? 0 : 1,
+        operation,
         volume: params.volume,
+        price: params.price,
         stoploss: params.stopLoss,
         takeprofit: params.takeProfit,
         comment: params.comment,
@@ -634,6 +794,8 @@ export class Api2TradeClient {
   async orderModify(params: {
     accountId: string;
     ticket: string;
+    /** new entry price - only for a pending order */
+    price?: number | null;
     stopLoss?: number | null;
     takeProfit?: number | null;
   }): Promise<Api2TradeExecutionResponse> {
@@ -641,6 +803,7 @@ export class Api2TradeClient {
       return this.request<Api2TradeExecutionResponse>("GET", "OrderModifySafe", {
         ...this.accountParams(params.accountId),
         ticket: params.ticket,
+        price: params.price,
         stoploss: params.stopLoss,
         takeprofit: params.takeProfit,
       });
@@ -652,6 +815,7 @@ export class Api2TradeClient {
       this.accountParams(params.accountId),
       {
         ticket: params.ticket,
+        price: params.price,
         stopLoss: params.stopLoss,
         takeProfit: params.takeProfit,
         stoploss: params.stopLoss,
@@ -659,10 +823,42 @@ export class Api2TradeClient {
       },
       {
         ticket: params.ticket,
+        price: params.price,
         stoploss: params.stopLoss,
         takeprofit: params.takeProfit,
       },
     );
     return assertRecord(result, "OrderModify") as Api2TradeExecutionResponse;
+  }
+
+  /**
+   * Delete a pending order. The bridge's delete call is not documented where we could read
+   * it: `OrderDelete`, `OrderDeleteSafe` and `OrderCloseSafe` are tried in turn. Only an
+   * answer of "no such endpoint" moves on to the next one - a refusal from the broker
+   * (the order is gone, trading is disabled) is the answer.
+   */
+  async orderCancel(params: {
+    accountId: string;
+    ticket: string;
+  }): Promise<Api2TradeExecutionResponse> {
+    const failedWithoutEndpoint: string[] = [];
+    let lastError: unknown = null;
+    for (const endpoint of endpointsToTry(CANCEL_ENDPOINTS, knownCancelEndpoint, missingListEndpoints)) {
+      try {
+        const result = await this.request<Api2TradeExecutionResponse>("GET", endpoint, {
+          ...this.accountParams(params.accountId),
+          ticket: params.ticket,
+        });
+        knownCancelEndpoint = endpoint;
+        const now = Date.now();
+        for (const failed of failedWithoutEndpoint) missingListEndpoints.set(failed, now + SYMBOL_ENDPOINT_MISSING_TTL_MS);
+        return result;
+      } catch (error) {
+        if (!answeredNoSuchEndpoint(error)) throw error;
+        failedWithoutEndpoint.push(endpoint);
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("The broker service cannot delete pending orders.");
   }
 }

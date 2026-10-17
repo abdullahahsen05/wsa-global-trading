@@ -4,6 +4,7 @@ import { InlineStatusStrip, WorkspacePage } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
 import { AccountConnectionActions } from "@/components/accounts/AccountConnectionActions";
 import { BrokerConnectPanel } from "@/components/accounts/BrokerConnectPanel";
+import { AccountPerformanceChart } from "@/components/charts/AccountPerformanceChart";
 import { LiveAccountTradesTable } from "@/components/accounts/LiveAccountTradesTable";
 import { requireAuth } from "@/lib/auth/session";
 import { getPlatformSubscriptionAccess } from "@/lib/services/billingService";
@@ -80,6 +81,14 @@ export default async function AccountDetailPage({
           },
           { label: "Drawdown", value: formatPercent(account.drawdownPercent), helper: "Current max" },
         ]}
+      />
+
+      <AccountPerformanceChart
+        className="mt-5"
+        accountId={accountId}
+        accountName={account.accountName}
+        currency={account.balance.currency}
+        currentDrawdownPercent={account.drawdownPercent}
       />
 
       <div className="mt-5">

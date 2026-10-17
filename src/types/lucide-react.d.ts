@@ -94,4 +94,16 @@ declare module 'lucide-react' {
   export const Settings2: LucideIcon
   export const ShieldOff: LucideIcon
   export const Clock: LucideIcon
+
+  // Icons used in the trading terminal workspace (TradingView + MetaTrader tabs)
+  export const Columns2: LucideIcon
+  export const Minimize2: LucideIcon
+  export const Monitor: LucideIcon
+  export const RotateCw: LucideIcon
+  export const Rows2: LucideIcon
+
+  // Icons used in the WSA Trade panel (order ticket, positions, pending orders)
+  export const ChevronUp: LucideIcon
+  export const Minus: LucideIcon
+  export const Zap: LucideIcon
 }

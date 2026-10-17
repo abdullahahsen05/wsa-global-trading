@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { validateCpaTierOrder } from "@/lib/partner/rebateRules";
+import { CALIBRATION_LIMITS } from "@/lib/copy/calibration";
 
 export const paginationSchema = z.object({
   cursor: z.string().optional(),
@@ -16,7 +18,8 @@ export const brokerConnectionSchema = z
       .transform((value) => value.toUpperCase() as "MT4" | "MT5")
       .default("MT5"),
     login: z.string().trim().max(50).default(""),
-    password: z.string().trim().max(200).default(""),
+    // kept exactly as typed: a broker password may begin or end with a space (the unit test pins this)
+    password: z.string().max(200).default(""),
     server: z.string().trim().max(100).default(""),
     brokerProviderId: z.string().uuid("Broker provider is invalid").optional(),
     brokerName: z.string().trim().min(2, "Broker name is required").max(100).optional(),
@@ -31,7 +34,7 @@ export const brokerConnectionSchema = z
         message: "Login is required",
       });
     }
-    if (!value.password) {
+    if (!value.password.trim()) {
       context.addIssue({
         code: "custom",
         path: ["password"],
@@ -93,6 +96,11 @@ export const brokerServerUpdateSchema = z
 export const analyticsSummaryQuerySchema = z.object({
   accountId: z.string().min(1).default("ALL"),
   period: z.enum(["DAILY", "WEEKLY", "MONTHLY", "ALL_TIME"]).default("ALL_TIME"),
+});
+
+export const performanceQuerySchema = z.object({
+  accountId: z.string().min(1).default("ALL"),
+  range: z.enum(["1D", "1W", "1M", "3M", "6M", "1Y", "ALL"]).default("ALL"),
 });
 
 export const tradeQuerySchema = paginationSchema.extend({
@@ -242,6 +250,16 @@ export const partnerBrokerConfigurationSchema = z.object({
   cpaTier3Payout: z.number().min(0).max(100_000_000).default(750),
   currency: z.string().trim().length(3).transform((value) => value.toUpperCase()).default("USD"),
   isActive: z.boolean().default(true),
+}).superRefine((value, context) => {
+  // A pure IB agreement never reads the CPA tiers; CPA / Hybrid agreements pick
+  // the highest tier whose deposit the client reached, so the deposits must ascend.
+  if (value.modelType === "IB") return;
+  const message = validateCpaTierOrder([
+    value.cpaTier1Deposit,
+    value.cpaTier2Deposit,
+    value.cpaTier3Deposit,
+  ]);
+  if (message) context.addIssue({ code: "custom", path: ["cpaTier2Deposit"], message });
 });
 
 export const referralClaimSchema = z.object({
@@ -352,9 +370,28 @@ const optionalCopyNumber = z.number().positive().max(10000).nullable();
 const symbolMappingSchema = z
   .record(
     z.string().trim().min(2).max(32).transform((value) => value.toUpperCase()),
-    z.string().trim().min(2).max(32).transform((value) => value.toUpperCase()),
+    // the follower's symbol keeps the broker's own spelling ("XAUUSDm", "EURUSD.r")
+    z.string().trim().min(2).max(32),
   )
   .refine((mapping) => Object.keys(mapping).length <= 100, { message: "Too many symbol mappings" });
+
+/** How a copied trade is shaped before it is sent (src/lib/copy/calibration.ts); every field is optional. */
+const copyCalibrationSchema = z
+  .object({
+    copyStopLoss: z.boolean(),
+    copyTakeProfit: z.boolean(),
+    stopLossPoints: z.number().positive().max(CALIBRATION_LIMITS.pointsMax).nullable(),
+    takeProfitPoints: z.number().positive().max(CALIBRATION_LIMITS.pointsMax).nullable(),
+    maxSlippagePoints: z.number().min(0).max(CALIBRATION_LIMITS.slippageMax).nullable(),
+    maxSignalAgeMs: z
+      .number()
+      .min(CALIBRATION_LIMITS.signalAgeMinMs)
+      .max(CALIBRATION_LIMITS.signalAgeMaxMs)
+      .nullable(),
+    copyExisting: z.boolean(),
+    autoSymbolMatch: z.boolean(),
+  })
+  .partial();
 
 export const copyFollowerSettingsSchema = z
   .object({
@@ -375,6 +412,7 @@ export const copyFollowerSettingsSchema = z
     reverseCopy: z.boolean(),
     pauseOnDisconnect: z.boolean(),
     emergencyStop: z.boolean(),
+    calibration: copyCalibrationSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.copyMode === "FIXED_LOT" && value.fixedLot === null) {

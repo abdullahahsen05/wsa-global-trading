@@ -1,7 +1,39 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { writeAuditLog } from "@/lib/services/auditService";
+import { chunkArray, selectAllPages, selectAllPagesForIds } from "@/lib/supabase/pagedSelect";
+import {
+  brokerGroupKey,
+  closedAfterAttribution,
+  cpaPayoutForDeposit,
+  dominantCurrency,
+  ibRebateAmount,
+  isEligibleLiveAccount,
+  pickBrokerConfiguration,
+  summarizeRebates,
+  symbolClass,
+  type BrokerConfigCandidate,
+  type PartnerModelType,
+  type RebateRowLike,
+  type RebateTotals,
+  type RebateView,
+} from "@/lib/partner/rebateRules";
 
-export type PartnerModelType = "IB" | "CPA" | "HYBRID";
+// ─────────────────────────────────────────────────────────────────────────────
+// Partner broker earnings (IB per lot / CPA / Hybrid).
+//
+// The terms an admin enters per partner and per broker live in
+// `partner_broker_configurations`; every closed trade of an attributed trader
+// then produces one `partner_rebates` row (IB) and — once per qualified client —
+// one CPA row. The maths is in `lib/partner/rebateRules.ts`; this file adds the
+// database around it.
+//
+// SHARED: `calculatePartnerRebatesForTradingAccounts` runs inside the broker
+// sync (AWS workers) — keep it free of Next / React / "server-only" imports.
+// Idempotency is load-bearing: unique index (trade_id, calculation_type) and
+// the existence check for CPA below.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type { PartnerModelType, RebateTotals, RebateView };
 
 export interface PartnerBrokerConfigurationDto {
   id: string;
@@ -41,6 +73,10 @@ export interface PartnerTradeRebateLogDto {
   createdAt: string;
 }
 
+export interface PartnerRebateTotalsDto extends RebateTotals {
+  currency: string;
+}
+
 type SupabaseAdmin = ReturnType<typeof createAdminClient>;
 
 interface ConfigRow {
@@ -63,6 +99,8 @@ interface ConfigRow {
   broker_providers?: { display_name?: string | null; name?: string | null } | null;
 }
 
+type Agreement = ConfigRow & BrokerConfigCandidate;
+
 interface TradeRebateLogRow {
   id: string;
   trader_id: string | null;
@@ -81,32 +119,48 @@ interface TradeRebateLogRow {
   broker_providers?: { display_name?: string | null; name?: string | null } | null;
 }
 
-interface ClosedTradeScanRow {
+interface AccountScanRow {
+  id: string;
+  user_id: string | null;
+  broker_provider_id: string | null;
+  broker_name: string | null;
+  initial_balance: number | string | null;
+  status: string | null;
+  account_usage: string | null;
+}
+
+interface AttributionRow {
+  user_id: string;
+  partner_id: string;
+  partner_assigned_at: string | null;
+}
+
+interface ClosedTradeRow {
   id: string;
   trading_account_id: string;
   symbol: string | null;
-  status: string;
   volume: number | string | null;
-  profit: number | string | null;
   currency: string | null;
   closed_at: string | null;
-  trading_accounts?: {
-    user_id?: string | null;
-    broker_provider_id?: string | null;
-    broker_name?: string | null;
-    initial_balance?: number | string | null;
-    status?: string | null;
-    account_usage?: string | null;
-  } | null;
 }
 
-interface TraderVolumeRow {
-  volume: number | string | null;
-  trading_accounts?: {
-    account_usage?: string | null;
-    status?: string | null;
-  } | null;
+/** An account that earns for a partner, with the agreement that applies to it. */
+interface Target {
+  account: AccountScanRow;
+  partnerId: string;
+  assignedAt: string | null;
+  agreement: Agreement;
 }
+
+const ACCOUNT_COLUMNS =
+  "id, user_id, broker_provider_id, broker_name, initial_balance, status, account_usage";
+
+/** Closed trades read per page when scanning for missing rebate rows. */
+const TRADE_PAGE = 1000;
+/** Upper bound of closed trades inspected per call (per chunk of accounts), newest first. */
+const MAX_SCANNED_TRADES = 20_000;
+/** Rows per bulk insert. */
+const INSERT_BATCH = 50;
 
 function mapConfig(row: ConfigRow): PartnerBrokerConfigurationDto {
   return {
@@ -130,13 +184,12 @@ function mapConfig(row: ConfigRow): PartnerBrokerConfigurationDto {
   };
 }
 
-function normalizeBrokerName(value: string | null | undefined): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function toAgreement(row: ConfigRow): Agreement {
+  return {
+    ...row,
+    brokerProviderId: row.broker_provider_id,
+    brokerNames: [row.broker_providers?.display_name, row.broker_providers?.name],
+  };
 }
 
 export async function listPartnerBrokerConfigurations(
@@ -149,7 +202,8 @@ export async function listPartnerBrokerConfigurations(
       "id, partner_id, broker_provider_id, model_type, rebate_rate_per_lot, xauusd_rate_per_lot, cpa_qualification_lots, cpa_tier_1_deposit, cpa_tier_1_payout, cpa_tier_2_deposit, cpa_tier_2_payout, cpa_tier_3_deposit, cpa_tier_3_payout, currency, is_active, updated_at, broker_providers(display_name, name)",
     )
     .eq("partner_id", partnerId)
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })
+    .limit(500);
   if (error) throw new Error(`Failed to load partner broker configurations: ${error.message}`);
   return ((data ?? []) as unknown as ConfigRow[]).map(mapConfig);
 }
@@ -188,7 +242,6 @@ export async function upsertPartnerBrokerConfiguration(params: {
     currency: params.currency.toUpperCase(),
     is_active: params.isActive,
     updated_by: params.actorUserId,
-    created_by: params.actorUserId,
   };
 
   const selectColumns =
@@ -204,6 +257,7 @@ export async function upsertPartnerBrokerConfiguration(params: {
   let data: unknown;
   let error: { message: string } | null = null;
   if (existing.data?.id) {
+    // `created_by` stays with whoever created the agreement.
     const response = await supabase
       .from("partner_broker_configurations")
       .update(row)
@@ -215,7 +269,7 @@ export async function upsertPartnerBrokerConfiguration(params: {
   } else {
     const response = await supabase
       .from("partner_broker_configurations")
-      .insert(row)
+      .insert({ ...row, created_by: params.actorUserId })
       .select(selectColumns)
       .single();
     data = response.data;
@@ -234,22 +288,28 @@ export async function upsertPartnerBrokerConfiguration(params: {
   return mapConfig(data as ConfigRow);
 }
 
+/** Newest trade-linked rebate rows (the table on the partner pages). Totals come from `getPartnerRebateTotals`. */
 export async function listPartnerTradeRebateLogs(
   partnerId: string,
   limit = 500,
+  view: RebateView = "ALL",
 ): Promise<PartnerTradeRebateLogDto[]> {
   const supabase = createAdminClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("partner_rebates")
     .select(
       "id, trader_id, trade_id, source_type, amount, currency, status, created_at, model_type, calculation_type, volume_lots, rate_per_lot, trades(external_trade_id, symbol), profiles!trader_id(full_name), broker_providers(display_name, name)",
     )
-    .eq("partner_id", partnerId)
-    .in("source_type", ["TRADE_VOLUME", "CPA_TIER"])
-    .order("created_at", { ascending: false })
-    .limit(limit);
+    .eq("partner_id", partnerId);
+  if (view === "REBATE") query = query.eq("source_type", "TRADE_VOLUME");
+  else if (view === "CPA") query = query.eq("source_type", "CPA_TIER");
+  else if (view === "HYBRID") query = query.eq("model_type", "HYBRID").in("source_type", ["TRADE_VOLUME", "CPA_TIER"]);
+  else query = query.in("source_type", ["TRADE_VOLUME", "CPA_TIER"]);
+
+  // PostgREST never returns more than 1000 rows per request.
+  const { data, error } = await query.order("created_at", { ascending: false }).limit(Math.min(Math.max(limit, 1), 1000));
   if (error) throw new Error(`Failed to load partner trade rebates: ${error.message}`);
-  return ((data ?? []) as TradeRebateLogRow[]).map((row) => ({
+  return ((data ?? []) as unknown as TradeRebateLogRow[]).map((row) => ({
     id: row.id,
     traderId: row.trader_id,
     traderName: row.profiles?.full_name ?? null,
@@ -268,54 +328,89 @@ export async function listPartnerTradeRebateLogs(
   }));
 }
 
+/**
+ * Totals over EVERY rebate row of a partner (not just the newest 1000): earned
+ * (APPROVED + PAID), pending, IB / CPA split, lots, distinct clients and brokers.
+ * Rows in a second currency are left out so amounts are never added across currencies.
+ */
+export async function getPartnerRebateTotals(
+  partnerId: string,
+  view: RebateView = "ALL",
+): Promise<PartnerRebateTotalsDto> {
+  const supabase = createAdminClient();
+  const rows = await selectAllPages<RebateRowLike & { currency?: string | null }>(
+    "Failed to load partner rebate totals",
+    (from, to) =>
+      supabase
+        .from("partner_rebates")
+        .select("amount, currency, status, calculation_type, source_type, model_type, volume_lots, trader_id, broker_provider_id")
+        .eq("partner_id", partnerId)
+        .order("id")
+        .range(from, to),
+  );
+  const currency = dominantCurrency(rows);
+  const scoped = currency ? rows.filter((row) => (row.currency ?? "").toUpperCase() === currency) : rows;
+  return { ...summarizeRebates(scoped, view), currency: currency ?? "USD" };
+}
+
+/** Calculates any missing rebate rows for every live account of the partner's traders. */
 export async function ensurePartnerRebateLedgerCurrent(
   partnerId: string,
 ): Promise<{ created: number; scannedTrades: number; accounts: number }> {
   const supabase = createAdminClient();
-  const { data: profiles, error: profileError } = await supabase
-    .from("trader_profiles")
-    .select("user_id")
-    .eq("partner_id", partnerId)
-    .limit(1000);
-  if (profileError) throw new Error(`Failed to load assigned traders for rebate refresh: ${profileError.message}`);
-
-  const traderIds = [...new Set((profiles ?? []).map((profile) => profile.user_id as string).filter(Boolean))];
+  const profiles = await selectAllPages<{ user_id: string }>(
+    "Failed to load assigned traders for rebate refresh",
+    (from, to) =>
+      supabase
+        .from("trader_profiles")
+        .select("user_id")
+        .eq("partner_id", partnerId)
+        .order("user_id")
+        .range(from, to),
+  );
+  const traderIds = [...new Set(profiles.map((profile) => profile.user_id).filter(Boolean))];
   if (traderIds.length === 0) return { created: 0, scannedTrades: 0, accounts: 0 };
 
-  const { data: accounts, error: accountError } = await supabase
-    .from("trading_accounts")
-    .select("id")
-    .in("user_id", traderIds)
-    .eq("status", "CONNECTED")
-    .in("account_usage", ["TRADER", "COPY_MASTER"])
-    .limit(2000);
-  if (accountError) throw new Error(`Failed to load live accounts for rebate refresh: ${accountError.message}`);
-
-  const accountIds = [...new Set((accounts ?? []).map((account) => account.id as string).filter(Boolean))];
+  const accounts = await selectAllPagesForIds<{ id: string }>(
+    "Failed to load live accounts for rebate refresh",
+    traderIds,
+    (ids, from, to) =>
+      supabase
+        .from("trading_accounts")
+        .select("id")
+        .in("user_id", ids)
+        .eq("status", "CONNECTED")
+        .in("account_usage", ["TRADER", "COPY_MASTER"])
+        .order("id")
+        .range(from, to),
+  );
+  const accountIds = [...new Set(accounts.map((account) => account.id).filter(Boolean))];
   if (accountIds.length === 0) return { created: 0, scannedTrades: 0, accounts: 0 };
   const result = await calculatePartnerRebatesForTradingAccounts(accountIds);
   return { ...result, accounts: accountIds.length };
 }
 
-function cpaPayout(config: ConfigRow, deposit: number): number {
-  if (deposit >= Number(config.cpa_tier_3_deposit)) return Number(config.cpa_tier_3_payout);
-  if (deposit >= Number(config.cpa_tier_2_deposit)) return Number(config.cpa_tier_2_payout);
-  if (deposit >= Number(config.cpa_tier_1_deposit)) return Number(config.cpa_tier_1_payout);
-  return 0;
-}
+/** The broker sync creates missing rows too; the page-side refresh is only a safety net. */
+const REFRESH_INTERVAL_MS = 60_000;
+const lastRefreshAt = new Map<string, number>();
 
-function isEligibleLiveCommissionAccount(
-  account: ClosedTradeScanRow["trading_accounts"] | TraderVolumeRow["trading_accounts"],
-): boolean {
-  if (!account) return false;
-  if ((account.status ?? "").toUpperCase() !== "CONNECTED") return false;
-  const usage = (account.account_usage ?? "TRADER").toUpperCase();
-  return usage === "TRADER" || usage === "COPY_MASTER";
-}
-
-function symbolClass(symbol: string | null | undefined): "XAUUSD" | "FOREX" {
-  const normalized = (symbol ?? "").toUpperCase().replace(/[^A-Z]/g, "");
-  return normalized.includes("XAUUSD") ? "XAUUSD" : "FOREX";
+/**
+ * Safety-net refresh used by the partner pages: creates missing rebate rows at
+ * most once a minute per partner (per server instance) and never fails the page
+ * — the rows already stored are still correct when the refresh cannot run.
+ */
+export async function refreshPartnerRebatesIfStale(partnerId: string): Promise<void> {
+  const now = Date.now();
+  if (now - (lastRefreshAt.get(partnerId) ?? 0) < REFRESH_INTERVAL_MS) return;
+  lastRefreshAt.set(partnerId, now);
+  try {
+    await ensurePartnerRebateLedgerCurrent(partnerId);
+  } catch (error) {
+    console.error(
+      "[partner rebates] refresh failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
 }
 
 function rebateRateForSymbol(config: ConfigRow, symbol: string | null | undefined): number {
@@ -325,49 +420,48 @@ function rebateRateForSymbol(config: ConfigRow, symbol: string | null | undefine
   return Number(config.rebate_rate_per_lot);
 }
 
-async function findConfig(
-  supabase: SupabaseAdmin,
-  partnerId: string,
-  brokerProviderId: string | null,
-  brokerName?: string | null,
-): Promise<ConfigRow | null> {
-  if (brokerProviderId) {
-    const { data } = await supabase
-      .from("partner_broker_configurations")
-      .select("*, broker_providers(display_name, name)")
-      .eq("partner_id", partnerId)
-      .eq("broker_provider_id", brokerProviderId)
-      .eq("is_active", true)
-      .maybeSingle();
-    if (data) return data as ConfigRow;
-  }
-
-  const normalizedBrokerName = normalizeBrokerName(brokerName);
-  if (normalizedBrokerName) {
-    const { data } = await supabase
-      .from("partner_broker_configurations")
-      .select("*, broker_providers(display_name, name)")
-      .eq("partner_id", partnerId)
-      .eq("is_active", true)
-      .not("broker_provider_id", "is", null);
-    const matched = ((data ?? []) as unknown as ConfigRow[]).find((config) => {
-      const displayName = normalizeBrokerName(config.broker_providers?.display_name);
-      const name = normalizeBrokerName(config.broker_providers?.name);
-      return displayName === normalizedBrokerName || name === normalizedBrokerName;
-    });
-    if (matched) return matched;
-  }
-
-  const { data } = await supabase
-    .from("partner_broker_configurations")
-    .select("*")
-    .eq("partner_id", partnerId)
-    .is("broker_provider_id", null)
-    .eq("is_active", true)
-    .maybeSingle();
-  return (data as ConfigRow | null) ?? null;
+function cpaTiersOf(config: ConfigRow) {
+  return [
+    { deposit: Number(config.cpa_tier_1_deposit), payout: Number(config.cpa_tier_1_payout) },
+    { deposit: Number(config.cpa_tier_2_deposit), payout: Number(config.cpa_tier_2_payout) },
+    { deposit: Number(config.cpa_tier_3_deposit), payout: Number(config.cpa_tier_3_payout) },
+  ];
 }
 
+/**
+ * Inserts rebate rows in batches. A unique violation (23505) means a parallel
+ * run already created some of them: the batch is then retried row by row so
+ * every missing row still lands and duplicates are skipped silently.
+ */
+async function insertRebateRows(
+  supabase: SupabaseAdmin,
+  rows: Array<Record<string, unknown>>,
+): Promise<number> {
+  let created = 0;
+  for (const batch of chunkArray(rows, INSERT_BATCH)) {
+    const { error } = await supabase.from("partner_rebates").insert(batch);
+    if (!error) {
+      created += batch.length;
+      continue;
+    }
+    if (error.code !== "23505") throw new Error(`Failed to create partner rebates: ${error.message}`);
+    for (const row of batch) {
+      const single = await supabase.from("partner_rebates").insert(row);
+      if (!single.error) created += 1;
+      else if (single.error.code !== "23505") {
+        throw new Error(`Failed to create partner rebate: ${single.error.message}`);
+      }
+    }
+  }
+  return created;
+}
+
+/**
+ * Creates the missing IB / CPA rows for the closed trades of the given trading
+ * accounts. Safe to call as often as you like (every sync): nothing is created
+ * twice, and accounts of traders without a partner or without an agreement cost
+ * only a handful of small queries.
+ */
 export async function calculatePartnerRebatesForTradingAccounts(
   tradingAccountIds: string[],
 ): Promise<{ created: number; scannedTrades: number }> {
@@ -375,117 +469,335 @@ export async function calculatePartnerRebatesForTradingAccounts(
   if (accountIds.length === 0) return { created: 0, scannedTrades: 0 };
 
   const supabase = createAdminClient();
-  const { data: trades, error } = await supabase
-    .from("trades")
-    .select("id, trading_account_id, symbol, status, volume, profit, currency, closed_at, trading_accounts(user_id, broker_provider_id, broker_name, initial_balance, status, account_usage)")
-    .in("trading_account_id", accountIds)
-    .eq("status", "CLOSED")
-    .not("closed_at", "is", null)
-    .order("closed_at", { ascending: false })
-    .limit(500);
-  if (error) throw new Error(`Failed to scan partner rebate trades: ${error.message}`);
-
   let created = 0;
-  const now = new Date().toISOString();
+  let scannedTrades = 0;
+  for (const idChunk of chunkArray(accountIds, 100)) {
+    const result = await calculateForAccountChunk(supabase, idChunk);
+    created += result.created;
+    scannedTrades += result.scannedTrades;
+  }
+  return { created, scannedTrades };
+}
 
-  for (const trade of (trades ?? []) as ClosedTradeScanRow[]) {
-    const account = trade.trading_accounts;
-    if (!account) continue;
-    if (!isEligibleLiveCommissionAccount(account)) continue;
-    const traderId = account.user_id as string | undefined;
-    if (!traderId) continue;
+async function calculateForAccountChunk(
+  supabase: SupabaseAdmin,
+  accountIds: string[],
+): Promise<{ created: number; scannedTrades: number }> {
+  const nothing = { created: 0, scannedTrades: 0 };
 
-    const { data: traderProfile } = await supabase
-      .from("trader_profiles")
-      .select("partner_id")
-      .eq("user_id", traderId)
-      .maybeSingle();
-    const partnerId = traderProfile?.partner_id as string | null | undefined;
-    if (!partnerId) continue;
+  // 1. Live accounts only (connected, TRADER / COPY_MASTER).
+  const accounts = await selectAllPagesForIds<AccountScanRow>(
+    "Failed to load accounts for partner rebates",
+    accountIds,
+    (ids, from, to) =>
+      supabase.from("trading_accounts").select(ACCOUNT_COLUMNS).in("id", ids).order("id").range(from, to),
+  );
+  const liveAccounts = accounts.filter((account) => Boolean(account.user_id) && isEligibleLiveAccount(account));
+  if (liveAccounts.length === 0) return nothing;
 
-    const brokerProviderId = (account?.broker_provider_id as string | null) ?? null;
-    const config = await findConfig(supabase, partnerId, brokerProviderId, account.broker_name);
-    if (!config) continue;
+  // 2. Which of those traders belong to a partner (and since when).
+  const traderIds = [...new Set(liveAccounts.map((account) => account.user_id as string))];
+  const attributions = await selectAllPagesForIds<AttributionRow>(
+    "Failed to load trader attribution for partner rebates",
+    traderIds,
+    (ids, from, to) =>
+      supabase
+        .from("trader_profiles")
+        .select("user_id, partner_id, partner_assigned_at")
+        .in("user_id", ids)
+        .not("partner_id", "is", null)
+        .order("user_id")
+        .range(from, to),
+  );
+  if (attributions.length === 0) return nothing;
+  const attributionByTrader = new Map(attributions.map((row) => [row.user_id, row]));
 
-    const volumeLots = Math.abs(Number(trade.volume ?? 0));
-    if (volumeLots <= 0) continue;
-
-    if (config.model_type === "IB" || config.model_type === "HYBRID") {
-      const ratePerLot = rebateRateForSymbol(config, trade.symbol);
-      const resolvedSymbolClass = symbolClass(trade.symbol);
-      const amount = Number((volumeLots * ratePerLot).toFixed(2));
-      if (amount > 0) {
-        const { error: insertError } = await supabase.from("partner_rebates").insert({
-          partner_id: partnerId,
-          trader_id: traderId,
-          trade_id: trade.id,
-          broker_provider_id: brokerProviderId,
-          configuration_id: config.id,
-          model_type: config.model_type,
-          calculation_type: "IB_VOLUME",
-          source_type: "TRADE_VOLUME",
-          amount,
-          currency: (config.currency || trade.currency || "USD").toUpperCase(),
-          status: "APPROVED",
-          approved_at: now,
-          volume_lots: volumeLots,
-          rate_per_lot: ratePerLot,
-          description: `${resolvedSymbolClass} ${volumeLots} lot(s) × ${ratePerLot.toFixed(2)} per lot`,
-          metadata: { tradeId: trade.id, symbol: trade.symbol, symbolClass: resolvedSymbolClass, brokerProviderId },
-        });
-        if (!insertError) created++;
-        else if ((insertError as { code?: string }).code !== "23505") {
-          throw new Error(`Failed to create IB rebate: ${insertError.message}`);
-        }
-      }
-    }
-
-    if (config.model_type === "CPA" || config.model_type === "HYBRID") {
-      let traderTradesQuery = supabase
-        .from("trades")
-        .select("volume, trading_accounts!inner(user_id, broker_provider_id, broker_name, status, account_usage)")
-        .eq("status", "CLOSED")
-        .eq("trading_accounts.user_id", traderId);
-      traderTradesQuery = brokerProviderId
-        ? traderTradesQuery.eq("trading_accounts.broker_provider_id", brokerProviderId)
-        : account.broker_name
-          ? traderTradesQuery.ilike("trading_accounts.broker_name", account.broker_name)
-          : traderTradesQuery.is("trading_accounts.broker_provider_id", null);
-      const { data: traderTrades } = await traderTradesQuery;
-      const totalLots = ((traderTrades ?? []) as TraderVolumeRow[])
-        .filter((row) => isEligibleLiveCommissionAccount(row.trading_accounts))
-        .reduce(
-        (sum, row) => sum + Math.abs(Number(row.volume ?? 0)),
-        0,
-      );
-      if (totalLots < Number(config.cpa_qualification_lots)) continue;
-      const deposit = Number(account.initial_balance ?? 0);
-      const amount = cpaPayout(config, deposit);
-      if (amount <= 0) continue;
-      const { error: insertError } = await supabase.from("partner_rebates").insert({
-        partner_id: partnerId,
-        trader_id: traderId,
-        trade_id: trade.id,
-        broker_provider_id: brokerProviderId,
-        configuration_id: config.id,
-        model_type: config.model_type,
-        calculation_type: "CPA_TIER",
-        source_type: "CPA_TIER",
-        amount,
-        currency: config.currency.toUpperCase(),
-        status: "APPROVED",
-        approved_at: now,
-        volume_lots: totalLots,
-        qualification_lots: Number(config.cpa_qualification_lots),
-        description: `CPA qualified at ${Number(totalLots.toFixed(2))} lot(s) and ${deposit.toFixed(2)} deposit tier`,
-        metadata: { qualifyingTradeId: trade.id, totalLots, deposit, brokerProviderId },
-      });
-      if (!insertError) created++;
-      else if ((insertError as { code?: string }).code !== "23505") {
-        throw new Error(`Failed to create CPA rebate: ${insertError.message}`);
-      }
-    }
+  // 3. The partners' active agreements.
+  const partnerIds = [...new Set(attributions.map((row) => row.partner_id))];
+  const configRows = await selectAllPagesForIds<ConfigRow>(
+    "Failed to load partner agreements",
+    partnerIds,
+    (ids, from, to) =>
+      supabase
+        .from("partner_broker_configurations")
+        .select("*, broker_providers(display_name, name)")
+        .in("partner_id", ids)
+        .eq("is_active", true)
+        .order("id")
+        .range(from, to),
+  );
+  if (configRows.length === 0) return nothing;
+  const agreementsByPartner = new Map<string, Agreement[]>();
+  for (const row of configRows) {
+    const list = agreementsByPartner.get(row.partner_id) ?? [];
+    list.push(toAgreement(row));
+    agreementsByPartner.set(row.partner_id, list);
   }
 
-  return { created, scannedTrades: trades?.length ?? 0 };
+  // 4. Account → partner agreement that applies to it.
+  const targets = new Map<string, Target>();
+  for (const account of liveAccounts) {
+    const attribution = attributionByTrader.get(account.user_id as string);
+    if (!attribution) continue;
+    const agreement = pickBrokerConfiguration(
+      agreementsByPartner.get(attribution.partner_id) ?? [],
+      account.broker_provider_id,
+      account.broker_name,
+    );
+    if (!agreement) continue;
+    targets.set(account.id, {
+      account,
+      partnerId: attribution.partner_id,
+      assignedAt: attribution.partner_assigned_at,
+      agreement,
+    });
+  }
+  if (targets.size === 0) return nothing;
+
+  // 5. Closed trades since the earliest attribution, newest first, one page at
+  //    a time. Rows are created newest first, so a page that needs nothing means
+  //    everything older is up to date as well: a normal sync reads one or two
+  //    pages, while a backlog (agreement added later, workers were off) is worked
+  //    off page by page, up to MAX_SCANNED_TRADES per call.
+  const assignedDates = [...targets.values()].map((target) => target.assignedAt);
+  const earliestAssigned = assignedDates.every(Boolean)
+    ? new Date(Math.min(...assignedDates.map((value) => Date.parse(value as string)))).toISOString()
+    : null;
+  const now = new Date().toISOString();
+  let created = 0;
+  let scannedTrades = 0;
+  for (const idChunk of chunkArray([...targets.keys()])) {
+    for (let from = 0; from < MAX_SCANNED_TRADES; from += TRADE_PAGE) {
+      let query = supabase
+        .from("trades")
+        .select("id, trading_account_id, symbol, volume, currency, closed_at")
+        .in("trading_account_id", idChunk)
+        .eq("status", "CLOSED")
+        .not("closed_at", "is", null);
+      if (earliestAssigned) query = query.gte("closed_at", earliestAssigned);
+      const { data, error } = await query
+        .order("closed_at", { ascending: false })
+        .order("id")
+        .range(from, from + TRADE_PAGE - 1);
+      if (error) throw new Error(`Failed to scan partner rebate trades: ${error.message}`);
+      const page = (data ?? []) as unknown as ClosedTradeRow[];
+      scannedTrades += page.length;
+
+      // Balance / deposit rows (volume 0) and trades from before the client joined earn nothing.
+      const trades = page.filter((trade) => {
+        const target = targets.get(trade.trading_account_id);
+        return (
+          Boolean(target)
+          && Math.abs(Number(trade.volume ?? 0)) > 0
+          && closedAfterAttribution(trade.closed_at, target?.assignedAt)
+        );
+      });
+      let pageCreated = 0;
+      if (trades.length > 0) {
+        pageCreated += await createIbRebates(supabase, targets, trades, now);
+        // CPA is once per client: look at it on the newest page, and on older pages only while a backlog is being worked off.
+        if (from === 0 || pageCreated > 0) pageCreated += await createCpaPayouts(supabase, targets, trades, now);
+      }
+      created += pageCreated;
+      if (page.length < TRADE_PAGE || pageCreated === 0) break;
+    }
+  }
+  return { created, scannedTrades };
+}
+
+async function createIbRebates(
+  supabase: SupabaseAdmin,
+  targets: Map<string, Target>,
+  trades: ClosedTradeRow[],
+  now: string,
+): Promise<number> {
+  const candidates = trades.filter((trade) => {
+    const model = targets.get(trade.trading_account_id)?.agreement.model_type;
+    return model === "IB" || model === "HYBRID";
+  });
+  if (candidates.length === 0) return 0;
+
+  // Trades that already earned are skipped here, so a sync costs one small query per 100 trades.
+  const done = await selectAllPagesForIds<{ trade_id: string }>(
+    "Failed to check existing partner rebates",
+    candidates.map((trade) => trade.id),
+    (ids, from, to) =>
+      supabase
+        .from("partner_rebates")
+        .select("trade_id")
+        .in("trade_id", ids)
+        .eq("calculation_type", "IB_VOLUME")
+        .order("trade_id")
+        .range(from, to),
+  );
+  const alreadyRebated = new Set(done.map((row) => row.trade_id));
+
+  const rows: Array<Record<string, unknown>> = [];
+  for (const trade of candidates) {
+    if (alreadyRebated.has(trade.id)) continue;
+    const target = targets.get(trade.trading_account_id);
+    if (!target) continue;
+    const lots = Math.abs(Number(trade.volume ?? 0));
+    const ratePerLot = rebateRateForSymbol(target.agreement, trade.symbol);
+    const amount = ibRebateAmount(lots, ratePerLot);
+    if (amount <= 0) continue;
+    const resolvedClass = symbolClass(trade.symbol);
+    const brokerProviderId = target.account.broker_provider_id ?? null;
+    rows.push({
+      partner_id: target.partnerId,
+      trader_id: target.account.user_id,
+      trade_id: trade.id,
+      broker_provider_id: brokerProviderId,
+      configuration_id: target.agreement.id,
+      model_type: target.agreement.model_type,
+      calculation_type: "IB_VOLUME",
+      source_type: "TRADE_VOLUME",
+      amount,
+      currency: (target.agreement.currency || trade.currency || "USD").toUpperCase(),
+      status: "APPROVED",
+      approved_at: now,
+      volume_lots: lots,
+      rate_per_lot: ratePerLot,
+      description: `${resolvedClass} ${lots} lot(s) × ${ratePerLot.toFixed(2)} per lot`,
+      metadata: { tradeId: trade.id, symbol: trade.symbol, symbolClass: resolvedClass, brokerProviderId },
+    });
+  }
+  return insertRebateRows(supabase, rows);
+}
+
+/**
+ * One CPA payout per partner / client / broker, ever. The database index on
+ * (partner, trader, broker, CPA) cannot stop a second payout when the account
+ * has no broker provider (NULLs are distinct in a unique index), so existence
+ * is checked here — cancelled rows count too, so an admin's cancellation sticks.
+ */
+async function createCpaPayouts(
+  supabase: SupabaseAdmin,
+  targets: Map<string, Target>,
+  trades: ClosedTradeRow[],
+  now: string,
+): Promise<number> {
+  interface Candidate {
+    target: Target;
+    traderId: string;
+    groupKey: string;
+    qualifyingTradeId: string;
+  }
+  const candidates = new Map<string, Candidate>();
+  for (const trade of trades) {
+    const target = targets.get(trade.trading_account_id);
+    if (!target || target.agreement.model_type === "IB") continue;
+    const traderId = target.account.user_id as string;
+    const groupKey = brokerGroupKey(target.account);
+    const key = `${target.partnerId}|${traderId}|${groupKey}`;
+    // `trades` is newest first: the first one seen is the newest qualifying trade.
+    if (!candidates.has(key)) candidates.set(key, { target, traderId, groupKey, qualifyingTradeId: trade.id });
+  }
+  if (candidates.size === 0) return 0;
+
+  const cpaKey = (partnerId: string, traderId: string, providerId: string | null) =>
+    `${partnerId}|${traderId}|${providerId ?? "none"}`;
+  const existing = await selectAllPagesForIds<{
+    partner_id: string;
+    trader_id: string;
+    broker_provider_id: string | null;
+  }>(
+    "Failed to check existing CPA payouts",
+    [...new Set([...candidates.values()].map((candidate) => candidate.traderId))],
+    (ids, from, to) =>
+      supabase
+        .from("partner_rebates")
+        .select("partner_id, trader_id, broker_provider_id")
+        .eq("calculation_type", "CPA_TIER")
+        .in("trader_id", ids)
+        .order("id")
+        .range(from, to),
+  );
+  const paidOnce = new Set(existing.map((row) => cpaKey(row.partner_id, row.trader_id, row.broker_provider_id)));
+
+  const open = [...candidates.values()].filter(
+    (candidate) =>
+      !paidOnce.has(cpaKey(candidate.target.partnerId, candidate.traderId, candidate.target.account.broker_provider_id)),
+  );
+  if (open.length === 0) return 0;
+
+  // The deposit tier comes from the client's accounts at that broker; load them once per client.
+  const traderAccounts = await selectAllPagesForIds<AccountScanRow>(
+    "Failed to load client accounts for CPA",
+    [...new Set(open.map((candidate) => candidate.traderId))],
+    (ids, from, to) =>
+      supabase
+        .from("trading_accounts")
+        .select(ACCOUNT_COLUMNS)
+        .in("user_id", ids)
+        .eq("status", "CONNECTED")
+        .in("account_usage", ["TRADER", "COPY_MASTER"])
+        .order("id")
+        .range(from, to),
+  );
+  const accountsByTrader = new Map<string, AccountScanRow[]>();
+  for (const account of traderAccounts) {
+    if (!account.user_id) continue;
+    const list = accountsByTrader.get(account.user_id) ?? [];
+    list.push(account);
+    accountsByTrader.set(account.user_id, list);
+  }
+
+  const rows: Array<Record<string, unknown>> = [];
+  for (const candidate of open) {
+    const { target, traderId } = candidate;
+    const providerId = target.account.broker_provider_id ?? null;
+    const key = cpaKey(target.partnerId, traderId, providerId);
+    if (paidOnce.has(key)) continue; // another account of the same client was just handled
+
+    const brokerAccounts = (accountsByTrader.get(traderId) ?? []).filter(
+      (account) => brokerGroupKey(account) === candidate.groupKey,
+    );
+    const deposit = brokerAccounts.reduce(
+      (max, account) => Math.max(max, Number(account.initial_balance ?? 0)),
+      0,
+    );
+    const payout = cpaPayoutForDeposit(cpaTiersOf(target.agreement), deposit);
+    if (payout <= 0) continue; // deposit below tier 1: no need to count lots
+
+    const closed = await selectAllPagesForIds<{ volume: number | string | null; closed_at: string | null }>(
+      "Failed to total client lots for CPA",
+      brokerAccounts.map((account) => account.id),
+      (ids, from, to) =>
+        supabase
+          .from("trades")
+          .select("volume, closed_at")
+          .in("trading_account_id", ids)
+          .eq("status", "CLOSED")
+          .not("closed_at", "is", null)
+          .order("id")
+          .range(from, to),
+    );
+    const totalLots = closed
+      .filter((trade) => closedAfterAttribution(trade.closed_at, target.assignedAt))
+      .reduce((sum, trade) => sum + Math.abs(Number(trade.volume ?? 0)), 0);
+    const qualificationLots = Number(target.agreement.cpa_qualification_lots);
+    if (totalLots <= 0 || totalLots < qualificationLots) continue;
+
+    paidOnce.add(key);
+    rows.push({
+      partner_id: target.partnerId,
+      trader_id: traderId,
+      trade_id: candidate.qualifyingTradeId,
+      broker_provider_id: providerId,
+      configuration_id: target.agreement.id,
+      model_type: target.agreement.model_type,
+      calculation_type: "CPA_TIER",
+      source_type: "CPA_TIER",
+      amount: payout,
+      currency: target.agreement.currency.toUpperCase(),
+      status: "APPROVED",
+      approved_at: now,
+      volume_lots: Number(totalLots.toFixed(4)),
+      qualification_lots: qualificationLots,
+      description: `CPA qualified at ${Number(totalLots.toFixed(2))} lot(s) and ${deposit.toFixed(2)} deposit tier`,
+      metadata: { qualifyingTradeId: candidate.qualifyingTradeId, totalLots, deposit, brokerProviderId: providerId },
+    });
+  }
+  return insertRebateRows(supabase, rows);
 }
