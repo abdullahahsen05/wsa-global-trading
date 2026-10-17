@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -176,13 +176,9 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
     [connectionFilter, currentSubscriptions, normalizedConnectionSearch],
   );
 
-  useEffect(() => {
-    if (!settingsSubscription) return;
-    const freshSubscription = subscriptions.find((subscription) => subscription.id === settingsSubscription.id);
-    if (freshSubscription && freshSubscription !== settingsSubscription) {
-      setSettingsSubscription(freshSubscription);
-    }
-  }, [settingsSubscription, subscriptions]);
+  const activeSettingsSubscription = settingsSubscription
+    ? subscriptions.find((subscription) => subscription.id === settingsSubscription.id) ?? settingsSubscription
+    : null;
 
   const refresh = async (savedSubscription?: CopyFollowerDto) => {
     if (savedSubscription) {
@@ -529,7 +525,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
         />
       ) : null}
 
-      <FollowerSettingsDialog subscription={settingsSubscription} onClose={() => setSettingsSubscription(null)} onSaved={refresh} />
+      <FollowerSettingsDialog subscription={activeSettingsSubscription} onClose={() => setSettingsSubscription(null)} onSaved={refresh} />
 
       {follow ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4">

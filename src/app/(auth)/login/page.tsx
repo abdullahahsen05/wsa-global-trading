@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, useSyncExternalStore, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Eye, Key } from "lucide-react";
@@ -12,23 +12,24 @@ import { createClient, setRememberSessionPreference } from "@/lib/supabase/clien
 import { parseUserRole, type UserRole } from "@/lib/auth/rbac";
 import { roleHome } from "@/lib/auth/routeAccess";
 
+function subscribeRememberedEmail(onChange: () => void): () => void {
+  window.addEventListener("storage", onChange);
+  return () => window.removeEventListener("storage", onChange);
+}
+
+function getRememberedEmail(): string {
+  return window.localStorage.getItem("wsa-login-email") ?? "";
+}
+
 export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
-  const [rememberedEmail, setRememberedEmail] = useState("");
+  const rememberedEmail = useSyncExternalStore(subscribeRememberedEmail, getRememberedEmail, () => "");
   const router = useRouter();
   const queryClient = useQueryClient();
-
-  useEffect(() => {
-    const savedEmail = window.localStorage.getItem("wsa-login-email") ?? "";
-    if (savedEmail) {
-      setRememberedEmail(savedEmail);
-      setRememberMe(true);
-    }
-  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

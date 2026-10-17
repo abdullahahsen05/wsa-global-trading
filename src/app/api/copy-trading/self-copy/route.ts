@@ -4,6 +4,7 @@ import { CopyError } from "@/lib/copy/types";
 import { selfCopyCreateSchema } from "@/lib/validation/schemas";
 import {
   createSelfCopyRelationship,
+  getSelfCopyPlatformStatus,
   listSelfCopyRelationships,
 } from "@/lib/services/selfCopyService";
 import {
@@ -13,7 +14,12 @@ import {
 export async function GET() {
   try {
     const trader = await requireTrader();
-    return jsonOk({ relationships: await listSelfCopyRelationships(trader.id) });
+    const [relationships, platform] = await Promise.all([
+      listSelfCopyRelationships(trader.id),
+      // the banner is a convenience: the routes are listed even when it cannot be worked out
+      getSelfCopyPlatformStatus().catch(() => null),
+    ]);
+    return jsonOk({ relationships, platform });
   } catch (error) {
     if (error instanceof AuthError) return jsonFail(error.code, error.message, error.statusCode);
     return jsonFail("SELF_COPY_UNAVAILABLE", "Self-copy setups are unavailable.", 503);

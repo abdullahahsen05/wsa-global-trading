@@ -157,6 +157,44 @@ async function loadScopedSnapshotDrawdown(
   );
 }
 
+const SUMMARY_TRADE_COLUMNS =
+  "id, short_trade_id, trading_account_id, symbol, side, status, volume, open_price, close_price, profit, currency, opened_at, closed_at";
+const SUMMARY_TRADE_PAGE_SIZE = 1000;
+const SUMMARY_TRADE_MAX_ROWS = 10_000;
+
+/**
+ * Closed trades of the scope, newest first, read page by page.
+ *
+ * PostgREST (Supabase) caps every response at 1000 rows no matter what
+ * `.limit()` asks for, so a single `.limit(10_000)` silently returned only the
+ * newest 1000 trades and made profit / win rate wrong for busy accounts.
+ */
+async function loadScopedClosedTrades(
+  accountIds: string[],
+  start: Date | null,
+): Promise<Array<Parameters<typeof mapTradeToDto>[0]>> {
+  const supabase = createAdminClient();
+  const rows: Array<Parameters<typeof mapTradeToDto>[0]> = [];
+  for (let from = 0; from < SUMMARY_TRADE_MAX_ROWS; from += SUMMARY_TRADE_PAGE_SIZE) {
+    let query = supabase
+      .from("trades")
+      .select(SUMMARY_TRADE_COLUMNS)
+      .in("trading_account_id", accountIds)
+      .eq("status", "CLOSED")
+      .order("closed_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, from + SUMMARY_TRADE_PAGE_SIZE - 1);
+    if (start) query = query.gte("closed_at", start.toISOString());
+
+    const { data, error } = await query;
+    if (error) throw new Error(`Failed to fetch trades: ${error.message}`);
+    const page = (data ?? []) as unknown as Array<Parameters<typeof mapTradeToDto>[0]>;
+    rows.push(...page);
+    if (page.length < SUMMARY_TRADE_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 export async function getAnalyticsSummary(
   accountId: string,
   userId: string,
@@ -168,35 +206,14 @@ export async function getAnalyticsSummary(
     return { ...buildAnalyticsSummary(accountId, [], []), period };
   }
 
-  const supabase = createAdminClient();
   const start = getAnalyticsPeriodStart(period);
-  let tradeQuery = supabase
-    .from("trades")
-    .select(
-      "id, short_trade_id, trading_account_id, symbol, side, status, volume, open_price, close_price, profit, currency, opened_at, closed_at",
-    )
-    .in("trading_account_id", accountIds)
-    .eq("status", "CLOSED")
-    .order("closed_at", { ascending: false })
-    .limit(10_000);
+  const [tradeRows, equityCurve, snapshotDrawdownPercent] = await Promise.all([
+    loadScopedClosedTrades(accountIds, start),
+    loadScopedEquityCurve(accountIds, period),
+    loadScopedSnapshotDrawdown(accountIds, period),
+  ]);
 
-  if (start) tradeQuery = tradeQuery.gte("closed_at", start.toISOString());
-  const [tradeResult, equityCurve, snapshotDrawdownPercent] = await Promise.all(
-    [
-      tradeQuery,
-      loadScopedEquityCurve(accountIds, period),
-      loadScopedSnapshotDrawdown(accountIds, period),
-    ],
-  );
-  if (tradeResult.error) {
-    throw new Error(`Failed to fetch trades: ${tradeResult.error.message}`);
-  }
-
-  const summary = buildAnalyticsSummary(
-    accountId,
-    (tradeResult.data ?? []).map(mapTradeToDto),
-    equityCurve,
-  );
+  const summary = buildAnalyticsSummary(accountId, tradeRows.map(mapTradeToDto), equityCurve);
 
   return {
     ...summary,

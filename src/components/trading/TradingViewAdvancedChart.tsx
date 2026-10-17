@@ -1,36 +1,65 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  TRADING_VIEW_WIDGET_SCRIPT,
+  buildTradingViewWidgetConfig,
+  tradingViewSymbolUrl,
+} from "@/lib/terminal/tradingview";
+import {
+  DEFAULT_TRADING_VIEW_SYMBOLS,
+  type TradingViewChartOptions,
+  type TradingViewPanels,
+} from "@/lib/terminal/workspace";
 
-export const TRADING_VIEW_SYMBOLS: Record<string, string> = {
-  XAUUSD: "OANDA:XAUUSD",
-  EURUSD: "OANDA:EURUSD",
-  GBPUSD: "OANDA:GBPUSD",
-  USDJPY: "OANDA:USDJPY",
-  NAS100: "OANDA:NAS100USD",
-  US30: "OANDA:US30USD",
-  BTCUSD: "BINANCE:BTCUSDT",
-  ETHUSD: "BINANCE:ETHUSDT",
-};
+export const TRADING_VIEW_SYMBOLS: Record<string, string> = DEFAULT_TRADING_VIEW_SYMBOLS;
 
 export type TradingViewAdvancedChartProps = {
   symbol?: string;
   interval?: string;
   height?: number | string;
-  theme?: "dark" | "light";
-  allowSymbolChange?: boolean;
+  /** Symbols of the watchlist panel (shown when `panels.watchlist` is on). */
+  watchlist?: ReadonlyArray<string>;
+  /** Right-hand panels of the widget. Everything is off by default. */
+  panels?: Partial<TradingViewPanels>;
+  /** Style, indicators, toolbars ... Missing fields take the terminal's defaults. */
+  chart?: Partial<TradingViewChartOptions>;
 };
+
+/** The browser's own time zone, for the "My browser's time" choice. */
+function browserTimezone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
 
 export function TradingViewAdvancedChart({
   symbol = "OANDA:XAUUSD",
   interval = "15",
   height = "520px",
-  theme = "dark",
-  allowSymbolChange = true,
+  watchlist,
+  panels,
+  chart,
 }: TradingViewAdvancedChartProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState(false);
   const disableThirdPartyWidget = typeof navigator !== "undefined" && navigator.webdriver;
+
+  // The widget has no update call: any change of the configuration rebuilds it.
+  // One string stands for the whole configuration, so a new object or array with
+  // the same content does not rebuild it.
+  const configJson = JSON.stringify(
+    buildTradingViewWidgetConfig({
+      symbol,
+      interval,
+      watchlist,
+      panels,
+      chart,
+      localTimezone: browserTimezone(),
+    }),
+  );
 
   useEffect(() => {
     const container = containerRef.current;
@@ -64,45 +93,28 @@ export function TradingViewAdvancedChart({
       widgetDiv.style.height = "calc(100% - 32px)";
       widgetDiv.style.width = "100%";
 
+      // TradingView's terms require this attribution link next to the widget.
       const copyright = document.createElement("div");
       copyright.className = "tradingview-widget-copyright";
       copyright.style.cssText =
         "font-size:10px;color:rgba(255,255,255,0.25);text-align:right;padding:4px 8px 0;";
-      const symbolSlug = symbol.replace(":", "-");
-      copyright.innerHTML = `<a href="https://www.tradingview.com/symbols/${symbolSlug}/" rel="noopener nofollow" target="_blank" style="color:rgba(255,255,255,0.3)">Chart by TradingView</a>`;
+      const attribution = document.createElement("a");
+      attribution.href = tradingViewSymbolUrl(symbol);
+      attribution.rel = "noopener nofollow";
+      attribution.target = "_blank";
+      attribution.style.color = "rgba(255,255,255,0.3)";
+      attribution.textContent = "Chart by TradingView";
+      copyright.appendChild(attribution);
 
       const script = document.createElement("script");
       script.type = "text/javascript";
-      script.src =
-        "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+      script.src = TRADING_VIEW_WIDGET_SCRIPT;
       script.async = true;
 
       script.onerror = () => setFailed(true);
 
       // Config is embedded in the script's text content (official TradingView pattern)
-      script.innerHTML = JSON.stringify({
-        autosize: true,
-        symbol,
-        interval,
-        timezone: "Etc/UTC",
-        theme,
-        style: "1",
-        locale: "en",
-        backgroundColor: "rgba(10, 10, 10, 1)",
-        gridColor: "rgba(255, 255, 255, 0.06)",
-        allow_symbol_change: allowSymbolChange,
-        calendar: false,
-        details: false,
-        hide_side_toolbar: false,
-        hide_top_toolbar: false,
-        hide_legend: false,
-        hide_volume: false,
-        hotlist: false,
-        save_image: false,
-        withdateranges: true,
-        support_host: "https://www.tradingview.com",
-        studies: ["STD;EMA"],
-      });
+      script.innerHTML = configJson;
 
       widgetContainer.appendChild(widgetDiv);
       widgetContainer.appendChild(copyright);
@@ -115,7 +127,7 @@ export function TradingViewAdvancedChart({
       cancelAnimationFrame(rafId);
       container.innerHTML = "";
     };
-  }, [allowSymbolChange, disableThirdPartyWidget, symbol, interval, theme]);
+  }, [configJson, disableThirdPartyWidget, symbol]);
 
   if (disableThirdPartyWidget || failed) {
     return (

@@ -45,12 +45,29 @@ export async function PATCH(req: Request) {
     if (!parsed.success) return jsonFail("VALIDATION_ERROR", parsed.error.issues[0]?.message ?? "Validation error", 400);
 
     const db = createAdminClient();
+
+    // `layout` also carries the terminal workspace (tabs, watchlist, MetaTrader
+    // accounts - see /api/terminal/workspace). Merge instead of replacing, and
+    // never let this endpoint write that key.
+    let mergedLayout: Record<string, unknown> | undefined;
+    if (parsed.data.layout !== undefined) {
+      const { data: existing } = await db
+        .from("terminal_user_preferences")
+        .select("layout")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const incoming = { ...parsed.data.layout };
+      delete incoming.workspace;
+      const current = (existing?.layout ?? {}) as Record<string, unknown>;
+      mergedLayout = { ...current, ...incoming };
+    }
+
     const { error } = await db.from("terminal_user_preferences").upsert(
       {
         user_id: userId,
         ...(parsed.data.symbol !== undefined && { symbol: parsed.data.symbol.toUpperCase() }),
         ...(parsed.data.timeframe !== undefined && { timeframe: parsed.data.timeframe }),
-        ...(parsed.data.layout !== undefined && { layout: parsed.data.layout }),
+        ...(mergedLayout !== undefined && { layout: mergedLayout }),
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id" }

@@ -15,6 +15,18 @@ export function useRealtimeUpdates(enabled = true) {
 
     const supabase = createClient()
 
+    // The account performance chart samples the whole history (see
+    // usePerformanceSeries), so it is refreshed at most once per quiet period
+    // after trades change instead of on every event / snapshot.
+    let performanceTimer: ReturnType<typeof setTimeout> | null = null
+    const schedulePerformanceRefresh = () => {
+      if (performanceTimer) clearTimeout(performanceTimer)
+      performanceTimer = setTimeout(() => {
+        performanceTimer = null
+        queryClient.invalidateQueries({ queryKey: ['account-performance'] })
+      }, 8_000)
+    }
+
     // Subscribe to account snapshots
     const snapshotChannel = supabase
       .channel('account-snapshots')
@@ -39,6 +51,7 @@ export function useRealtimeUpdates(enabled = true) {
       }, (payload) => {
         queryClient.invalidateQueries({ queryKey: ['trades'] })
         queryClient.invalidateQueries({ queryKey: ['analytics-summary'] })
+        schedulePerformanceRefresh()
         const newStatus = 'new' in payload ? (payload.new as { status?: string } | null)?.status : undefined
         if (payload.eventType !== 'INSERT' || newStatus === 'OPEN') {
           queryClient.invalidateQueries({ queryKey: ['trading-accounts'] })
@@ -146,6 +159,7 @@ export function useRealtimeUpdates(enabled = true) {
       .subscribe()
 
     return () => {
+      if (performanceTimer) clearTimeout(performanceTimer)
       supabase.removeChannel(snapshotChannel)
       supabase.removeChannel(tradeChannel)
       supabase.removeChannel(riskChannel)

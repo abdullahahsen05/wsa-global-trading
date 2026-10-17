@@ -8,6 +8,8 @@ import { buildMockCheckoutUrl, getBillingRuntimeMode } from "@/lib/payments/runt
 import { getStripe, ensureStripeCustomer } from "@/lib/stripe/stripeClient";
 import { getStripePriceId, getStripeCheckoutMode } from "@/lib/stripe/stripeProducts";
 import { writeAuditLog } from "@/lib/services/auditService";
+import { commissionOnSale } from "@/lib/partner/rebateRules";
+import { selectAllPagesForIds } from "@/lib/supabase/pagedSelect";
 
 function copyTierForProductCode(code: string): "NORMAL" | "PREMIUM" {
   return code === "COPY_ULTRA_FAST" || code.endsWith("_PREMIUM") ? "PREMIUM" : "NORMAL";
@@ -1463,7 +1465,10 @@ export async function handleStripeInvoicePaymentFailed(stripeSubscriptionId: str
   // Access is preserved until current_period_end; expireStaleEntitlements() handles the rest.
 }
 
-/** Called on charge.refunded — marks order REFUNDED and logs it. */
+/**
+ * Called on charge.refunded — marks the order REFUNDED and takes back the WSA
+ * commission the partner had earned on that sale (when it is not paid out yet).
+ */
 export async function handleStripeChargeRefunded(paymentIntentId: string | null): Promise<void> {
   if (!paymentIntentId) return;
   const supabase = createAdminClient();
@@ -1472,6 +1477,81 @@ export async function handleStripeChargeRefunded(paymentIntentId: string | null)
     .update({ status: "REFUNDED" })
     .eq("stripe_payment_intent_id", paymentIntentId)
     .neq("status", "REFUNDED");
+
+  // Read the orders again (not only the rows just updated) so a webhook retry
+  // after a failed reversal still finishes the job; the reversal is idempotent.
+  try {
+    const { data: orders } = await supabase
+      .from("payment_orders")
+      .select("id")
+      .eq("stripe_payment_intent_id", paymentIntentId);
+    await reversePartnerCommissionsForRefundedOrders((orders ?? []).map((order) => order.id));
+  } catch (error) {
+    console.error(
+      `[billing] partner commission reversal failed for payment intent ${paymentIntentId}:`,
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
+/**
+ * A refunded sale no longer earns the partner a commission. Commissions that
+ * are PENDING, or APPROVED and not part of any withdrawal request, become
+ * REVERSED. A commission that is already PAID or reserved by a withdrawal is
+ * left for the admin to settle by hand (money may already have left WSA).
+ */
+async function reversePartnerCommissionsForRefundedOrders(orderIds: string[]): Promise<void> {
+  if (orderIds.length === 0) return;
+  const supabase = createAdminClient();
+  const commissions = await selectAllPagesForIds<{
+    id: string;
+    partner_id: string;
+    status: string;
+    commission_amount: number | string;
+  }>(
+    "Failed to load commissions of refunded orders",
+    orderIds,
+    (idChunk, from, to) =>
+      supabase
+        .from("partner_commissions")
+        .select("id, partner_id, status, commission_amount")
+        .in("purchase_id", idChunk)
+        .in("status", ["PENDING", "APPROVED"])
+        .order("id")
+        .range(from, to),
+  );
+
+  for (const commission of commissions) {
+    if (commission.status === "APPROVED") {
+      const { data: reserved } = await supabase
+        .from("partner_withdrawal_allocations")
+        .select("id")
+        .eq("commission_id", commission.id)
+        .limit(1);
+      if (reserved?.length) continue;
+    }
+    const { data: reversed } = await supabase
+      .from("partner_commissions")
+      .update({ status: "REVERSED" })
+      .eq("id", commission.id)
+      .eq("status", commission.status)
+      .select("id")
+      .maybeSingle();
+    if (!reversed) continue;
+    await writeAuditLog({
+      actorUserId: null,
+      action: "PARTNER_COMMISSION_STATUS_CHANGED",
+      entityType: "partner_commission",
+      entityId: commission.id,
+      metadata: {
+        partnerId: commission.partner_id,
+        from: commission.status,
+        status: "REVERSED",
+        reason: "order_refunded",
+        amount: Number(commission.commission_amount),
+      },
+    });
+  }
 }
 
 // ─── Webhook: handle payment succeeded ───────────────────────────────────────
@@ -1609,29 +1689,38 @@ async function maybeCreatePartnerCommission(
   // Get commission %
   const { data: pp } = await supabase
     .from("partner_profiles")
-    .select("commission_percent, commission_type")
+    .select("commission_percent")
     .eq("user_id", tp.partner_id)
     .single();
 
   if (!pp) return;
 
-  const commissionAmount = Number(grossAmount) * (Number(pp.commission_percent ?? 0) / 100);
+  // Rounded to cents (a NUMERIC(18,2) column would round anyway, but the
+  // payout maths must see exactly what is stored) and currency in the same
+  // upper-case form the withdrawal queries filter on.
+  const commissionPercent = Number(pp.commission_percent ?? 0);
+  const commissionAmount = commissionOnSale(grossAmount, commissionPercent);
+  if (commissionAmount <= 0) return;
   const now = new Date();
   const payoutMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  await supabase.from("partner_commissions").insert({
+  const { error: insertError } = await supabase.from("partner_commissions").insert({
     partner_id: tp.partner_id,
     trader_id: userId,
     purchase_id: purchaseId,
     source_type: "PAYMENT",
     source_id: purchaseId,
     gross_amount: grossAmount,
-    commission_percent: pp.commission_percent ?? 0,
+    commission_percent: commissionPercent,
     commission_amount: commissionAmount,
-    currency,
+    currency: String(currency || "USD").toUpperCase(),
     status: "PENDING",
     payout_month: payoutMonth,
   });
+  // 23505 = a concurrent confirmation already created this order's commission.
+  if (insertError && insertError.code !== "23505") {
+    console.error(`[billing] partner commission for order ${purchaseId} failed: ${insertError.message}`);
+  }
 }
 
 // ─── User billing summary ─────────────────────────────────────────────────────

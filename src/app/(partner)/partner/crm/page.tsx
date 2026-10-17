@@ -126,8 +126,8 @@ export default function PartnerCrmPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <MetricCard label="Rebate model" value={labelModel(selectedTrader.commissionModel)} helper={selectedTrader.brokerNames[0] ?? "No broker yet"} />
                   <MetricCard label="Last live sync" value={selectedTrader.latestSyncAt ? new Date(selectedTrader.latestSyncAt).toLocaleString() : "Not synced"} helper="Latest broker refresh visible to partner" />
-                  <MetricCard label="Wallet-ready" value={formatMoney(selectedTrader.approvedWalletContribution)} helper="Approved earnings available for payout flow" />
-                  <MetricCard label="Pending wallet" value={formatMoney(selectedTrader.pendingWalletContribution)} helper="Pending earnings not yet cleared" />
+                  <MetricCard label="Wallet-ready" value={formatMoney(selectedTrader.approvedWalletContribution)} helper="Approved WSA commission available for payout" />
+                  <MetricCard label="Pending wallet" value={formatMoney(selectedTrader.pendingWalletContribution)} helper="WSA commission waiting for admin approval" />
                   <MetricCard label="IB earned" value={formatMoney(selectedTrader.ibRebateEarned)} helper="Closed-lot rebate earnings" />
                   <MetricCard label="CPA earned" value={formatMoney(selectedTrader.cpaEarned)} helper={selectedTrader.cpaTierLabel ? `Current ${selectedTrader.cpaTierLabel}` : "Tier not reached yet"} />
                 </div>
@@ -222,13 +222,13 @@ function buildPipelineSteps(trader: PartnerTraderDto): Array<{ label: string; he
       done: trader.totalLotsTraded > 0,
     },
     {
-      label: "WSA earnings calculated",
+      label: "Earnings calculated",
       helper: `${formatMoney(trader.wsaCommissionEarned)} commission · ${formatMoney(trader.ibRebateEarned)} rebate · ${formatMoney(trader.cpaEarned)} CPA`,
       done: trader.wsaCommissionEarned.amount > 0 || trader.ibRebateEarned.amount > 0 || trader.cpaEarned.amount > 0,
     },
     {
       label: "Wallet / payout ready",
-      helper: `${formatMoney(trader.approvedWalletContribution)} approved for the payout flow.`,
+      helper: `${formatMoney(trader.approvedWalletContribution)} WSA commission approved for the payout flow.`,
       done: trader.approvedWalletContribution.amount > 0,
     },
   ];

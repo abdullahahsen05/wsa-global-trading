@@ -69,10 +69,19 @@ export interface PartnerTraderDto {
   brokerNames: string[];
   latestSyncAt: string | null;
   grossRevenue: MoneyValue;
+  /** WSA subscription commission cleared for payout (APPROVED, not yet paid) — the "wallet". */
   approvedWalletContribution: MoneyValue;
+  /** WSA subscription commission still PENDING admin approval. */
   pendingWalletContribution: MoneyValue;
+  /** Broker IB + CPA earnings that are APPROVED or PAID — reporting only, never WSA-payable. */
+  brokerEarningsApproved: MoneyValue;
+  /** Broker IB + CPA earnings still PENDING. */
+  brokerEarningsPending: MoneyValue;
+  /** IB per-lot earnings (APPROVED + PAID). */
   ibRebateEarned: MoneyValue;
+  /** CPA payouts (APPROVED + PAID). */
   cpaEarned: MoneyValue;
+  /** All WSA commission rows except cancelled / reversed ones. */
   wsaCommissionEarned: MoneyValue;
   cpaQualified: boolean;
   cpaTierLabel: string | null;
@@ -107,7 +116,7 @@ export interface PartnerCommissionDto {
   commissionPercent: number;
   commissionAmount: number;
   currency: string;
-  status: "PENDING" | "APPROVED" | "PAID" | "CANCELLED";
+  status: "PENDING" | "APPROVED" | "PAID" | "CANCELLED" | "REVERSED";
   periodStart: string | null;
   periodEnd: string | null;
   createdAt: string;

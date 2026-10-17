@@ -10,30 +10,47 @@ import {
   type BrokerAdapter,
   type BrokerConnectionHealth,
   type BrokerExecutionResult,
+  type BrokerQuote,
+  type BrokerSymbolInfo,
   type BrokerSymbolSpecifications,
+  type BrokerTradingState,
+  type CancelOrderRequest,
   type CloseTradeRequest,
   type ModifyTradeRequest,
   type OpenTradeRequest,
+  type OrderKind,
 } from "./BrokerAdapter";
+import { classifyOrderType, mapOpenPositions, orderVolumeLots, positionTicket } from "./openPositions";
+import { parseQuote, QUOTE_ENDPOINTS } from "./quote";
 import {
   Api2TradeClient,
   type Api2TradeAccountDetails,
   type Api2TradeConnectionStatus,
-  type Api2TradeExecutionResponse,
+  type Api2TradeOperation,
   type Api2TradeOrder,
   type Api2TradeSymbolSpecifications,
   loadApi2TradeConfig,
 } from "./api2TradeClient";
 import { publicApi2TradeError, publicBrokerConnectionError } from "./api2TradeErrors";
+import { describeProviderFailure, evaluateExecutionResponse, readExecutionResponse } from "./tradeRetcodes";
+import { readAccountFigures } from "./accountFigures";
+import {
+  estimateServerOffsetMs,
+  extractCashFlows,
+  isTradeRecord,
+  orderNetProfit,
+  resolveOrderTimes,
+  type BrokerCashFlow,
+} from "./orderNormalization";
+import {
+  backfillBudgetFromEnv,
+  backfillDaysFromEnv,
+  backfillOrderHistory,
+  mergeBackfilledOrders,
+  type BackfillMode,
+  type BackfillState,
+} from "./historyBackfill";
 import { getDecryptedCredentials } from "@/lib/services/brokerCredentialService";
-
-function safeIso(value: unknown, fallback = new Date().toISOString()): string {
-  if (value == null || value === "") return fallback;
-  const date = typeof value === "number"
-    ? new Date(value > 100_000_000_000 ? value : value * 1000)
-    : new Date(String(value));
-  return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
-}
 
 function isConnectedText(value: string): boolean {
   const normalized = value.trim().toLowerCase();
@@ -45,40 +62,77 @@ function isConnectedStatus(value: Api2TradeConnectionStatus | string): boolean {
   return Boolean(value.isConnected);
 }
 
+/** Direction by the platform-wide rule (`openPositions.ts`): a sell limit / sell stop is a SELL too. */
 function toSide(value: unknown): "BUY" | "SELL" {
-  if (value === 1 || value === "1") return "SELL";
-  if (value === 0 || value === "0") return "BUY";
-  const normalized = String(value ?? "").toUpperCase();
-  return normalized.includes("SELL") ? "SELL" : "BUY";
+  return classifyOrderType(value).side ?? "BUY";
 }
 
+/** 32-bit FNV-1a of a text, in hex: a stable stand-in id for a row the bridge sent without any id. */
+function stableHash(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * The id a trade is stored under: the position id, else the ticket (an id of 0 is "none").
+ * A row without any id gets one made of its own figures - the same row always gets the
+ * same id, so a sync never stores it twice (a random id used to do exactly that).
+ */
 function tradeId(order: Api2TradeOrder): string {
-  return String(order.positionId ?? order.ticket ?? order.orderId ?? order.id ?? crypto.randomUUID());
+  const found = positionTicket(order);
+  if (found) return found;
+  const fingerprint = [
+    order.symbol,
+    order.openTimestampUTC ?? order.openTime,
+    order.closeTimestampUTC ?? order.closeTime,
+    order.openPrice,
+    order.closePrice,
+    order.lots ?? order.volume,
+    order.profit,
+  ].join("|");
+  return `anon-${stableHash(fingerprint)}`;
+}
+
+/** Everything in `OpenedOrders` that is not a pending order (pending orders are no trades yet). */
+function isMarketRow(order: Api2TradeOrder): boolean {
+  return !classifyOrderType(order.orderType ?? order.type ?? order.dealType).pending;
 }
 
 function orderVolume(order: Api2TradeOrder): number {
-  const raw = Number(order.lots || order.closeLots || order.volume || order.closeVolume || 0);
   // MT5 sometimes exposes integer volume in centi-lots. Prefer lots when present;
   // otherwise normalize very large integer-style values defensively.
-  if (order.lots == null && order.closeLots == null && raw >= 100) return raw / 100_000_000;
-  return raw;
+  return orderVolumeLots(order);
 }
 
-function orderOpenTime(order: Api2TradeOrder): unknown {
-  return order.openTime ?? order.openTimestampUTC;
-}
-
-function orderCloseTime(order: Api2TradeOrder): unknown {
-  return order.closeTime ?? order.closeTimestampUTC;
+function finiteOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function dateTimeParam(date: Date): string {
   return date.toISOString().slice(0, 19);
 }
 
-function mapOrder(accountId: string, order: Api2TradeOrder, status: "OPEN" | "CLOSED", currency: string): TradeDto {
+/**
+ * `openTime` / `closeTime` are broker SERVER time (no zone); `openTimestampUTC` /
+ * `closeTimestampUTC` are real UTC. `resolveOrderTimes` takes the UTC epoch first
+ * and only falls back to the server-time text (converted with the offset the same
+ * payload reveals), so trades land on the same clock as the equity snapshots.
+ */
+function mapOrder(
+  accountId: string,
+  order: Api2TradeOrder,
+  status: "OPEN" | "CLOSED",
+  currency: string,
+  serverOffsetMs = 0,
+): TradeDto {
   const id = tradeId(order);
-  const closeTime = status === "CLOSED" ? orderCloseTime(order) : null;
+  const { openedAt, closedAt } = resolveOrderTimes(order, status, { serverOffsetMs });
   return {
     id,
     shortTradeId: `LIVE-${id.slice(-8).toUpperCase()}`,
@@ -89,44 +143,72 @@ function mapOrder(accountId: string, order: Api2TradeOrder, status: "OPEN" | "CL
     volume: orderVolume(order),
     openPrice: Number(order.openPrice ?? 0),
     closePrice: status === "CLOSED" ? Number(order.closePrice ?? 0) : null,
-    profit: { amount: Number(order.profit ?? 0), currency },
-    openedAt: safeIso(orderOpenTime(order)),
-    closedAt: closeTime == null ? null : safeIso(closeTime),
+    // A closed order's result is what reached the balance: profit + commission + swap.
+    // An open order keeps the floating profit exactly as the broker reports it.
+    profit: { amount: status === "CLOSED" ? orderNetProfit(order) : Number(order.profit ?? 0), currency },
+    openedAt,
+    closedAt,
   };
 }
 
-function responseOk(response: Api2TradeExecutionResponse): boolean {
-  if (response.error) return false;
-  if (response.success === true || response.done === true) return true;
-  if (response.ticket || response.order || response.orderId || response.positionId) return true;
-  const message = String(response.message ?? "").toLowerCase();
-  return message.includes("done") || message.includes("success") || message.includes("placed");
-}
-
-function interpretExecution(response: Api2TradeExecutionResponse): BrokerExecutionResult {
-  if (!responseOk(response)) {
-      throw new BrokerExecutionError(
-      BROKER_EXEC_ERROR.PROVIDER_ERROR,
-      publicBrokerConnectionError(response.error ?? response.message ?? "Broker rejected the operation."),
-      502,
-    );
+/**
+ * The broker's answer to an order as a result, or the reason it was refused in words a
+ * trader can act on ("Not enough free margin", "Invalid stop loss / take profit") - the
+ * `comment` and `retcode` of the answer used to be thrown away.
+ */
+function interpretExecution(raw: unknown): BrokerExecutionResult {
+  const response = readExecutionResponse(raw);
+  const outcome = evaluateExecutionResponse(response);
+  if (!outcome.ok) {
+    throw new BrokerExecutionError(BROKER_EXEC_ERROR.PROVIDER_ERROR, outcome.message, 502, outcome.retry);
   }
-  const orderId = response.orderId ?? response.order ?? response.ticket;
-  const positionId = response.positionId ?? response.ticket ?? response.orderId ?? response.order;
   return {
     ok: true,
-    brokerOrderId: orderId == null ? undefined : String(orderId),
-    brokerPositionId: positionId == null ? undefined : String(positionId),
+    brokerOrderId: outcome.orderId ?? undefined,
+    brokerPositionId: outcome.positionId ?? undefined,
+    ...(outcome.price !== null ? { executedPrice: outcome.price } : {}),
+    ...(outcome.volume !== null ? { executedVolume: outcome.volume } : {}),
+    ...(outcome.note ? { note: outcome.note } : {}),
     rawResponse: {
       ticket: response.ticket,
       order: response.order,
       orderId: response.orderId,
       positionId: response.positionId,
       message: response.message,
+      comment: response.comment,
       retcode: response.retcode,
       code: response.code,
     },
   };
+}
+
+/** A call that failed on the way to the broker, as an error the callers understand. */
+function asExecutionError(error: unknown): never {
+  if (error instanceof BrokerExecutionError) throw error;
+  const text = publicApi2TradeError(error);
+  if (/did not answer/i.test(text)) {
+    // The order may or may not exist: never offered to another symbol, never sent again by itself.
+    throw new BrokerExecutionError(BROKER_EXEC_ERROR.PROVIDER_TIMEOUT, describeProviderFailure(error).message, 504);
+  }
+  // A refusal the bridge put into an HTTP answer or an error record: the broker said no.
+  if (/request failed \(\d{3}\)|\bfailed:\s/i.test(text)) {
+    const failure = describeProviderFailure(error);
+    throw new BrokerExecutionError(BROKER_EXEC_ERROR.PROVIDER_ERROR, failure.message, 502, failure.retry);
+  }
+  throw error;
+}
+
+/** Pauses before the first and second repeat of an order the trade server declined for a moment (a requote). */
+const REPEAT_PAUSES_MS = [120, 300];
+
+function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function operationFor(side: "BUY" | "SELL", kind: OrderKind): Api2TradeOperation {
+  if (kind === "LIMIT") return side === "BUY" ? "BuyLimit" : "SellLimit";
+  if (kind === "STOP") return side === "BUY" ? "BuyStop" : "SellStop";
+  return side === "BUY" ? "Buy" : "Sell";
 }
 
 function normalizeProviderAccountId(value: unknown): string {
@@ -293,6 +375,19 @@ const SYMBOL_SPEC_TTL_MS = Math.max(
 const SYMBOL_SPEC_MISS_TTL_MS = Math.min(60_000, SYMBOL_SPEC_TTL_MS);
 const symbolSpecificationCache = new Map<string, { value: BrokerSymbolSpecifications | null; expiresAt: number }>();
 
+// Price endpoint of the bridge: the one that answered (per process), or "none answers" for a while.
+const QUOTE_ENDPOINT_MISSING_TTL_MS = 10 * 60 * 1000;
+const QUOTE_MISS_TTL_MS = 15 * 1000;
+let knownQuoteEndpoint: string | null = null;
+let quoteEndpointMissingUntil = 0;
+const quoteMisses = new Map<string, number>();
+
+// The symbols of an account, as its broker spells them (the WSA Trade symbol picker, copy calibration).
+const SYMBOL_LIST_TTL_MS = 15 * 60_000;
+const SYMBOL_LIST_MISS_TTL_MS = 60_000;
+const SYMBOL_LIST_MAX_ACCOUNTS = 500;
+const symbolListCache = new Map<string, { value: BrokerSymbolInfo[]; expiresAt: number }>();
+
 function symbolSpecCacheKey(accountId: string, symbol: string): string {
   return `${accountId}:${symbol.trim().toUpperCase()}`;
 }
@@ -308,6 +403,37 @@ function setCachedSymbolSpecifications(accountId: string, symbol: string, value:
     value,
     expiresAt: Date.now() + (value ? SYMBOL_SPEC_TTL_MS : SYMBOL_SPEC_MISS_TTL_MS),
   });
+}
+
+// ── deposits / withdrawals seen in the history ───────────────────────────────
+// `fetchTradeHistory` returns trades only; the balance operations it saw on the
+// way are parked here (module level, because every sync creates a new adapter)
+// until the sync picks them up with `takeCashFlows`.
+const CASH_FLOW_STASH_TTL_MS = 5 * 60_000;
+const cashFlowStash = new Map<string, { flows: BrokerCashFlow[]; at: number }>();
+/** When the history of an account that showed no balance operation was last searched for them. */
+const cashFlowProbeAt = new Map<string, number>();
+const CASH_FLOW_PROBE_EVERY_MS = 12 * 60 * 60_000;
+const CASH_FLOW_LOOKBACK_MS = 365 * 24 * 60 * 60_000;
+
+// ── older history (3M / 6M / 1Y charts) ──────────────────────────────────────
+// The closed-orders list of the bridge is short. Once per account (and again
+// weekly) the dated history is walked backwards - see historyBackfill.ts. The
+// progress is kept per process; a restart only means one more pass.
+// API2TRADE_HISTORY_BACKFILL_DAYS (default 365, 0 = off, at most 3650) and
+// API2TRADE_HISTORY_BACKFILL_BUDGET_MS (default 12000) tune it.
+const HISTORY_BACKFILL_DAYS = backfillDaysFromEnv(process.env.API2TRADE_HISTORY_BACKFILL_DAYS);
+const HISTORY_BACKFILL_BUDGET_MS = backfillBudgetFromEnv(process.env.API2TRADE_HISTORY_BACKFILL_BUDGET_MS);
+const historyBackfillStates = new Map<string, BackfillState>();
+const HISTORY_BACKFILL_MAX_ACCOUNTS = 2000;
+
+function stashCashFlows(accountId: string, flows: BrokerCashFlow[]) {
+  const now = Date.now();
+  for (const [key, entry] of cashFlowStash) {
+    if (now - entry.at > CASH_FLOW_STASH_TTL_MS) cashFlowStash.delete(key);
+  }
+  if (flows.length > 0) cashFlowStash.set(accountId, { flows, at: now });
+  else cashFlowStash.delete(accountId);
 }
 
 export class Api2TradeBrokerAdapter implements BrokerAdapter {
@@ -578,9 +704,10 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
         client.openedOrders(providerAccountId).catch(() => []),
       ]),
     );
-    const balance = Number(summary.balance ?? 0);
-    const equity = Number(summary.equity ?? balance);
+    // Throws on an incomplete answer: a half-loaded session must not be stored as "balance 0".
+    const { balance, equity } = readAccountFigures(summary);
     const currency = summary.currency ?? details.currency ?? "USD";
+    const marketRows = openOrders.filter(isMarketRow);
     return {
       accountId,
       accountName: details.accountName ?? "",
@@ -591,9 +718,13 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
       balance: { amount: balance, currency },
       equity: { amount: equity, currency },
       floatingPnl: { amount: Number((equity - balance).toFixed(2)), currency },
-      openTradeCount: openOrders.length,
+      // pending orders are no open trades
+      openTradeCount: marketRows.length,
       drawdownPercent: balance > 0 ? Math.max(0, ((balance - equity) / balance) * 100) : 0,
       updatedAt: new Date().toISOString(),
+      margin: finiteOrNull(summary.margin),
+      freeMargin: finiteOrNull(summary.freeMargin),
+      marginLevel: finiteOrNull(summary.marginLevel),
     };
   }
 
@@ -602,10 +733,103 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     const [summary, orders] = await this.withSessionRetry(accountId, async (providerAccountId) =>
       Promise.all([
         client.accountSummary(providerAccountId).catch(() => ({ currency: "USD" })),
-        client.openedOrders(providerAccountId),
+        // the checked read: an answer that is not a list is an error here, never "no open trades"
+        client.openedOrdersChecked(providerAccountId),
       ]),
     );
-    return orders.map((order) => mapOrder(accountId, order, "OPEN", summary.currency ?? "USD"));
+    const serverOffsetMs = estimateServerOffsetMs(orders) ?? 0;
+    // A pending order is not a trade yet: it used to be listed as an open trade (a sell limit as a BUY).
+    return orders
+      .filter(isMarketRow)
+      .map((order) => mapOrder(accountId, order, "OPEN", summary.currency ?? "USD", serverOffsetMs));
+  }
+
+  /** Figures and open positions of an account in one session round (the WSA Trade panel polls this). */
+  async fetchTradingState(accountId: string): Promise<BrokerTradingState> {
+    const client = this.assertConfigured();
+    const [summary, orders] = await this.withSessionRetry(accountId, async (providerAccountId) =>
+      Promise.all([client.accountSummary(providerAccountId), client.openedOrdersChecked(providerAccountId)]),
+    );
+    // Throws on an incomplete answer: a half-loaded session must not be shown as "balance 0".
+    const { balance, equity } = readAccountFigures(summary);
+    const { positions, pending, pendingOrders } = mapOpenPositions(orders);
+    return {
+      currency: summary.currency ?? "USD",
+      balance,
+      equity,
+      floatingProfit: finiteOrNull(summary.profit) ?? Number((equity - balance).toFixed(2)),
+      margin: finiteOrNull(summary.margin),
+      freeMargin: finiteOrNull(summary.freeMargin),
+      marginLevel: finiteOrNull(summary.marginLevel),
+      readOnly: summary.isInvestor === true,
+      positions,
+      pending,
+      pendingOrders,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Every symbol the account can trade, spelled the way its broker spells it. Empty when the
+   * bridge has no symbol list. Kept for 15 minutes (a failed attempt for one), never throws.
+   */
+  async fetchSymbolList(accountId: string): Promise<BrokerSymbolInfo[]> {
+    const cached = symbolListCache.get(accountId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const client = this.client;
+    if (!client) return [];
+    let list: BrokerSymbolInfo[] = [];
+    let ttl = SYMBOL_LIST_MISS_TTL_MS;
+    try {
+      list = await this.withSessionRetry(accountId, (providerAccountId) => client.symbolList(providerAccountId));
+      if (list.length > 0) ttl = SYMBOL_LIST_TTL_MS;
+    } catch {
+      // the picker then falls back to what the person types - the next call asks again soon
+    }
+    if (symbolListCache.size >= SYMBOL_LIST_MAX_ACCOUNTS) symbolListCache.clear();
+    symbolListCache.set(accountId, { value: list, expiresAt: Date.now() + ttl });
+    return list;
+  }
+
+  /**
+   * Bid / ask of a symbol, or null. Which price endpoint the bridge has is not
+   * documented where we could read it: the first call tries a short list and
+   * remembers the one that answers; when none does, nothing is asked again for ten
+   * minutes (and an unknown symbol for fifteen seconds). Never throws - a price is
+   * only a convenience next to the order ticket.
+   */
+  async fetchQuote(accountId: string, symbol: string): Promise<BrokerQuote | null> {
+    const client = this.client;
+    if (!client) return null;
+    const now = Date.now();
+    if (!knownQuoteEndpoint && now < quoteEndpointMissingUntil) return null;
+    const key = `${accountId}|${symbol}`;
+    if ((quoteMisses.get(key) ?? 0) > now) return null;
+
+    try {
+      const providerAccountId = await this.resolveReadyProviderAccountId(accountId);
+      const endpoints = knownQuoteEndpoint ? [knownQuoteEndpoint] : QUOTE_ENDPOINTS;
+      let notFound = 0;
+      for (const endpoint of endpoints) {
+        try {
+          const parsed = parseQuote(await client.quoteVia(endpoint, providerAccountId, symbol), symbol);
+          if (parsed) {
+            knownQuoteEndpoint = endpoint;
+            return { symbol, ...parsed };
+          }
+        } catch (error) {
+          if (/\b404\b|not found/i.test(error instanceof Error ? error.message : "")) notFound += 1;
+        }
+      }
+      if (!knownQuoteEndpoint && notFound === endpoints.length) {
+        quoteEndpointMissingUntil = Date.now() + QUOTE_ENDPOINT_MISSING_TTL_MS;
+      }
+    } catch {
+      // no ready session: the state call of the same poll reports that
+    }
+    if (quoteMisses.size > 500) quoteMisses.clear();
+    quoteMisses.set(key, Date.now() + QUOTE_MISS_TTL_MS);
+    return null;
   }
 
   async fetchTradeHistory(accountId: string, historyDays = 30): Promise<TradeDto[]> {
@@ -632,12 +856,97 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
         }),
       ]),
     );
-    // OrderHistory also contains Balance/Credit operations. They are cash
-    // movements, not trades; only a broker order with a symbol belongs in the
-    // trade ledger. Cash movements are consumed separately by analytics.
-    return providerOrders
-      .filter((order) => Boolean(order.symbol?.trim()))
-      .map((order) => mapOrder(accountId, order, "CLOSED", summary.currency ?? "USD"));
+    // Older history than the bridge hands over by itself, so a 3M / 6M / 1Y chart has
+    // something to draw (a pass of a few dated requests, never fatal, repeated weekly).
+    const olderOrders = await this.backfillOlderHistory(accountId, providerOrders);
+    const allOrders = olderOrders.length > 0 ? mergeBackfilledOrders(providerOrders, olderOrders) : providerOrders;
+
+    // Deposits, withdrawals, credit and other balance rows sit in the same history;
+    // they are not trades and must not show up as lot-size-0 "winners".
+    const tradeOrders = allOrders.filter(
+      (order) => isTradeRecord(order) && Boolean(order.symbol?.trim()),
+    );
+    const serverOffsetMs = estimateServerOffsetMs(tradeOrders) ?? 0;
+
+    // ...but the deposits and withdrawals among them are kept apart for the growth curve.
+    let cashFlows = extractCashFlows(allOrders, { serverOffsetMs });
+    if (cashFlows.length === 0) cashFlows = await this.probeCashFlows(accountId, serverOffsetMs);
+    stashCashFlows(accountId, cashFlows);
+
+    return tradeOrders.map((order) => mapOrder(accountId, order, "CLOSED", summary.currency ?? "USD", serverOffsetMs));
+  }
+
+  /**
+   * The orders older than `current` reaches, found by walking the dated order
+   * history backwards (see historyBackfill.ts). Any problem gives "nothing older":
+   * the normal sync is never held up by it.
+   */
+  private async backfillOlderHistory(accountId: string, current: Api2TradeOrder[]): Promise<Api2TradeOrder[]> {
+    if (HISTORY_BACKFILL_DAYS <= 0) return [];
+    try {
+      const client = this.assertConfigured();
+      const result = await backfillOrderHistory<Api2TradeOrder>({
+        now: Date.now(),
+        horizonDays: HISTORY_BACKFILL_DAYS,
+        budgetMs: HISTORY_BACKFILL_BUDGET_MS,
+        current,
+        state: historyBackfillStates.get(accountId),
+        fetchWindow: (fromMs, toMs, mode) =>
+          this.withSessionRetry(accountId, async (providerAccountId) => {
+            const window = {
+              accountId: providerAccountId,
+              from: dateTimeParam(new Date(fromMs)),
+              to: dateTimeParam(new Date(toMs)),
+            };
+            // MT5 answers with positions, MT4 with orders; the endpoint that answered
+            // first is the one asked for the other windows.
+            if (mode !== "orders") {
+              const positions = await client.historyPositionsByCloseTime(window).catch(() => []);
+              if (positions.length > 0 || mode === "positions") {
+                return { rows: positions, mode: (positions.length > 0 ? "positions" : mode) as BackfillMode | null };
+              }
+            }
+            const orders = await client.orderHistory(window).catch(() => []);
+            return { rows: orders, mode: (orders.length > 0 ? "orders" : mode) as BackfillMode | null };
+          }),
+      });
+      if (historyBackfillStates.size >= HISTORY_BACKFILL_MAX_ACCOUNTS) historyBackfillStates.clear();
+      historyBackfillStates.set(accountId, result.state);
+      return result.rows;
+    } catch {
+      return [];
+    }
+  }
+
+  takeCashFlows(accountId: string): BrokerCashFlow[] {
+    const entry = cashFlowStash.get(accountId);
+    cashFlowStash.delete(accountId);
+    return entry && Date.now() - entry.at <= CASH_FLOW_STASH_TTL_MS ? entry.flows : [];
+  }
+
+  /**
+   * Some bridges leave balance operations out of the closed-orders list. When a
+   * history showed none, the dated order history is searched for them - at most
+   * once every 12 hours per account, never fatal.
+   */
+  private async probeCashFlows(accountId: string, serverOffsetMs: number): Promise<BrokerCashFlow[]> {
+    const now = Date.now();
+    const last = cashFlowProbeAt.get(accountId) ?? 0;
+    if (now - last < CASH_FLOW_PROBE_EVERY_MS) return [];
+    cashFlowProbeAt.set(accountId, now);
+    try {
+      const client = this.assertConfigured();
+      const history = await this.withSessionRetry(accountId, (providerAccountId) =>
+        client.orderHistory({
+          accountId: providerAccountId,
+          from: dateTimeParam(new Date(now - CASH_FLOW_LOOKBACK_MS)),
+          to: dateTimeParam(new Date(now)),
+        }),
+      );
+      return extractCashFlows(history, { serverOffsetMs });
+    } catch {
+      return [];
+    }
   }
 
   async fetchSymbolSpecifications(accountId: string, symbol: string): Promise<BrokerSymbolSpecifications | null> {
@@ -656,54 +965,92 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     return specifications;
   }
 
-  async openTrade(req: OpenTradeRequest): Promise<BrokerExecutionResult> {
-    const client = this.assertConfigured();
+  private assertExecutionAvailable(): void {
     if (!this.executionAvailable()) {
       throw new BrokerExecutionError(BROKER_EXEC_ERROR.PROVIDER_NOT_CONFIGURED, "Broker execution is disabled.", 503);
     }
-    const result = interpretExecution(await this.withSessionRetry(req.accountId, async (providerAccountId) =>
+  }
+
+  /**
+   * One order call, with the session handling and the reading of the answer. When the
+   * trade server says it did NOT execute the request and that asking again is fine (a
+   * requote, a busy trade context), the same request is sent again up to twice after a
+   * short pause - a copied trade used to be lost on the first requote. An answer that
+   * never came (a time-out) is never repeated: the order may exist.
+   */
+  private async executeOrder(
+    accountId: string,
+    call: (providerAccountId: string) => Promise<unknown>,
+  ): Promise<BrokerExecutionResult> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const raw = await this.withSessionRetry(accountId, call).catch(asExecutionError);
+        return interpretExecution(raw);
+      } catch (error) {
+        const again = error instanceof BrokerExecutionError && error.retryable && attempt < REPEAT_PAUSES_MS.length;
+        if (!again) throw error;
+      }
+      await pause(REPEAT_PAUSES_MS[attempt]);
+    }
+  }
+
+  async openTrade(req: OpenTradeRequest): Promise<BrokerExecutionResult> {
+    const client = this.assertConfigured();
+    this.assertExecutionAvailable();
+    const kind: OrderKind = req.orderKind ?? "MARKET";
+    if (kind !== "MARKET" && !(typeof req.price === "number" && req.price > 0)) {
+      throw new BrokerExecutionError(BROKER_EXEC_ERROR.INVALID_REQUEST, "A pending order needs the price it waits for.", 400);
+    }
+    const result = await this.executeOrder(req.accountId, (providerAccountId) =>
       client.orderSend({
         accountId: providerAccountId,
         symbol: req.symbol,
-        operation: req.side === "BUY" ? "Buy" : "Sell",
+        operation: operationFor(req.side, kind),
         volume: req.volume,
+        price: kind === "MARKET" ? undefined : req.price,
         stopLoss: req.stopLoss,
         takeProfit: req.takeProfit,
         comment: req.comment,
-        slippage: req.slippage,
+        slippage: kind === "MARKET" ? req.slippage : undefined,
       }),
-    ));
-    return { ...result, executedVolume: req.volume };
+    );
+    return { ...result, executedVolume: result.executedVolume ?? req.volume };
   }
 
   async closeTrade(req: CloseTradeRequest): Promise<BrokerExecutionResult> {
     const client = this.assertConfigured();
-    if (!this.executionAvailable()) {
-      throw new BrokerExecutionError(BROKER_EXEC_ERROR.PROVIDER_NOT_CONFIGURED, "Broker execution is disabled.", 503);
-    }
-    return interpretExecution(await this.withSessionRetry(req.accountId, async (providerAccountId) =>
+    this.assertExecutionAvailable();
+    return this.executeOrder(req.accountId, (providerAccountId) =>
       client.orderClose({
         accountId: providerAccountId,
         ticket: req.brokerPositionId,
         lots: req.volume,
         comment: req.comment,
       }),
-    ));
+    );
   }
 
   async modifyTrade(req: ModifyTradeRequest): Promise<BrokerExecutionResult> {
     const client = this.assertConfigured();
-    if (!this.executionAvailable()) {
-      throw new BrokerExecutionError(BROKER_EXEC_ERROR.PROVIDER_NOT_CONFIGURED, "Broker execution is disabled.", 503);
-    }
-    return interpretExecution(await this.withSessionRetry(req.accountId, async (providerAccountId) =>
+    this.assertExecutionAvailable();
+    return this.executeOrder(req.accountId, (providerAccountId) =>
       client.orderModify({
         accountId: providerAccountId,
         ticket: req.brokerPositionId,
+        price: req.price,
         stopLoss: req.stopLoss,
         takeProfit: req.takeProfit,
       }),
-    ));
+    );
+  }
+
+  /** Delete a pending order. */
+  async cancelOrder(req: CancelOrderRequest): Promise<BrokerExecutionResult> {
+    const client = this.assertConfigured();
+    this.assertExecutionAvailable();
+    return this.executeOrder(req.accountId, (providerAccountId) =>
+      client.orderCancel({ accountId: providerAccountId, ticket: req.brokerOrderId }),
+    );
   }
 
   async deactivateAccount(providerAccountId: string): Promise<void> {

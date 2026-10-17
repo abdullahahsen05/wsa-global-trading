@@ -38,6 +38,8 @@
   --color-line-strong: var(--line-strong);
   --color-accent: var(--accent);
   --color-accent-2: var(--accent-2);
+  /* "lime" is the green of the status pills (text-lime, bg-lime/10 ... are used across the app) */
+  --color-lime: var(--accent-2);
   --color-danger: var(--danger);
   --font-sans: var(--font-manrope), "Segoe UI Variable", "Segoe UI", Arial, Helvetica, sans-serif;
   --font-mono: "Cascadia Code", "Consolas", monospace;

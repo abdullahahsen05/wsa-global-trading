@@ -26,7 +26,6 @@ import type {
   AdminSummaryDto,
   AdminTradingAccountSummary,
   AdminEquityTimelineDto,
-  EquityPoint,
   TradeDto,
   TraderCrmDirectoryDto,
   TraderProfileDto,
@@ -36,7 +35,7 @@ import {
   calculateConsistencyScore,
   calculateMaxDrawdown,
 } from "@/lib/domain/metrics";
-import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
+import { AccountPerformanceChart } from "@/components/charts/AccountPerformanceChart";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 
 type SessionUser = {
@@ -165,249 +164,22 @@ function formatClosedTradeProfit(trades: TradeDto[]): string {
   );
 }
 
-function PlatformOversightChart({
-  data,
-  currency,
-  mixedCurrencies,
-  isRefreshing,
-}: {
-  data: EquityPoint[];
-  currency: string;
-  mixedCurrencies: boolean;
-  isRefreshing: boolean;
-}) {
-  const width = 920;
-  const height = 300;
-  const padding = {
-    top: 20,
-    right: 18,
-    bottom: 40,
-    left: 58,
-  };
-
-  const values = data.map((point) => point.equity);
-  const fallbackValue = values[0] ?? 0;
-  const safeValues = values.length > 0 ? values : [fallbackValue];
-
-  const rawMin = Math.min(...safeValues);
-  const rawMax = Math.max(...safeValues);
-  const spread = Math.max(rawMax - rawMin, Math.max(Math.abs(rawMax) * 0.12, 1));
-  const min = Math.max(0, rawMin - spread * 0.12);
-  const max = rawMax + spread * 0.12;
-  const range = max - min || 1;
-
-  const drawableWidth = width - padding.left - padding.right;
-  const drawableHeight = height - padding.top - padding.bottom;
-
-  const firstTime = new Date(data[0]?.capturedAt ?? 0).getTime();
-  const lastTime = new Date(data.at(-1)?.capturedAt ?? 0).getTime();
-  const points = data.map((point) => {
-    const x =
-      padding.left +
-      (data.length === 1
-        ? drawableWidth
-        : ((new Date(point.capturedAt).getTime() - firstTime) / Math.max(lastTime - firstTime, 1)) * drawableWidth);
-    const y =
-      padding.top +
-      drawableHeight -
-      ((point.equity - min) / range) * drawableHeight;
-
-    return {
-      x,
-      y,
-      point,
-    };
-  });
-
-  const curvePoints = points.map(({ x, y }) => ({ x, y }));
-  const linePath = toSmoothPath(curvePoints);
-  const areaPath = toSmoothAreaPath(curvePoints, height - padding.bottom);
-  const firstEquity = data[0]?.equity ?? 0;
-  const latestEquity = data.at(-1)?.equity ?? firstEquity;
-  const equityChange = latestEquity - firstEquity;
-  const isFlatTrend = Math.abs(equityChange) < 0.01;
-
-  const tickCount = 4;
-  const yTicks = Array.from({ length: tickCount + 1 }, (_, index) => {
-    const ratio = index / tickCount;
-    const value = max - ratio * range;
-    const y = padding.top + ratio * drawableHeight;
-
-    return {
-      value,
-      y,
-    };
-  });
-
-  const dateIndexes = Array.from(
-    new Set([
-      0,
-      Math.floor((data.length - 1) * 0.25),
-      Math.floor((data.length - 1) * 0.5),
-      Math.floor((data.length - 1) * 0.75),
-      data.length - 1,
-    ]),
-  );
-
-  const latest = data.at(-1);
-
+/**
+ * Platform oversight = the combined history of every connected account, drawn
+ * with the same Myfxbook-style chart as a single account (admins are scoped to
+ * all accounts by the API). Stored snapshots and closed trades only - nothing
+ * on this chart is generated.
+ */
+function PlatformOversightChart({ currency }: { currency: string }) {
   return (
-    <section className="overflow-hidden rounded-[4px] border border-line bg-panel/45">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-5">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">
-            Platform oversight
-          </h2>
-          <p className="mt-1 text-sm leading-6 text-muted">
-            Live platform equity from connected accounts.
-          </p>
-        </div>
-
-        <div className="text-right">
-          <p className="flex items-center justify-end gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">
-            <span className={`h-1.5 w-1.5 rounded-full ${isRefreshing ? "animate-pulse bg-accent" : "bg-accent-2"}`} />
-            {isRefreshing ? "Refreshing" : "Live"}
-          </p>
-          <p className="mt-1 text-base font-semibold text-accent tabular-nums">
-            {latest
-              ? formatMoney({
-                  amount: latest.equity,
-                  currency,
-                })
-              : "$0"}
-          </p>
-        </div>
-      </header>
-
-      {mixedCurrencies ? (
-        <div className="grid h-[312px] place-items-center px-6 text-center">
-          <div>
-            <p className="font-semibold text-foreground">Multiple account currencies</p>
-            <p className="mt-2 max-w-lg text-sm leading-6 text-muted">
-              Platform equity is not combined without a verified conversion rate. Individual live equities remain available in the watchlist and account supervision.
-            </p>
-          </div>
-        </div>
-      ) : data.length === 0 ? (
-        <div className="grid h-[312px] place-items-center px-6 text-center">
-          <div>
-            <p className="font-semibold text-foreground">No live equity yet</p>
-            <p className="mt-2 text-sm text-muted">Connect and synchronize an account to begin the platform timeline.</p>
-          </div>
-        </div>
-      ) : <div className="px-4 pb-3 pt-4">
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="h-[280px] w-full overflow-visible"
-          role="img"
-          aria-label="Platform equity trend"
-        >
-          <defs>
-            <linearGradient
-              id="admin-platform-equity-fill"
-              x1="0"
-              x2="0"
-              y1="0"
-              y2="1"
-            >
-              <stop offset="0%" stopColor="#21d19f" stopOpacity="0.22" />
-              <stop offset="100%" stopColor="#21d19f" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-
-          {yTicks.map((tick) => (
-            <g key={tick.y}>
-              <line
-                x1={padding.left}
-                x2={width - padding.right}
-                y1={tick.y}
-                y2={tick.y}
-                stroke="rgba(255,255,255,0.07)"
-                strokeWidth="1"
-              />
-              <text
-                x={padding.left - 12}
-                y={tick.y + 4}
-                textAnchor="end"
-                fill="rgba(255,255,255,0.42)"
-                fontSize="11"
-              >
-                {new Intl.NumberFormat("en-US", {
-                  notation: "compact",
-                  maximumFractionDigits: 0,
-                  style: "currency",
-                  currency,
-                }).format(tick.value)}
-              </text>
-            </g>
-          ))}
-
-          <path d={areaPath} fill="url(#admin-platform-equity-fill)" />
-
-          <path
-            d={linePath}
-            fill="none"
-            stroke="#21d19f"
-            strokeWidth="3"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-
-          {points.at(-1) ? (
-            <circle
-              cx={points.at(-1)!.x}
-              cy={points.at(-1)!.y}
-              r="5"
-              fill="#050505"
-              stroke="#21d19f"
-              strokeWidth="3"
-            />
-          ) : null}
-
-          {dateIndexes.map((index) => {
-            const point = data[index];
-            const plottedPoint = points[index];
-
-            if (!point || !plottedPoint) return null;
-
-            return (
-              <text
-                key={`${point.capturedAt}-${index}`}
-                x={plottedPoint.x}
-                y={height - 12}
-                textAnchor={
-                  index === 0
-                    ? "start"
-                  : index === data.length - 1
-                      ? "end"
-                      : "middle"
-                }
-                fill="rgba(255,255,255,0.42)"
-                fontSize="11"
-              >
-                {new Date(point.capturedAt).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                })}
-              </text>
-            );
-          })}
-        </svg>
-        <div className="mt-1 flex flex-wrap items-center justify-between gap-3 border-t border-line px-1 pt-3 text-xs text-muted">
-          <span>
-            {isFlatTrend ? "Live equity is steady" : "Live equity trend is updating"}
-          </span>
-          <span className={equityChange >= 0 ? "font-semibold text-accent-2 tabular-nums" : "font-semibold text-danger tabular-nums"}>
-            {isFlatTrend
-              ? "No change"
-              : `${equityChange > 0 ? "+" : ""}${formatMoney({
-                  amount: equityChange,
-                  currency,
-                })}`}
-          </span>
-        </div>
-      </div>}
-    </section>
+    <AccountPerformanceChart
+      accountId="ALL"
+      accountName="every connected account"
+      currency={currency}
+      eyebrow="Platform"
+      title="Platform oversight"
+      description="Combined equity, closed P&L and traded volume of all connected accounts, drawn from stored snapshots and closed trades."
+    />
   );
 }
 
@@ -528,10 +300,7 @@ export default function AdminOverviewPage() {
     refetchIntervalInBackground: false,
   });
 
-  const {
-    data: equityTimeline,
-    isFetching: equityRefreshing,
-  } = useQuery<AdminEquityTimelineDto>({
+  const { data: equityTimeline } = useQuery<AdminEquityTimelineDto>({
     queryKey: ["admin-equity-timeline"],
     queryFn: async () => {
       const res = await fetch("/api/admin/analytics/equity");
@@ -690,15 +459,10 @@ export default function AdminOverviewPage() {
 
       <PlatformMetricRail items={platformMetrics} />
 
-      <div className="mt-5 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2.05fr)_minmax(300px,0.95fr)]">
-        <PlatformOversightChart
-          data={liveEquityCurve}
-          currency={liveCurrency}
-          mixedCurrencies={mixedCurrencies}
-          isRefreshing={equityRefreshing}
-        />
+      <div className="mt-5 grid items-start gap-4 xl:grid-cols-[minmax(0,2.05fr)_minmax(300px,0.95fr)]">
+        <PlatformOversightChart currency={liveCurrency} />
 
-        <Panel className="h-full !rounded-[4px] !p-0">
+        <Panel className="!rounded-[4px] !p-0">
           <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-5">
             <div>
               <h2 className="text-base font-semibold text-foreground">

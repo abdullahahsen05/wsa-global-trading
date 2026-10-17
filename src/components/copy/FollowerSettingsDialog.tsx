@@ -2,13 +2,19 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2, ShieldAlert, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { GhostButton, PrimaryButton } from "@/components/app/WorkspaceUI";
 import {
   SelectField,
   TextAreaField,
   TextField,
 } from "@/components/app/FormFields";
+import { CopyCalibrationFields } from "@/components/copy/CopyCalibrationFields";
+import {
+  calibrationFromForm,
+  calibrationToForm,
+  type CalibrationForm,
+} from "@/lib/copy/selfCopyView";
 import type { CopyFollowerDto, FollowerCopyMode } from "@/lib/copy/types";
 
 function optionalNumber(value: string): number | null {
@@ -23,23 +29,7 @@ function symbolList(value: string): string[] | null {
   return values.length > 0 ? [...new Set(values)] : null;
 }
 
-function parseMapping(value: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const line of value.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const [source, target, ...extra] = line.split(":");
-    if (!source?.trim() || !target?.trim() || extra.length > 0) {
-      throw new Error(
-        `Invalid mapping "${line}". Use SOURCE:TARGET, one per line.`,
-      );
-    }
-    result[source.trim().toUpperCase()] = target.trim().toUpperCase();
-  }
-  return result;
-}
-
 function defaultMultiplierValue(
-  copyMode: FollowerCopyMode | undefined,
   multiplier: number | null | undefined,
 ): string {
   if (multiplier !== null && multiplier !== undefined)
@@ -47,82 +37,68 @@ function defaultMultiplierValue(
   return "";
 }
 
-export function FollowerSettingsDialog(props: {
-  subscription: CopyFollowerDto | null;
+/**
+ * The form of one subscription. It is mounted for one subscription at a time (the dialog gives it
+ * the subscription's id as its key), so every field starts from that subscription's settings and
+ * nothing has to be copied over in an effect.
+ */
+function FollowerSettingsForm({
+  sub,
+  onClose,
+  onSaved,
+}: {
+  sub: CopyFollowerDto;
   onClose: () => void;
   onSaved: (subscription: CopyFollowerDto) => void | Promise<void>;
 }) {
-  const sub = props.subscription;
-  const [copyEnabled, setCopyEnabled] = useState(sub?.copyEnabled ?? true);
+  const [copyEnabled, setCopyEnabled] = useState(sub.copyEnabled ?? true);
   const [copyMode, setCopyMode] = useState<FollowerCopyMode>(
-    sub?.copyMode ?? "BALANCE_RATIO",
+    sub.copyMode ?? "BALANCE_RATIO",
   );
-  const [fixedLot, setFixedLot] = useState(sub?.fixedLot?.toString() ?? "");
+  const [fixedLot, setFixedLot] = useState(sub.fixedLot?.toString() ?? "");
   const [lotMultiplier, setLotMultiplier] = useState(
-    defaultMultiplierValue(sub?.copyMode, sub?.lotMultiplier),
+    defaultMultiplierValue(sub.lotMultiplier),
   );
   const [riskPercent, setRiskPercent] = useState(
-    sub?.riskPercent?.toString() ?? "",
+    sub.riskPercent?.toString() ?? "",
   );
-  const [minLot, setMinLot] = useState(sub?.minLot?.toString() ?? "");
-  const [maxLot, setMaxLot] = useState(sub?.maxLot?.toString() ?? "");
+  const [minLot, setMinLot] = useState(sub.minLot?.toString() ?? "");
+  const [maxLot, setMaxLot] = useState(sub.maxLot?.toString() ?? "");
   const [maxOpenTrades, setMaxOpenTrades] = useState(
-    sub?.maxOpenTrades?.toString() ?? "",
+    sub.maxOpenTrades?.toString() ?? "",
   );
   const [maxDailyLoss, setMaxDailyLoss] = useState(
-    sub?.maxDailyLossPercent?.toString() ?? "",
+    sub.maxDailyLossPercent?.toString() ?? "",
   );
   const [maxDrawdown, setMaxDrawdown] = useState(
-    sub?.maxDrawdownPercent?.toString() ?? "",
+    sub.maxDrawdownPercent?.toString() ?? "",
   );
   const [allowedSymbols, setAllowedSymbols] = useState(
-    sub?.allowedSymbols?.join(", ") ?? "",
+    sub.allowedSymbols?.join(", ") ?? "",
   );
   const [blockedSymbols, setBlockedSymbols] = useState(
-    sub?.blockedSymbols?.join(", ") ?? "",
+    sub.blockedSymbols?.join(", ") ?? "",
   );
-  const [mapping, setMapping] = useState(
-    Object.entries(sub?.symbolMapping ?? {})
-      .map(([source, target]) => `${source}:${target}`)
-      .join("\n"),
+  const [calibration, setCalibration] = useState<CalibrationForm>(() =>
+    calibrationToForm(sub.calibration, sub.symbolMapping),
   );
-  const [reverseCopy, setReverseCopy] = useState(sub?.reverseCopy ?? false);
+  const [reverseCopy, setReverseCopy] = useState(sub.reverseCopy ?? false);
   const [pauseOnDisconnect, setPauseOnDisconnect] = useState(
-    sub?.pauseOnDisconnect ?? true,
+    sub.pauseOnDisconnect ?? true,
   );
   const [emergencyStop, setEmergencyStop] = useState(
-    sub?.emergencyStop ?? false,
+    sub.emergencyStop ?? false,
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (!sub) return;
-    setCopyEnabled(sub.copyEnabled ?? true);
-    setCopyMode(sub.copyMode ?? "BALANCE_RATIO");
-    setFixedLot(sub.fixedLot?.toString() ?? "");
-    setLotMultiplier(defaultMultiplierValue(sub.copyMode, sub.lotMultiplier));
-    setRiskPercent(sub.riskPercent?.toString() ?? "");
-    setMinLot(sub.minLot?.toString() ?? "");
-    setMaxLot(sub.maxLot?.toString() ?? "");
-    setMaxOpenTrades(sub.maxOpenTrades?.toString() ?? "");
-    setMaxDailyLoss(sub.maxDailyLossPercent?.toString() ?? "");
-    setMaxDrawdown(sub.maxDrawdownPercent?.toString() ?? "");
-    setAllowedSymbols(sub.allowedSymbols?.join(", ") ?? "");
-    setBlockedSymbols(sub.blockedSymbols?.join(", ") ?? "");
-    setMapping(
-      Object.entries(sub.symbolMapping ?? {})
-        .map(([source, target]) => `${source}:${target}`)
-        .join("\n"),
-    );
-    setReverseCopy(sub.reverseCopy ?? false);
-    setPauseOnDisconnect(sub.pauseOnDisconnect ?? true);
-    setEmergencyStop(sub.emergencyStop ?? false);
-    setError("");
-  }, [sub?.id]);
-
   async function save() {
-    if (!sub || saving) return;
+    if (saving) return;
+    const parsedCalibration = calibrationFromForm(calibration);
+    if (!parsedCalibration.ok) {
+      setError(parsedCalibration.error);
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -149,11 +125,12 @@ export function FollowerSettingsDialog(props: {
             maxDrawdownPercent: optionalNumber(maxDrawdown),
             allowedSymbols: symbolList(allowedSymbols),
             blockedSymbols: symbolList(blockedSymbols),
-            symbolMapping: parseMapping(mapping),
+            symbolMapping: parsedCalibration.symbolMapping,
             copyNewTradesOnly: true,
             reverseCopy,
             pauseOnDisconnect,
             emergencyStop,
+            calibration: parsedCalibration.calibration,
           }),
         },
       );
@@ -162,8 +139,8 @@ export function FollowerSettingsDialog(props: {
         throw new Error(
           payload.error?.message ?? "Settings could not be saved.",
         );
-      await props.onSaved(payload.data.subscription as CopyFollowerDto);
-      props.onClose();
+      await onSaved(payload.data.subscription as CopyFollowerDto);
+      onClose();
     } catch (saveError) {
       setError(
         saveError instanceof Error
@@ -177,8 +154,8 @@ export function FollowerSettingsDialog(props: {
 
   return (
     <Dialog.Root
-      open={Boolean(sub)}
-      onOpenChange={(open) => !open && !saving && props.onClose()}
+      open
+      onOpenChange={(open) => !open && !saving && onClose()}
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75" />
@@ -187,7 +164,7 @@ export function FollowerSettingsDialog(props: {
             Follower copy settings
           </Dialog.Title>
           <Dialog.Description className="mt-2 text-sm leading-6 text-muted">
-            {sub?.followerAccountName ?? "Follower account"} · supported
+            {sub.followerAccountName ?? "Follower account"} · supported
             settings are enforced by both simulation and the guarded live path.
           </Dialog.Description>
 
@@ -347,16 +324,18 @@ export function FollowerSettingsDialog(props: {
                 placeholder="BTCUSD, US30"
                 hint="Comma separated."
               />
-              <div className="sm:col-span-2">
-                <TextAreaField
-                  label="Symbol mapping"
-                  rows={3}
-                  value={mapping}
-                  onChange={(event) => setMapping(event.target.value)}
-                  placeholder={"XAUUSD:GOLD\nUS30:DJ30"}
-                  hint="One SOURCE:FOLLOWER pair per line."
-                />
-              </div>
+            </div>
+
+            <div className="rounded-[4px] border border-line bg-background p-4">
+              <CopyCalibrationFields
+                value={calibration}
+                onChange={(next) => {
+                  setCalibration(next);
+                  setError("");
+                }}
+                showExisting={false}
+                divider={false}
+              />
             </div>
 
             <div className="grid gap-3 rounded-[4px] border border-line bg-background p-4 sm:grid-cols-3">
@@ -390,10 +369,9 @@ export function FollowerSettingsDialog(props: {
                 <h3 className="font-semibold text-foreground">Coming soon</h3>
               </div>
               <p className="mt-2 text-xs leading-5 text-muted">
-                Equity-peak drawdown, live spread/slippage checks, copying
-                historical positions, and copying source stop-loss/take-profit
-                are disabled because the current engine cannot guarantee those
-                behaviors yet.
+                Equity-peak drawdown, live spread checks and copying positions
+                that were already open are disabled because the current engine
+                cannot guarantee those behaviors yet.
               </p>
             </div>
 
@@ -405,11 +383,7 @@ export function FollowerSettingsDialog(props: {
           </div>
 
           <div className="mt-5 flex justify-end gap-3 border-t border-line pt-4">
-            <GhostButton
-              type="button"
-              disabled={saving}
-              onClick={props.onClose}
-            >
+            <GhostButton type="button" disabled={saving} onClick={onClose}>
               Cancel
             </GhostButton>
             <PrimaryButton
@@ -427,7 +401,7 @@ export function FollowerSettingsDialog(props: {
             type="button"
             aria-label="Close"
             disabled={saving}
-            onClick={props.onClose}
+            onClick={onClose}
             className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full border border-line bg-background text-muted"
           >
             <X className="h-4 w-4" />
@@ -435,5 +409,21 @@ export function FollowerSettingsDialog(props: {
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+export function FollowerSettingsDialog(props: {
+  subscription: CopyFollowerDto | null;
+  onClose: () => void;
+  onSaved: (subscription: CopyFollowerDto) => void | Promise<void>;
+}) {
+  if (!props.subscription) return null;
+  return (
+    <FollowerSettingsForm
+      key={props.subscription.id}
+      sub={props.subscription}
+      onClose={props.onClose}
+      onSaved={props.onSaved}
+    />
   );
 }

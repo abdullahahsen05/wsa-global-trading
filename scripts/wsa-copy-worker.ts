@@ -2,150 +2,162 @@ import { createAdminClient } from "../src/lib/supabase/admin";
 import { enqueueJob } from "../src/lib/services/backgroundJobService";
 import { runWorkerOnce } from "../src/lib/workers/jobProcessor";
 import { executeCopyForEvent, warmCopyStrategyAccounts, type LinkedEvent } from "../src/lib/services/copyTradingService";
-import { executeSelfCopyPositionEvent } from "../src/lib/services/selfCopyService";
+import { closeVanishedSelfCopyPositions, executeSelfCopyPositionEvent } from "../src/lib/services/selfCopyService";
+import {
+  flushSelfCopyActivity,
+  loadSelfCopyRouteEntries,
+  loadSourcesWithOpenCopies,
+  pruneSelfCopyActivity,
+  reportSelfCopyEngine,
+} from "../src/lib/copy/selfCopyStore";
+import { toSelfCopyPositionEvent } from "../src/lib/copy/selfCopyEvents";
+import { pausedOnlySources, planSelfCopySources, type SelfCopySourcePlan } from "../src/lib/copy/selfCopySources";
+import type { SelfCopyPositionEvent } from "../src/lib/copy/selfCopyEngine";
+import type { BrokerAdapter } from "../src/lib/broker/BrokerAdapter";
 import { expireStaleTradingAccounts } from "../src/lib/services/tradingAccountLifecycleService";
-import { Api2TradeLiveAccountSource } from "../src/lib/broker/api2TradeLiveSource";
+import { Api2TradeLiveAccountSource, type Api2TradePositionEvent } from "../src/lib/broker/api2TradeLiveSource";
+import { enableApi2TradeConnectionPool } from "../src/lib/broker/api2TradeTransport";
 import { createBrokerAdapter, getBrokerProviderId } from "../src/lib/broker/provider";
+import { KeyedChains } from "../src/lib/copy/keyedChains";
+import { createSupabaseGatewayStore } from "../src/lib/gateway/gatewayStore";
+import { startGatewayWorker, type GatewayWorker } from "../src/lib/gateway/gatewayWorker";
+import { StreamPump } from "../src/lib/copy/streamPump";
+import {
+  buildMasterEvent,
+  openedBeforeDetectionMs,
+  storeMasterEvent,
+  type BuiltMasterEvent,
+  type DetectedPositionEvent,
+  type MasterPosition,
+} from "../src/lib/copy/masterEvents";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-type Position = {
-  id: string | number; type: string; symbol: string; volume: number; openPrice: number;
-  currentPrice?: number; stopLoss?: number; takeProfit?: number;
-  time?: Date | string; updateTime?: Date | string;
-};
+/**
+ * The live copy worker.
+ *
+ * Shape (since the 2026-10-12 speed work):
+ *  - every live master account ("stream") has its OWN pump: read what changed at the
+ *    broker, hand the changes on, rest briefly, repeat. The broker's order stream wakes
+ *    the pump the moment something happens, so a trade is picked up in milliseconds;
+ *  - copying is never awaited by the pump. Each change goes into a chain keyed by the
+ *    master position (OPEN -> MODIFY -> CLOSE of one ticket stay in order, different
+ *    tickets and different strategies never wait for each other);
+ *  - finding and opening streams (database + broker round trips, up to several seconds)
+ *    is a separate loop, so it cannot delay a trade either;
+ *  - background retry jobs have their own timer.
+ * Before this, ONE loop did all of the above in turn: a slow follower order, a stream
+ * that was being opened or a database query stalled the detection of every trade.
+ *
+ * Self-copy (a trader's own accounts, `self_copy_relationships`) has the same shape since the
+ * 2026-10-12 rebuild: one pump per SOURCE account, one chain per source ticket, the routes come
+ * from the discovery loop (live ones, and paused ones while copies are still open) and the engine
+ * (`lib/copy/selfCopyEngine.ts`) writes the reason for every copy, skip or failure to
+ * `self_copy_events`. The worker tells the routes whether it listens (`engine_*`, migration 061).
+ * `WSA_SELF_COPY_ENABLED=false` switches it off on this worker.
+ */
+
+type Position = MasterPosition;
+type DetectedEvent = DetectedPositionEvent;
 type LiveStrategy = {
   id: string; master_account_id: string;
   trading_accounts: { provider_account_id: string | null } | null;
 };
 type StreamHandle = {
+  /** One pass: read what changed at the broker and hand it on. Throwing ends the stream. */
   reconcile(): Promise<void>;
+  /** The broker's live feed reports a change: the listener runs at once. Returns the way to stop listening. */
+  onSignal?(listener: () => void): () => void;
   close(): Promise<void>;
 };
-type LiveSelfCopySource = {
-  source_account_id: string;
-  trading_accounts: { provider_account_id: string | null } | null;
+type RunningStream = {
+  handle: StreamHandle;
+  pump: StreamPump;
+  unsubscribe: () => void;
+  startedAt: number;
 };
-type PositionEvent = {
-  eventType: "OPEN" | "MODIFY" | "CLOSE";
-  position: Position;
-  previous?: Position;
-};
+
+function intFromEnv(name: string, fallback: number, min: number, max = Number.MAX_SAFE_INTEGER): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
 
 const brokerProviderId = getBrokerProviderId();
-const defaultCopyPollMs = brokerProviderId === "api2trade" ? "100" : "1000";
-const pollMs = Math.max(100, Number.parseInt(process.env.WSA_COPY_POLL_MS ?? defaultCopyPollMs, 10) || Number(defaultCopyPollMs));
-const defaultWarmupMs = brokerProviderId === "api2trade" ? "10000" : "5000";
-const minWarmupMs = 5_000;
-const warmupMs = Math.max(
-  minWarmupMs,
-  Number.parseInt(process.env.WSA_COPY_WARMUP_MS ?? defaultWarmupMs, 10) || Number(defaultWarmupMs),
-);
+const isApi2Trade = brokerProviderId === "api2trade";
+const pollMs = intFromEnv("WSA_COPY_POLL_MS", isApi2Trade ? 100 : 1_000, 100);
+const warmupMs = intFromEnv("WSA_COPY_WARMUP_MS", isApi2Trade ? 10_000 : 5_000, 5_000);
 const workerId = `wsa-copy-${process.pid}`;
-const streams = new Map<string, StreamHandle>();
-const selfCopyStreams = new Map<string, StreamHandle>();
+const streams = new Map<string, RunningStream>();
+const selfCopyStreams = new Map<string, RunningStream>();
 const activeStrategies = new Map<string, LiveStrategy>();
-const activeSelfCopySources = new Map<string, LiveSelfCopySource>();
+/** The sources followed for self-copy with their routes, as of the last discovery (events read it when they run). */
+const selfCopySources = new Map<string, SelfCopySourcePlan>();
 let stopping = false;
+let shuttingDown: Promise<void> | null = null;
 let nextLifecycleScanAt = 0;
-let nextStreamDiscoveryAt = 0;
 const retryAfter = new Map<string, number>();
-const defaultEventConcurrency = brokerProviderId === "api2trade" ? "8" : "2";
-const eventConcurrency = Math.max(
-  1,
-  Number.parseInt(process.env.WSA_COPY_EVENT_CONCURRENCY ?? defaultEventConcurrency, 10) || Number(defaultEventConcurrency),
-);
-const backgroundJobPollMs = Math.max(
-  250,
-  Number.parseInt(process.env.WSA_COPY_BACKGROUND_JOB_POLL_MS ?? "1000", 10) || 1_000,
-);
-const streamDiscoveryMs = Math.max(
-  1_000,
-  Number.parseInt(process.env.WSA_COPY_STREAM_DISCOVERY_MS ?? "2000", 10) || 2_000,
-);
-const heartbeatMs = Math.max(
-  2_000,
-  Number.parseInt(process.env.WSA_COPY_HEARTBEAT_MS ?? "5000", 10) || 5_000,
-);
+const failureCounts = new Map<string, number>();
+const opening = new Set<string>();
+const eventConcurrency = intFromEnv("WSA_COPY_EVENT_CONCURRENCY", isApi2Trade ? 8 : 2, 1);
+const backgroundJobPollMs = intFromEnv("WSA_COPY_BACKGROUND_JOB_POLL_MS", 1_000, 250);
+const streamDiscoveryMs = intFromEnv("WSA_COPY_STREAM_DISCOVERY_MS", 2_000, 1_000);
+const heartbeatMs = intFromEnv("WSA_COPY_HEARTBEAT_MS", 5_000, 2_000);
+/** how many streams may be opened at the same time (opening one warms every follower's broker session) */
+const maxConcurrentOpens = intFromEnv("WSA_COPY_OPEN_CONCURRENCY", 4, 1, 32);
+const streamRetryBaseMs = intFromEnv("WSA_COPY_STREAM_RETRY_MS", 2_000, 500, 60_000);
+const streamRetryMaxMs = Math.max(streamRetryBaseMs, 15_000);
+/** a stream that ran this long without failing starts again from the shortest retry delay */
+const HEALTHY_STREAM_MS = 30_000;
+/** Self-copy can be switched off on this worker without touching copy trading of the strategies. */
+const selfCopyEnabled = process.env.WSA_SELF_COPY_ENABLED !== "false";
+/** How often the routes of a source are told "the worker is listening" (the web calls a report older than 3 minutes stale). */
+const selfCopyReportMs = intFromEnv("WSA_SELF_COPY_REPORT_MS", 45_000, 5_000, 120_000);
+/** How often the follower accounts' broker sessions are kept warm (the bridge forgets a session after 5 minutes). */
+const selfCopyWarmupMs = intFromEnv("WSA_SELF_COPY_WARMUP_MS", 60_000, 10_000, 240_000);
+/** The safety net: how often copies of vanished source positions are looked for (the stream normally reports closes at once). */
+const selfCopyRecoveryMs = intFromEnv("WSA_SELF_COPY_RECOVERY_MS", 5 * 60_000, 30_000, 24 * 3_600_000);
+let nextSelfCopyPruneAt = 0;
 let nextBackgroundJobRunAt = 0;
 let backgroundJobRun: Promise<void> | null = null;
+let backgroundTicker: ReturnType<typeof setInterval> | null = null;
+/** The WSA Trade gateway: executes the commands the web app queues and keeps watched accounts fresh (migration 060). */
+let tradeGateway: GatewayWorker | null = null;
+let wakeDiscovery: (() => void) | null = null;
 const strategyHeartbeatAt = new Map<string, number>();
+const streamStatusLoggedAt = new Map<string, number>();
 
-function retryDelayMs(): number {
-  return 15_000;
+function errorMessage(error: unknown, fallback = "unknown error"): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
-function iso(value?: Date | string) {
-  if (!value) return new Date().toISOString();
-  const date = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() < 2000) {
-    return new Date().toISOString();
-  }
-  return date.toISOString();
+/** Records a failure of the stream under `key` and returns how long to wait before it is opened again. */
+function noteFailure(key: string): number {
+  const count = (failureCounts.get(key) ?? 0) + 1;
+  failureCounts.set(key, count);
+  const wait = Math.min(streamRetryMaxMs, streamRetryBaseMs * 2 ** (count - 1));
+  retryAfter.set(key, Date.now() + wait);
+  return wait;
 }
+
 function changed(previous: Position, current: Position) {
   return Number(previous.volume) !== Number(current.volume)
     || Number(previous.stopLoss ?? 0) !== Number(current.stopLoss ?? 0)
     || Number(previous.takeProfit ?? 0) !== Number(current.takeProfit ?? 0);
 }
 
-async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY" | "CLOSE", position: Position, previous?: Position) {
-  const startedAt = Date.now();
-  const supabase = createAdminClient();
-  const positionId = String(position.id);
-  const eventTime = iso(position.updateTime ?? position.time);
-  const fingerprint = eventType === "MODIFY"
-    ? `${eventTime}:${position.volume}:${position.stopLoss ?? ""}:${position.takeProfit ?? ""}`
-    : eventType;
-  const dedupeKey = `${strategy.id}:${positionId}:${fingerprint}`;
-  const { data, error } = await supabase.from("copy_master_events").insert({
-    strategy_id: strategy.id,
-    master_account_id: strategy.master_account_id,
-    event_type: eventType,
-    master_trade_id: positionId,
-    symbol: position.symbol,
-    side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
-    volume: Number(position.volume ?? 0),
-    previous_volume: previous ? Number(previous.volume ?? 0) : null,
-    open_price: Number(position.openPrice ?? 0),
-    close_price: eventType === "CLOSE" ? Number(position.currentPrice ?? 0) : null,
-    stop_loss: position.stopLoss ?? null,
-    take_profit: position.takeProfit ?? null,
-    event_time: eventTime,
-    dedupe_key: dedupeKey,
-    source_sequence: fingerprint,
-    source: getBrokerProviderId() === "api2trade" ? "LIVE_BROKER_SOURCE" : "WSA_STREAM",
-    raw_payload: { source: getBrokerProviderId() === "api2trade" ? "LIVE_BROKER_SOURCE" : "BROKER_STREAM", eventType },
-  }).select("id").single();
-  if (error) {
-    if ((error as { code?: string }).code === "23505") return;
-    throw new Error(`Master event could not be stored: ${error.message}`);
-  }
-  const brokerEventAgeMs = Date.now() - new Date(eventTime).getTime();
-  console.log(
-    `[copy-worker] detected ${eventType} ${position.symbol} ${Number(position.volume ?? 0)} lot(s) in ${Date.now() - startedAt}ms; broker event age ${brokerEventAgeMs}ms`,
-  );
-  if (getBrokerProviderId() === "api2trade" && process.env.WSA_COPY_DIRECT_EXECUTION !== "false") {
+// ── master events: build, store, copy ─────────────────────────────────────────
+
+async function copyStoredEvent(eventId: string, built: BuiltMasterEvent, startedAt: number) {
+  const linked = built.linked;
+  if (isApi2Trade && process.env.WSA_COPY_DIRECT_EXECUTION !== "false") {
     try {
-      const result = await executeCopyForEvent({
-        id: data.id,
-        strategy_id: strategy.id,
-        event_type: eventType,
-        master_trade_id: positionId,
-        symbol: position.symbol,
-        side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
-        volume: Number(position.volume ?? 0),
-        previous_volume: previous ? Number(previous.volume ?? 0) : null,
-        open_price: Number(position.openPrice ?? 0),
-        stop_loss: position.stopLoss ?? null,
-        take_profit: position.takeProfit ?? null,
-        event_time: eventTime,
-      } satisfies LinkedEvent, null, startedAt);
+      const result = await executeCopyForEvent({ id: eventId, ...linked } satisfies LinkedEvent, null, startedAt);
       console.log(
-        `[copy-worker] direct copy event ${data.id} finished in ${Date.now() - startedAt}ms: ${result.success} succeeded, ${result.failed} failed, ${result.skipped} skipped`,
+        `[copy-worker] direct copy event ${eventId} finished in ${Date.now() - startedAt}ms: ${result.success} succeeded, ${result.failed} failed, ${result.skipped} skipped`,
       );
       if (
-        eventType === "OPEN"
+        linked.event_type === "OPEN"
         && result.attempted === 0
         && result.success === 0
         && result.failed === 0
@@ -153,52 +165,70 @@ async function persistEvent(strategy: LiveStrategy, eventType: "OPEN" | "MODIFY"
       ) {
         await enqueueJob({
           type: "EXECUTE_COPY_EVENT",
-          payload: { masterEventId: data.id },
-          uniqueKey: `EXECUTE_COPY_EVENT:${data.id}`,
+          payload: { masterEventId: eventId },
+          uniqueKey: `EXECUTE_COPY_EVENT:${eventId}`,
           priority: 200,
           runAfter: new Date(Date.now() + 10_000).toISOString(),
           maxAttempts: 5,
         });
-        console.warn(`[copy-worker] direct copy event ${data.id} had no eligible followers; queued delayed retry`);
+        console.warn(`[copy-worker] direct copy event ${eventId} had no eligible followers; queued delayed retry`);
       }
       return;
     } catch (error) {
       console.error(
-        `[copy-worker] direct copy event failed for ${data.id}; queued retry: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
+        `[copy-worker] direct copy event failed for ${eventId}; queued retry: ${errorMessage(error, "Unknown error")}`,
       );
     }
   }
   await enqueueJob({
     type: "EXECUTE_COPY_EVENT",
-    payload: { masterEventId: data.id },
-    uniqueKey: `EXECUTE_COPY_EVENT:${data.id}`,
+    payload: { masterEventId: eventId },
+    uniqueKey: `EXECUTE_COPY_EVENT:${eventId}`,
     priority: 200,
   });
 }
 
-async function runConcurrentBatches<T>(items: T[], limit: number, handler: (item: T) => Promise<void>) {
-  for (let index = 0; index < items.length; index += limit) {
-    await Promise.all(items.slice(index, index + limit).map(handler));
-  }
+async function persistEvent(strategy: LiveStrategy, event: DetectedEvent) {
+  const startedAt = Date.now();
+  const detectedAt = event.detectedAt ?? startedAt;
+  const built = buildMasterEvent(strategy, event, { liveBrokerSource: isApi2Trade });
+  const eventId = await storeMasterEvent(createAdminClient(), built, {
+    onRetry: (attempt, message) =>
+      console.warn(`[copy-worker] master event could not be stored (attempt ${attempt}); trying again: ${message}`),
+  });
+  if (!eventId) return;
+  const openedAge = openedBeforeDetectionMs(event, detectedAt);
+  console.log(
+    `[copy-worker] detected ${event.eventType} ${event.position.symbol} ${Number(event.position.volume ?? 0)} lot(s): `
+    + `waited ${startedAt - detectedAt}ms, stored in ${Date.now() - startedAt}ms`
+    + (openedAge === null ? "" : `, trade was open ${openedAge}ms when seen`),
+  );
+  // timings of the copy count from the moment the change was seen, not from when it was stored
+  await copyStoredEvent(eventId, built, detectedAt);
 }
 
-async function persistEventBatch(strategy: LiveStrategy, events: PositionEvent[]) {
-  if (events.length === 0) return;
-  const eventsByTicket = new Map<string, PositionEvent[]>();
+/**
+ * Hands detected changes to the copy engine WITHOUT waiting for it. Changes of one master
+ * position run in order, everything else in parallel (up to `eventConcurrency`).
+ */
+function dispatchMasterEvents(
+  strategy: LiveStrategy,
+  chains: KeyedChains,
+  events: DetectedEvent[],
+  onFatal: (error: unknown) => void,
+) {
   for (const event of events) {
-    const ticket = String(event.position.id);
-    const group = eventsByTicket.get(ticket);
-    if (group) group.push(event);
-    else eventsByTicket.set(ticket, [event]);
+    void chains.run(
+      `${strategy.id}:${String(event.position.id)}`,
+      () => persistEvent(strategy, event),
+      (error) => {
+        console.error(
+          `[copy-worker] ${event.eventType} ${event.position.symbol} ${event.position.id} could not be processed: ${errorMessage(error)}`,
+        );
+        onFatal(error);
+      },
+    );
   }
-
-  await runConcurrentBatches([...eventsByTicket.values()], eventConcurrency, async (group) => {
-    for (const event of group) {
-      await persistEvent(strategy, event.eventType, event.position, event.previous);
-    }
-  });
 }
 
 function touchStrategyLiveHeartbeat(strategyId: string) {
@@ -216,15 +246,32 @@ function touchStrategyLiveHeartbeat(strategyId: string) {
   });
 }
 
-async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle> {
+/** A line about a stream that is not in perfect shape, at most once a minute per stream. */
+function reportStreamTrouble(label: string, source: Api2TradeLiveAccountSource) {
+  const stats = source.stats();
+  if (stats.websocket && !stats.fastPolling && stats.consecutiveReadErrors === 0) return;
+  const now = Date.now();
+  if (now - (streamStatusLoggedAt.get(label) ?? 0) < 60_000) return;
+  streamStatusLoggedAt.set(label, now);
+  console.warn(
+    `[copy-worker] ${label}: websocket ${stats.websocket ? "up" : "DOWN (polling REST)"}`
+    + `${stats.fastPolling ? ", fast polling (the stream missed a change)" : ""}`
+    + `, ${stats.consecutiveReadErrors} failed read(s) in a row, ${stats.trackedPositions} open position(s)`,
+  );
+}
+
+// ── streams ──────────────────────────────────────────────────────────────────
+
+async function openStrategyStream(strategy: LiveStrategy, onFatal: (error: unknown) => void): Promise<StreamHandle> {
   const providerAccountId = strategy.trading_accounts?.provider_account_id;
   if (!providerAccountId) throw new Error("Master account has no broker provider account.");
-  if (getBrokerProviderId() === "api2trade") {
+  if (isApi2Trade) {
     const adapter = createBrokerAdapter();
     const health = await adapter.verifyConnection(strategy.master_account_id);
     if (!health.ok) throw new Error(health.message);
     const source = Api2TradeLiveAccountSource.fromEnv(providerAccountId);
     await source.reconnect();
+    const chains = new KeyedChains(eventConcurrency);
     let lastWarmupAt = 0;
     let warmupInFlight: Promise<void> | null = null;
     const warmStrategyAccounts = async (force = false) => {
@@ -238,29 +285,38 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
           }
         })
         .catch((error) => {
-          console.error(`[copy-worker] Broker prewarm failed for strategy ${strategy.id}: ${error instanceof Error ? error.message : "unknown error"}`);
+          console.error(`[copy-worker] Broker prewarm failed for strategy ${strategy.id}: ${errorMessage(error)}`);
         })
         .finally(() => {
           warmupInFlight = null;
         });
       return warmupInFlight;
     };
-    await warmStrategyAccounts(true);
-    const warmTicker = setInterval(() => {
-      void warmStrategyAccounts(false);
-    }, warmupMs);
     const handle: StreamHandle = {
       async reconcile() {
         const events = await source.reconcile({ emitExistingAsOpen: true });
-        await persistEventBatch(strategy, events);
+        if (events.length > 0) dispatchMasterEvents(strategy, chains, events, onFatal);
         touchStrategyLiveHeartbeat(strategy.id);
+        reportStreamTrouble(`strategy ${strategy.id}`, source);
       },
+      onSignal: (listener) => source.onSignal(listener),
       async close() {
         clearInterval(warmTicker);
+        // copies that are already running are allowed to finish
+        await chains.idle();
         await source.close();
       },
     };
-    await handle.reconcile();
+    const warmTicker = setInterval(() => {
+      void warmStrategyAccounts(false);
+    }, warmupMs);
+    try {
+      await warmStrategyAccounts(true);
+      await handle.reconcile();
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    }
     console.log(
       `[copy-worker] Broker ${source.usingWebSocket() ? "websocket" : "polling fallback"} synchronized for strategy ${strategy.id}`,
     );
@@ -308,13 +364,13 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
       const previous = positions.get(key);
       positions.set(key, position);
       if (!ready) return;
-      if (!previous) await persistEvent(strategy, "OPEN", position);
-      else if (changed(previous, position)) await persistEvent(strategy, "MODIFY", position, previous);
+      if (!previous) await persistEvent(strategy, { eventType: "OPEN", position });
+      else if (changed(previous, position)) await persistEvent(strategy, { eventType: "MODIFY", position, previous });
     }
     async onPositionRemoved(_instanceIndex: string, positionId: string) {
       const previous = positions.get(String(positionId));
       positions.delete(String(positionId));
-      if (ready && previous) await persistEvent(strategy, "CLOSE", previous);
+      if (ready && previous) await persistEvent(strategy, { eventType: "CLOSE", position: previous });
     }
   }
   const listener = new MasterListener();
@@ -330,7 +386,7 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
   // initial synchronization was in progress. The OPEN dedupe key makes this
   // restart-safe, while event_time still protects copy-new-trades-only rules.
   for (const position of synchronizedPositions) {
-    await persistEvent(strategy, "OPEN", position);
+    await persistEvent(strategy, { eventType: "OPEN", position, existing: true });
   }
   await persistMasterActivity();
   await createAdminClient().from("copy_strategies").update({
@@ -344,11 +400,11 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
         const key = String(position.id);
         const previous = positions.get(key);
         current.set(key, position);
-        if (!previous) await persistEvent(strategy, "OPEN", position);
-        else if (changed(previous, position)) await persistEvent(strategy, "MODIFY", position, previous);
+        if (!previous) await persistEvent(strategy, { eventType: "OPEN", position });
+        else if (changed(previous, position)) await persistEvent(strategy, { eventType: "MODIFY", position, previous });
       }
       for (const [key, previous] of positions) {
-        if (!current.has(key)) await persistEvent(strategy, "CLOSE", previous);
+        if (!current.has(key)) await persistEvent(strategy, { eventType: "CLOSE", position: previous });
       }
       positions.clear();
       for (const [key, position] of current) positions.set(key, position);
@@ -363,52 +419,189 @@ async function openStrategyStream(strategy: LiveStrategy): Promise<StreamHandle>
   };
 }
 
-async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHandle> {
-  const providerAccountId = source.trading_accounts?.provider_account_id;
-  if (!providerAccountId) throw new Error("Self-copy source has no broker provider account.");
-  if (getBrokerProviderId() === "api2trade") {
-    const health = await createBrokerAdapter().verifyConnection(source.source_account_id);
+// ── self-copy: one stream per source account ─────────────────────────────────
+//
+// Shape (since the 2026-10-12 self-copy rebuild): the routes are read by the discovery loop and
+// kept in `selfCopySources`; a change of a source position is copied on exactly those routes, so
+// pausing, resuming or editing a route takes effect within a couple of seconds without reopening
+// the stream. Every ticket has its own chain (OPEN -> MODIFY -> CLOSE in order, different tickets
+// in parallel) and nothing the engine does is awaited by the pump that watches the account.
+
+let selfCopyBrokerAdapter: BrokerAdapter | null = null;
+function selfCopyBroker(): BrokerAdapter {
+  selfCopyBrokerAdapter ??= createBrokerAdapter();
+  return selfCopyBrokerAdapter;
+}
+
+/** Positions of a source already handed to the engine by this process: a stream that is opened anew must not repeat them. */
+const selfCopyHandled = new Map<string, Set<string>>();
+
+/** True the first time this process sees the position of the source. */
+function firstSightOfPosition(sourceAccountId: string, positionId: string): boolean {
+  let handled = selfCopyHandled.get(sourceAccountId);
+  if (!handled) {
+    handled = new Set<string>();
+    selfCopyHandled.set(sourceAccountId, handled);
+  }
+  if (handled.has(positionId)) return false;
+  handled.add(positionId);
+  return true;
+}
+
+/** A database hiccup BEFORE an order is sent (the engine only throws from those reads) is tried again after these pauses. */
+const SELF_COPY_RETRY_DELAYS_MS: readonly number[] = [250, 750];
+
+/** Copies one change of a source position on the routes the last discovery found. */
+async function copySelfCopyEvent(event: SelfCopyPositionEvent): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    const routes = selfCopySources.get(event.sourceAccountId)?.routes;
+    if (!routes || routes.length === 0) return;
+    try {
+      await executeSelfCopyPositionEvent(event, { routes, adapter: selfCopyBroker(), log: (line) => console.log(line) });
+      return;
+    } catch (error) {
+      if (attempt >= SELF_COPY_RETRY_DELAYS_MS.length) throw error;
+      console.warn(
+        `[self-copy] ${event.eventType} ${event.symbol} ${event.sourcePositionId}: ${errorMessage(error)}; trying again`,
+      );
+      await new Promise<void>((resolve) => setTimeout(resolve, SELF_COPY_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+}
+
+/** Hands detected changes to the engine WITHOUT waiting for it. */
+function dispatchSelfCopyChanges(sourceAccountId: string, chains: KeyedChains, changes: Api2TradePositionEvent[]) {
+  for (const change of changes) {
+    const positionId = String(change.position.id);
+    // found again in the first look of a stream that was opened anew: it was dealt with the first time
+    if (change.eventType === "OPEN" && !firstSightOfPosition(sourceAccountId, positionId)) continue;
+    if (change.eventType === "CLOSE") selfCopyHandled.get(sourceAccountId)?.delete(positionId);
+    const event = toSelfCopyPositionEvent(sourceAccountId, change);
+    void chains.run(
+      `self:${sourceAccountId}:${positionId}`,
+      () => copySelfCopyEvent(event),
+      (error) =>
+        console.error(`[self-copy] ${event.eventType} ${event.symbol} ${positionId} could not be processed: ${errorMessage(error)}`),
+    );
+  }
+}
+
+const selfCopyWarmups = new Map<string, Promise<void>>();
+
+/** Keeps the follower accounts' broker sessions open and their symbol lists at hand, so the first order of a trade pays for neither. */
+function warmSelfCopyFollowers(sourceAccountId: string): Promise<void> {
+  const running = selfCopyWarmups.get(sourceAccountId);
+  if (running) return running;
+  const routes = (selfCopySources.get(sourceAccountId)?.routes ?? []).filter((route) => route.status === "LIVE");
+  if (routes.length === 0) return Promise.resolve();
+  const adapter = selfCopyBroker();
+  const followerIds = [...new Set(routes.map((route) => route.followerAccountId))];
+  const needSymbols = [
+    ...new Set(
+      routes
+        .filter((route) => route.settings.calibration.autoSymbolMatch || Object.keys(route.settings.symbolMapping).length > 0)
+        .map((route) => route.followerAccountId),
+    ),
+  ];
+  const warming = (async () => {
+    await adapter.warmAccounts?.(followerIds);
+    await Promise.allSettled(needSymbols.map((accountId) => adapter.fetchSymbolList?.(accountId)));
+  })()
+    .catch((error) => {
+      console.error(`[self-copy] warm-up of the follower accounts of ${sourceAccountId} failed: ${errorMessage(error)}`);
+    })
+    .finally(() => {
+      selfCopyWarmups.delete(sourceAccountId);
+    });
+  selfCopyWarmups.set(sourceAccountId, warming);
+  return warming;
+}
+
+const selfCopyRecoveries = new Set<string>();
+
+/** Closes the copies of source positions that are gone (closed while nobody was listening). One run per source at a time. */
+async function recoverMissedSelfCopyCloses(sourceAccountId: string, readLive: () => Promise<ReadonlySet<string>>) {
+  if (selfCopyRecoveries.has(sourceAccountId)) return;
+  selfCopyRecoveries.add(sourceAccountId);
+  try {
+    const summary = await closeVanishedSelfCopyPositions(sourceAccountId, readLive, {
+      adapter: selfCopyBroker(),
+      log: (line) => console.log(line),
+    });
+    if (summary.attempted > 0) {
+      console.log(
+        `[self-copy] ${sourceAccountId}: closed ${summary.success} copy(ies) whose source position was gone`
+        + (summary.failed > 0 ? `, ${summary.failed} could not be closed` : ""),
+      );
+    }
+  } catch (error) {
+    console.error(`[self-copy] looking for missed closes of ${sourceAccountId} failed: ${errorMessage(error)}`);
+  } finally {
+    selfCopyRecoveries.delete(sourceAccountId);
+  }
+}
+
+async function openSelfCopyStream(plan: SelfCopySourcePlan): Promise<StreamHandle> {
+  const sourceAccountId = plan.sourceAccountId;
+  const providerAccountId = plan.providerAccountId;
+  if (!providerAccountId) {
+    throw new Error("The source account has no broker connection yet (it is not registered at the broker bridge).");
+  }
+  void reportSelfCopyEngine(sourceAccountId, "STARTING", null);
+
+  if (isApi2Trade) {
+    const adapter = selfCopyBroker();
+    const health = await adapter.verifyConnection(sourceAccountId);
     if (!health.ok) throw new Error(health.message);
     const liveSource = Api2TradeLiveAccountSource.fromEnv(providerAccountId);
     await liveSource.reconnect();
-    let queue = Promise.resolve();
-    const dispatch = (eventType: "OPEN" | "MODIFY" | "CLOSE", position: Position, previous?: Position) => {
-      queue = queue.then(async () => {
-        const outcome = await executeSelfCopyPositionEvent({
-          sourceAccountId: source.source_account_id,
-          eventType,
-          sourcePositionId: String(position.id),
-          symbol: position.symbol,
-          side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
-          volume: Number(position.volume ?? 0),
-          previousVolume: previous ? Number(previous.volume ?? 0) : null,
-          stopLoss: position.stopLoss ?? null,
-          takeProfit: position.takeProfit ?? null,
-        });
-        if (outcome.attempted || outcome.failed) {
-          console.log(`[self-copy] ${eventType} ${position.symbol}: ${outcome.success} succeeded, ${outcome.failed} failed, ${outcome.skipped} skipped`);
-        }
-      }).catch((error) => {
-        console.error(`[self-copy] ${eventType} failed: ${error instanceof Error ? error.message : "unknown error"}`);
-      });
-      return queue;
-    };
+    // OPEN -> MODIFY -> CLOSE of one ticket stay in order; different tickets never wait for each other
+    const chains = new KeyedChains(eventConcurrency);
+    let lastReportAt = 0;
+    let nextRecoveryAt = Date.now() + selfCopyRecoveryMs;
     const handle: StreamHandle = {
       async reconcile() {
-        const events = await liveSource.reconcile({ emitExistingAsOpen: true });
-        for (const event of events) {
-          await dispatch(event.eventType, event.position, event.previous);
+        const changes = await liveSource.reconcile({ emitExistingAsOpen: true });
+        if (changes.length > 0) dispatchSelfCopyChanges(sourceAccountId, chains, changes);
+        const now = Date.now();
+        if (now - lastReportAt >= selfCopyReportMs) {
+          lastReportAt = now;
+          void reportSelfCopyEngine(sourceAccountId, "LIVE", null);
         }
+        if (now >= nextRecoveryAt) {
+          nextRecoveryAt = now + selfCopyRecoveryMs;
+          void recoverMissedSelfCopyCloses(sourceAccountId, () => liveSource.confirmedOpenPositionIds());
+        }
+        reportStreamTrouble(`self-copy source ${sourceAccountId}`, liveSource);
       },
+      onSignal: (listener) => liveSource.onSignal(listener),
       async close() {
-        await queue;
+        clearInterval(warmTicker);
+        // copies that are on their way are allowed to finish
+        await chains.idle();
         await liveSource.close();
       },
     };
-    await handle.reconcile();
-    console.log(`[self-copy] Broker live source synchronized for ${source.source_account_id}`);
+    const warmTicker = setInterval(() => {
+      void warmSelfCopyFollowers(sourceAccountId);
+    }, selfCopyWarmupMs);
+    warmTicker.unref?.();
+    try {
+      await warmSelfCopyFollowers(sourceAccountId);
+      await handle.reconcile();
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      throw error;
+    }
+    // copies whose source position was closed while nobody was listening
+    void recoverMissedSelfCopyCloses(sourceAccountId, () => liveSource.confirmedOpenPositionIds());
+    console.log(
+      `[self-copy] ${sourceAccountId}: broker ${liveSource.usingWebSocket() ? "websocket" : "polling fallback"} synchronized, `
+      + `following ${liveSource.stats().trackedPositions} open position(s) for ${plan.routes.length} route(s)`,
+    );
     return handle;
   }
+
   const sdk = await import("metaapi.cloud-sdk/node") as unknown as {
     default: new (authToken: string) => {
       metatraderAccountApi: { getAccount(id: string): Promise<any> }; close(): void;
@@ -426,25 +619,21 @@ async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHan
   const positions = new Map<string, Position>();
   let ready = false;
   let queue = Promise.resolve();
+  let lastReportAt = Date.now();
 
-  const dispatch = (eventType: "OPEN" | "MODIFY" | "CLOSE", position: Position, previous?: Position) => {
-    queue = queue.then(async () => {
-      const outcome = await executeSelfCopyPositionEvent({
-        sourceAccountId: source.source_account_id,
-        eventType,
-        sourcePositionId: String(position.id),
-        symbol: position.symbol,
-        side: position.type === "POSITION_TYPE_SELL" ? "SELL" : "BUY",
-        volume: Number(position.volume ?? 0),
-        previousVolume: previous ? Number(previous.volume ?? 0) : null,
-        stopLoss: position.stopLoss ?? null,
-        takeProfit: position.takeProfit ?? null,
-      });
-      if (outcome.attempted || outcome.failed) {
-        console.log(`[self-copy] ${eventType} ${position.symbol}: ${outcome.success} succeeded, ${outcome.failed} failed, ${outcome.skipped} skipped`);
-      }
-    }).catch((error) => {
-      console.error(`[self-copy] ${eventType} failed: ${error instanceof Error ? error.message : "unknown error"}`);
+  const dispatch = (eventType: "OPEN" | "MODIFY" | "CLOSE", position: Position, previous?: Position, existing = false) => {
+    const positionId = String(position.id);
+    if (eventType === "OPEN" && !firstSightOfPosition(sourceAccountId, positionId)) return queue;
+    if (eventType === "CLOSE") selfCopyHandled.get(sourceAccountId)?.delete(positionId);
+    const event = toSelfCopyPositionEvent(sourceAccountId, {
+      eventType,
+      position,
+      previous: previous ?? null,
+      detectedAt: Date.now(),
+      existing,
+    });
+    queue = queue.then(() => copySelfCopyEvent(event)).catch((error) => {
+      console.error(`[self-copy] ${eventType} failed: ${errorMessage(error)}`);
     });
     return queue;
   };
@@ -478,27 +667,10 @@ async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHan
   }
   ready = true;
 
-  // Recover opens and closes missed while the worker was offline.
-  for (const position of positions.values()) await dispatch("OPEN", position);
-  const { data: openLinks } = await createAdminClient()
-    .from("self_copy_trade_links")
-    .select("source_position_id, symbol, side, copied_volume")
-    .eq("source_account_id", source.source_account_id)
-    .eq("status", "OPEN");
-  const uniqueMissing = new Map(
-    (openLinks ?? [])
-      .filter((link) => !positions.has(String(link.source_position_id)))
-      .map((link) => [String(link.source_position_id), link]),
-  );
-  for (const link of uniqueMissing.values()) {
-    await dispatch("CLOSE", {
-      id: link.source_position_id,
-      type: link.side === "SELL" ? "POSITION_TYPE_SELL" : "POSITION_TYPE_BUY",
-      symbol: link.symbol,
-      volume: Number(link.copied_volume ?? 0),
-      openPrice: 0,
-    });
-  }
+  // Trades that were open when the stream started are "existing": the engine copies one only when it opened after the route went live.
+  for (const position of positions.values()) await dispatch("OPEN", position, undefined, true);
+  void recoverMissedSelfCopyCloses(sourceAccountId, async () => new Set(positions.keys()));
+  await reportSelfCopyEngine(sourceAccountId, "LIVE", null);
 
   return {
     async reconcile() {
@@ -515,6 +687,10 @@ async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHan
       }
       positions.clear();
       for (const [key, position] of current) positions.set(key, position);
+      if (Date.now() - lastReportAt >= selfCopyReportMs) {
+        lastReportAt = Date.now();
+        void reportSelfCopyEngine(sourceAccountId, "LIVE", null);
+      }
     },
     async close() {
       ready = false;
@@ -526,123 +702,258 @@ async function openSelfCopyStream(source: LiveSelfCopySource): Promise<StreamHan
   };
 }
 
-async function reconcileStreams() {
-  if (Date.now() >= nextLifecycleScanAt) {
-    const expired = await expireStaleTradingAccounts();
-    if (expired > 0) {
-      console.log(`[copy-worker] moved ${expired} stale or incomplete account(s) out of live status`);
-    }
-    nextLifecycleScanAt = Date.now() + 60 * 60 * 1_000;
-  }
-  const supabase = createAdminClient();
-  if (Date.now() >= nextStreamDiscoveryAt) {
-    const [{ data, error }, { data: relationshipRows, error: relationshipError }] = await Promise.all([
-      supabase
-        .from("copy_strategies")
-        .select("id, master_account_id, trading_accounts!master_account_id(provider_account_id)")
-        .eq("status", "ACTIVE").eq("live_enabled", true).in("engine_status", ["LIVE", "STARTING", "ERROR"]).limit(500),
-      supabase
-        .from("self_copy_relationships")
-        .select("source_account_id, trading_accounts!source_account_id(provider_account_id)")
-        .eq("status", "LIVE")
-        .limit(1000),
-    ]);
-    if (error) throw new Error(`Live strategies could not be loaded: ${error.message}`);
-    if (relationshipError) throw new Error(`Live self-copy sources could not be loaded: ${relationshipError.message}`);
+// ── pumps: one per stream ────────────────────────────────────────────────────
 
-    activeStrategies.clear();
-    for (const entry of data ?? []) {
-      const strategy = entry as unknown as LiveStrategy;
-      activeStrategies.set(strategy.id, strategy);
-    }
-    activeSelfCopySources.clear();
-    for (const row of relationshipRows ?? []) {
-      const source = row as unknown as LiveSelfCopySource;
-      activeSelfCopySources.set(source.source_account_id, source);
-    }
-    nextStreamDiscoveryAt = Date.now() + streamDiscoveryMs;
+function startPump(handle: StreamHandle, onFailure: (error: unknown) => void | Promise<void>): RunningStream {
+  const pump = new StreamPump({ step: () => handle.reconcile(), intervalMs: pollMs, onFailure });
+  const unsubscribe = handle.onSignal?.(() => pump.wake()) ?? (() => undefined);
+  pump.start();
+  return { handle, pump, unsubscribe, startedAt: Date.now() };
+}
 
-    for (const [strategyId, handle] of streams) {
-      if (!activeStrategies.has(strategyId)) {
-        await handle.close();
-        streams.delete(strategyId);
-        strategyHeartbeatAt.delete(strategyId);
-      }
-    }
-    for (const [sourceAccountId, handle] of selfCopyStreams) {
-      if (!activeSelfCopySources.has(sourceAccountId)) {
-        await handle.close();
-        selfCopyStreams.delete(sourceAccountId);
-      }
-    }
-  }
+async function stopRunning(running: RunningStream) {
+  running.unsubscribe();
+  await running.pump.stop().catch(() => undefined);
+  await running.handle.close().catch(() => undefined);
+}
 
-  for (const strategy of activeStrategies.values()) {
-    if (streams.has(strategy.id)) {
-      try {
-        await streams.get(strategy.id)!.reconcile();
-        retryAfter.delete(`strategy:${strategy.id}`);
-        touchStrategyLiveHeartbeat(strategy.id);
-      } catch (error) {
-        await streams.get(strategy.id)!.close().catch(() => undefined);
-        streams.delete(strategy.id);
-        retryAfter.set(`strategy:${strategy.id}`, Date.now() + retryDelayMs());
-        const message = (error instanceof Error ? error.message : "Master stream failed").slice(0, 400);
-        await supabase.from("copy_strategies").update({
-          engine_status: "ERROR",
-          engine_error: message,
-        }).eq("id", strategy.id);
-        console.error(`[copy-worker] active master stream failed for ${strategy.id}: ${message}`);
-      }
-      continue;
-    }
-    if ((retryAfter.get(`strategy:${strategy.id}`) ?? 0) > Date.now()) continue;
-    try {
-      streams.set(strategy.id, await openStrategyStream(strategy));
-      retryAfter.delete(`strategy:${strategy.id}`);
-    } catch (error) {
-      const message = (error instanceof Error ? error.message : "Master stream failed").slice(0, 400);
-      retryAfter.set(`strategy:${strategy.id}`, Date.now() + retryDelayMs());
-      await supabase.from("copy_strategies").update({ engine_status: "ERROR", engine_error: message }).eq("id", strategy.id);
-    }
-  }
+/** A running stream broke: close it, say so, and let the discovery loop open it again after a pause. */
+async function failStream(
+  registry: Map<string, RunningStream>,
+  id: string,
+  retryKey: string,
+  label: string,
+  error: unknown,
+  report?: (message: string) => Promise<void>,
+) {
+  const running = registry.get(id);
+  if (!running) return;
+  registry.delete(id);
+  if (Date.now() - running.startedAt > HEALTHY_STREAM_MS) failureCounts.delete(retryKey);
+  const wait = noteFailure(retryKey);
+  const message = (error instanceof Error ? error.message : "Master stream failed").slice(0, 400);
+  console.error(`[copy-worker] ${label} failed: ${message}; opening it again in ${Math.round(wait / 100) / 10}s`);
+  await stopRunning(running);
+  if (report) await report(message).catch(() => undefined);
+}
 
-  for (const source of activeSelfCopySources.values()) {
-    if (selfCopyStreams.has(source.source_account_id)) {
-      try {
-        await selfCopyStreams.get(source.source_account_id)!.reconcile();
-        retryAfter.delete(`self:${source.source_account_id}`);
-      } catch (error) {
-        await selfCopyStreams.get(source.source_account_id)!.close().catch(() => undefined);
-        selfCopyStreams.delete(source.source_account_id);
-        retryAfter.set(`self:${source.source_account_id}`, Date.now() + retryDelayMs());
-        console.error(
-          `[self-copy] active source stream failed for ${source.source_account_id}: ${
-            error instanceof Error ? error.message : "unknown error"
-          }`,
-        );
-      }
-      continue;
+async function startStrategyStream(strategy: LiveStrategy) {
+  const key = `strategy:${strategy.id}`;
+  opening.add(key);
+  let registered = false;
+  let fatal: unknown = null;
+  const label = `active master stream ${strategy.id}`;
+  const fail = (error: unknown) =>
+    failStream(streams, strategy.id, key, label, error, async (message) => {
+      await createAdminClient().from("copy_strategies").update({ engine_status: "ERROR", engine_error: message }).eq("id", strategy.id);
+    });
+  try {
+    const handle = await openStrategyStream(strategy, (error) => {
+      // storing a change failed for good: the stream is not trustworthy any more
+      if (registered) void fail(error);
+      else fatal = error ?? new Error("Master event could not be stored.");
+    });
+    if (stopping || !activeStrategies.has(strategy.id)) {
+      await handle.close().catch(() => undefined);
+      return;
     }
-    if ((retryAfter.get(`self:${source.source_account_id}`) ?? 0) > Date.now()) continue;
-    try {
-      selfCopyStreams.set(source.source_account_id, await openSelfCopyStream(source));
-      retryAfter.delete(`self:${source.source_account_id}`);
-    } catch (error) {
-      retryAfter.set(`self:${source.source_account_id}`, Date.now() + retryDelayMs());
-      console.error(`[self-copy] source stream failed: ${error instanceof Error ? error.message : "unknown error"}`);
-    }
+    streams.set(strategy.id, startPump(handle, fail));
+    registered = true;
+    retryAfter.delete(key);
+    if (fatal) void fail(fatal);
+  } catch (error) {
+    const wait = noteFailure(key);
+    const message = (error instanceof Error ? error.message : "Master stream failed").slice(0, 400);
+    console.error(`[copy-worker] master stream ${strategy.id} could not be opened: ${message}; trying again in ${Math.round(wait / 100) / 10}s`);
+    await createAdminClient().from("copy_strategies").update({ engine_status: "ERROR", engine_error: message }).eq("id", strategy.id)
+      .then(() => undefined, () => undefined);
+  } finally {
+    opening.delete(key);
   }
 }
 
-async function shutdown() {
+async function startSelfCopyStream(plan: SelfCopySourcePlan) {
+  const sourceAccountId = plan.sourceAccountId;
+  const key = `self:${sourceAccountId}`;
+  opening.add(key);
+  const label = `self-copy source stream ${sourceAccountId}`;
+  const fail = (error: unknown) =>
+    failStream(selfCopyStreams, sourceAccountId, key, `[self-copy] ${label}`, error, (message) =>
+      reportSelfCopyEngine(sourceAccountId, "ERROR", message),
+    );
+  try {
+    const handle = await openSelfCopyStream(plan);
+    if (stopping || !selfCopySources.has(sourceAccountId)) {
+      await handle.close().catch(() => undefined);
+      return;
+    }
+    selfCopyStreams.set(sourceAccountId, startPump(handle, fail));
+    retryAfter.delete(key);
+  } catch (error) {
+    const wait = noteFailure(key);
+    const message = errorMessage(error, "The source stream failed.").slice(0, 400);
+    console.error(
+      `[self-copy] source stream ${sourceAccountId} could not be opened: ${message}; trying again in ${Math.round(wait / 100) / 10}s`,
+    );
+    await reportSelfCopyEngine(sourceAccountId, "ERROR", message);
+  } finally {
+    opening.delete(key);
+  }
+}
+
+// ── discovery: which streams should exist ────────────────────────────────────
+
+function runHousekeeping() {
+  if (Date.now() >= nextLifecycleScanAt) {
+    nextLifecycleScanAt = Date.now() + 60 * 60 * 1_000;
+    void expireStaleTradingAccounts()
+      .then((expired) => {
+        if (expired > 0) {
+          console.log(`[copy-worker] moved ${expired} stale or incomplete account(s) out of live status`);
+        }
+      })
+      .catch((error) => {
+        console.error(`[copy-worker] account lifecycle scan failed: ${errorMessage(error)}`);
+      });
+  }
+  if (selfCopyEnabled && Date.now() >= nextSelfCopyPruneAt) {
+    nextSelfCopyPruneAt = Date.now() + 60 * 60 * 1_000;
+    void pruneSelfCopyActivity(14).then((removed) => {
+      if (removed > 0) console.log(`[self-copy] removed ${removed} old line(s) of activity`);
+    });
+  }
+}
+
+async function discoverStrategyStreams() {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("copy_strategies")
+    .select("id, master_account_id, trading_accounts!master_account_id(provider_account_id)")
+    .eq("status", "ACTIVE").eq("live_enabled", true).in("engine_status", ["LIVE", "STARTING", "ERROR"]).limit(500);
+  if (error) throw new Error(`Live strategies could not be loaded: ${error.message}`);
+
+  activeStrategies.clear();
+  for (const entry of data ?? []) {
+    const strategy = entry as unknown as LiveStrategy;
+    activeStrategies.set(strategy.id, strategy);
+  }
+
+  // streams nobody wants any more are closed in the background (copies in flight finish first)
+  for (const [strategyId, running] of streams) {
+    if (!activeStrategies.has(strategyId)) {
+      streams.delete(strategyId);
+      strategyHeartbeatAt.delete(strategyId);
+      void stopRunning(running);
+    }
+  }
+
+  // missing streams are opened in the background, a few at a time
+  const now = Date.now();
+  for (const strategy of activeStrategies.values()) {
+    const key = `strategy:${strategy.id}`;
+    if (stopping || opening.size >= maxConcurrentOpens) break;
+    if (streams.has(strategy.id) || opening.has(key)) continue;
+    if ((retryAfter.get(key) ?? 0) > now) continue;
+    void startStrategyStream(strategy);
+  }
+}
+
+/** Reads the routes and decides which sources are followed. null = the database could not be read: keep what runs. */
+async function readSelfCopyPlans(): Promise<Map<string, SelfCopySourcePlan> | null> {
+  if (!selfCopyEnabled) return new Map();
+  try {
+    const entries = await loadSelfCopyRouteEntries();
+    const idle = pausedOnlySources(entries);
+    const withOpenCopies = idle.length > 0 ? await loadSourcesWithOpenCopies(idle) : new Set<string>();
+    return planSelfCopySources(entries, withOpenCopies);
+  } catch (error) {
+    console.error(`[self-copy] the routes could not be loaded; the streams that run stay as they are: ${errorMessage(error)}`);
+    return null;
+  }
+}
+
+async function discoverSelfCopyStreams() {
+  const plans = await readSelfCopyPlans();
+  if (!plans) return;
+  selfCopySources.clear();
+  for (const [sourceAccountId, plan] of plans) selfCopySources.set(sourceAccountId, plan);
+
+  for (const [sourceAccountId, running] of selfCopyStreams) {
+    if (!selfCopySources.has(sourceAccountId)) {
+      selfCopyStreams.delete(sourceAccountId);
+      selfCopyHandled.delete(sourceAccountId);
+      void stopRunning(running);
+    }
+  }
+  const now = Date.now();
+  for (const plan of selfCopySources.values()) {
+    const key = `self:${plan.sourceAccountId}`;
+    if (stopping || opening.size >= maxConcurrentOpens) break;
+    if (selfCopyStreams.has(plan.sourceAccountId) || opening.has(key)) continue;
+    if ((retryAfter.get(key) ?? 0) > now) continue;
+    void startSelfCopyStream(plan);
+  }
+}
+
+/** Strategies and self-copy are discovered on their own: a failure of one never keeps the other from opening or closing streams. */
+async function discoverStreams() {
+  runHousekeeping();
+  const [strategies, selfCopy] = await Promise.allSettled([discoverStrategyStreams(), discoverSelfCopyStreams()]);
+  if (strategies.status === "rejected") {
+    console.error(`[copy-worker] stream discovery failed; retrying in ${streamDiscoveryMs}ms: ${errorMessage(strategies.reason)}`);
+  }
+  if (selfCopy.status === "rejected") {
+    console.error(`[self-copy] stream discovery failed; retrying in ${streamDiscoveryMs}ms: ${errorMessage(selfCopy.reason)}`);
+  }
+}
+
+function sleepUntilWoken(ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms);
+    function done() {
+      clearTimeout(timer);
+      if (wakeDiscovery === done) wakeDiscovery = null;
+      resolve();
+    }
+    wakeDiscovery = done;
+  });
+}
+
+async function discoveryLoop() {
+  while (!stopping) {
+    try {
+      await discoverStreams();
+    } catch (error) {
+      console.error(
+        `[copy-worker] stream discovery failed; retrying in ${streamDiscoveryMs}ms: ${errorMessage(error)}`,
+      );
+    }
+    if (!stopping) await sleepUntilWoken(streamDiscoveryMs);
+  }
+}
+
+function shutdown(): Promise<void> {
+  if (shuttingDown) return shuttingDown;
   stopping = true;
-  await backgroundJobRun?.catch(() => undefined);
-  await Promise.allSettled([...streams.values()].map((stream) => stream.close()));
-  await Promise.allSettled([...selfCopyStreams.values()].map((stream) => stream.close()));
-  streams.clear();
-  selfCopyStreams.clear();
-  retryAfter.clear();
+  wakeDiscovery?.();
+  if (backgroundTicker) clearInterval(backgroundTicker);
+  backgroundTicker = null;
+  shuttingDown = (async () => {
+    await Promise.allSettled([tradeGateway?.stop()]);
+    tradeGateway = null;
+    await backgroundJobRun?.catch(() => undefined);
+    await Promise.allSettled([...streams.values()].map(stopRunning));
+    await Promise.allSettled([...selfCopyStreams.values()].map(stopRunning));
+    // the last lines of activity are written before the process ends
+    await flushSelfCopyActivity().catch(() => undefined);
+    streams.clear();
+    selfCopyStreams.clear();
+    selfCopySources.clear();
+    selfCopyHandled.clear();
+    retryAfter.clear();
+    failureCounts.clear();
+  })();
+  return shuttingDown;
 }
 
 function runBackgroundJobsWithoutBlockingRealtime() {
@@ -655,11 +966,7 @@ function runBackgroundJobsWithoutBlockingRealtime() {
   })
     .then(() => undefined)
     .catch((error) => {
-      console.error(
-        `[copy-worker] background job cycle failed: ${
-          error instanceof Error ? error.message : "unknown error"
-        }`,
-      );
+      console.error(`[copy-worker] background job cycle failed: ${errorMessage(error)}`);
     })
     .finally(() => {
       backgroundJobRun = null;
@@ -673,25 +980,33 @@ async function main() {
   if (!process.env.API2TRADE_BASE_URL || !(process.env.API2TRADE_USERNAME && process.env.API2TRADE_PASSWORD)) {
     throw new Error("Copy worker requires live broker API configuration.");
   }
-  console.log("[copy-worker] Broker websocket-first source enabled; WSA engine remains local.");
   if (process.env.BROKER_EXECUTION_ENABLED !== "true") {
     throw new Error("BROKER_EXECUTION_ENABLED must be true before the live WSA worker can start.");
   }
+  // Orders go out in bursts (one per follower) after seconds of silence: keep the connections open.
+  const pooled = isApi2Trade ? await enableApi2TradeConnectionPool() : false;
+  console.log(
+    `[copy-worker] Broker websocket-first source enabled; WSA engine remains local. Connection pool: ${pooled ? "keep-alive" : "default fetch"}.`,
+  );
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
-  while (!stopping) {
-    try {
-      await reconcileStreams();
-      runBackgroundJobsWithoutBlockingRealtime();
-    } catch (error) {
-      console.error(
-        `[copy-worker] reconcile cycle failed; retrying in ${pollMs}ms: ${
-          error instanceof Error ? error.message : "unknown error"
-        }`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  backgroundTicker = setInterval(runBackgroundJobsWithoutBlockingRealtime, Math.min(backgroundJobPollMs, 500));
+  if (isApi2Trade && process.env.WSA_TRADE_GATEWAY_ENABLED !== "false") {
+    // Without migration 060 the gateway sleeps and checks again every minute; it never blocks copying.
+    tradeGateway = startGatewayWorker({
+      store: createSupabaseGatewayStore(),
+      adapter: createBrokerAdapter(),
+      workerId,
+      pollMs: intFromEnv("WSA_TRADE_GATEWAY_POLL_MS", 100, 50, 5_000),
+      idlePollMs: intFromEnv("WSA_TRADE_GATEWAY_IDLE_POLL_MS", 750, 100, 10_000),
+      stateRefreshMs: intFromEnv("WSA_TRADE_GATEWAY_STATE_MS", 1_000, 250, 10_000),
+      commandConcurrency: intFromEnv("WSA_TRADE_GATEWAY_CONCURRENCY", 8, 1, 32),
+      stateConcurrency: intFromEnv("WSA_TRADE_GATEWAY_STATE_CONCURRENCY", 6, 1, 32),
+    });
+    console.log("[copy-worker] WSA Trade gateway started (orders and live account state for the web terminal).");
   }
+  await discoveryLoop();
+  await shutdown();
 }
 
 main().catch(async (error) => {

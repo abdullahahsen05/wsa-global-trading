@@ -422,7 +422,7 @@ test.describe("literal QA route matrix", () => {
         await expect(page.locator("body")).toContainText(/Execute live copy/i);
         await page.getByRole("button", { name: /Cancel/i }).last().click();
       }
-      await page.goto("/admin/terminal");
+      await page.goto("/admin/terminal/provider");
       await expect(page.locator("body")).toContainText(/dxFeed|locked|unavailable/i);
 
       const partnerContext = await browser.newContext({ storageState: authState("partner") });

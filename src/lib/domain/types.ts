@@ -32,6 +32,13 @@ export interface TraderAccountSummary {
   lastSyncedAt?: string | null;
   live?: boolean;
   reconnectRequired?: boolean;
+  /**
+   * Margin figures reported by the broker. Only set on live broker snapshots
+   * (`BrokerAdapter.fetchSnapshot`), never on rows read back from the database.
+   */
+  margin?: number | null;
+  freeMargin?: number | null;
+  marginLevel?: number | null;
 }
 
 export interface AdminTradingAccountSummary extends TraderAccountSummary {

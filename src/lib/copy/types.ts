@@ -2,6 +2,8 @@
 // Copy Trading — shared types + typed errors
 // ─────────────────────────────────────────────────────────────────────────────
 
+import type { CopyCalibration } from "@/lib/copy/calibration";
+
 export type CopyMode = "SIMULATION" | "LIVE";
 export type StrategyStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "ARCHIVED";
 export type FollowerStatus = "PENDING" | "ACTIVE" | "PAUSED" | "DISABLED" | "REVOKED";
@@ -124,6 +126,8 @@ export interface CopyFollowerDto {
   reverseCopy: boolean;
   pauseOnDisconnect: boolean;
   emergencyStop: boolean;
+  /** how this follower's copies are shaped (stop loss / take profit, slippage, signal age, symbol matching); absent in an older payload */
+  calibration?: CopyCalibration;
   engineStatus: "DRAFT" | "LIVE" | "PAUSED" | "ERROR" | "REMOVED";
   engineError: string | null;
   engineSyncedAt: string | null;

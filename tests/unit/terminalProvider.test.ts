@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { MockMarketDataProvider } from "@/lib/terminal/providers/mockMarketDataProvider";
 import { DxfeedMarketDataProvider } from "@/lib/terminal/providers/dxfeedMarketDataProvider";
 import { resetMarketDataProvider, getMarketDataProvider } from "@/lib/terminal/marketDataService";
@@ -249,14 +249,21 @@ describe("getMarketDataProvider", () => {
     resetMarketDataProvider();
   });
 
-  it("returns MockMarketDataProvider by default (no env var)", () => {
-    delete process.env.MARKET_DATA_PROVIDER;
-    const provider = getMarketDataProvider();
-    expect(provider).toBeInstanceOf(MockMarketDataProvider);
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetMarketDataProvider();
   });
 
-  it("returns MockMarketDataProvider when MARKET_DATA_PROVIDER=mock", () => {
-    process.env.MARKET_DATA_PROVIDER = "mock";
+  it("returns DxfeedMarketDataProvider by default (no env var)", () => {
+    vi.stubEnv("MARKET_DATA_PROVIDER", "");
+    vi.stubEnv("ALLOW_MOCK_MARKET_DATA", "");
+    const provider = getMarketDataProvider();
+    expect(provider).toBeInstanceOf(DxfeedMarketDataProvider);
+  });
+
+  it("returns MockMarketDataProvider when local mock data is explicitly enabled", () => {
+    vi.stubEnv("MARKET_DATA_PROVIDER", "mock");
+    vi.stubEnv("ALLOW_MOCK_MARKET_DATA", "true");
     const provider = getMarketDataProvider();
     expect(provider).toBeInstanceOf(MockMarketDataProvider);
   });
@@ -268,14 +275,16 @@ describe("getMarketDataProvider", () => {
   });
 
   it("returns the same singleton instance on repeated calls", () => {
-    process.env.MARKET_DATA_PROVIDER = "mock";
+    vi.stubEnv("MARKET_DATA_PROVIDER", "mock");
+    vi.stubEnv("ALLOW_MOCK_MARKET_DATA", "true");
     const p1 = getMarketDataProvider();
     const p2 = getMarketDataProvider();
     expect(p1).toBe(p2);
   });
 
   it("resetMarketDataProvider clears the singleton", () => {
-    process.env.MARKET_DATA_PROVIDER = "mock";
+    vi.stubEnv("MARKET_DATA_PROVIDER", "mock");
+    vi.stubEnv("ALLOW_MOCK_MARKET_DATA", "true");
     const p1 = getMarketDataProvider();
     resetMarketDataProvider();
     process.env.MARKET_DATA_PROVIDER = "dxfeed";

@@ -1,22 +1,55 @@
-import { calculateFollowerLot } from "@/lib/copy/lotScaling";
-import {
-  copyModeToScalingMode,
-  mapFollowerSymbol,
-  reverseFollowerSide,
-} from "@/lib/copy/settings";
+import type { BrokerAdapter } from "@/lib/broker/BrokerAdapter";
+import { createBrokerAdapter } from "@/lib/broker/provider";
+import { readCalibration, type CopyCalibration } from "@/lib/copy/calibration";
+import { isMissingSchema } from "@/lib/copy/activityLog";
+import { copyModeToScalingMode } from "@/lib/copy/settings";
 import { COPY_ERROR, CopyError } from "@/lib/copy/types";
 import {
-  BrokerExecutionError,
-  type BrokerAdapter,
-} from "@/lib/broker/BrokerAdapter";
-import { createBrokerAdapter } from "@/lib/broker/provider";
+  closeVanishedPositions,
+  planSelfCopyOpen,
+  runSelfCopyEvent,
+  type SelfCopyPositionEvent,
+  type SelfCopyRoute,
+  type SelfCopySummary,
+} from "@/lib/copy/selfCopyEngine";
+import type { SelfCopyCheck } from "@/lib/copy/selfCopyDecision";
+import { judgeEngine, type EngineState } from "@/lib/copy/selfCopyEngineStatus";
+import {
+  createSupabaseSelfCopyStore,
+  forgetSelfCopyFacts,
+  listSelfCopyActivity,
+  loadSelfCopyPlatform,
+  routeFromRow,
+  type SelfCopyActivityResult,
+} from "@/lib/copy/selfCopyStore";
+import { gatewayAvailability } from "@/lib/gateway/gatewayQueue";
 import type { FollowerSettingsPatch } from "@/lib/services/copyTradingService";
-import { getCopyGlobalSettings } from "@/lib/services/copyTradingService";
 import { writeAuditLog } from "@/lib/services/auditService";
-import { getRiskEnforcementState } from "@/lib/services/riskService";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+export type { SelfCopyPositionEvent } from "@/lib/copy/selfCopyEngine";
+
 export type SelfCopyStatus = "LIVE" | "PAUSED" | "ARCHIVED";
+
+/** The route form's settings: the follower settings plus the calibration of a copied trade. */
+export type SelfCopySettingsInput = FollowerSettingsPatch & { calibration?: Partial<CopyCalibration> };
+
+export interface SelfCopyEngineDto {
+  state: EngineState;
+  /** the copy worker is connected to the source account right now */
+  listening: boolean;
+  error: string | null;
+  heartbeatAt: string | null;
+}
+
+export interface SelfCopyLastActivityDto {
+  eventType: "OPEN" | "MODIFY" | "CLOSE";
+  outcome: "COPIED" | "SKIPPED" | "FAILED";
+  code: string;
+  message: string;
+  symbol: string | null;
+  createdAt: string;
+}
 
 export interface SelfCopyRelationshipDto {
   id: string;
@@ -28,9 +61,23 @@ export interface SelfCopyRelationshipDto {
   followerAccountName: string;
   followerStatus: string;
   status: SelfCopyStatus;
-  copySettings: FollowerSettingsPatch;
+  copySettings: SelfCopySettingsInput & { calibration: CopyCalibration };
+  /** null = the engine columns of migration 061 are not in the database */
+  engine: SelfCopyEngineDto | null;
+  /** null = nothing recorded yet, or the activity table of migration 061 is missing */
+  lastActivity: SelfCopyLastActivityDto | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SelfCopyPlatformDto {
+  copyEnabled: boolean;
+  liveCopyEnabled: boolean;
+  emergencyStop: boolean;
+  /** the AWS worker's heartbeat (trade gateway, migration 060); "unknown" = not installed */
+  worker: "online" | "offline" | "unknown";
+  /** the worker may place broker orders (null = not known) */
+  workerOrdersAllowed: boolean | null;
 }
 
 interface RelationshipRow {
@@ -39,12 +86,21 @@ interface RelationshipRow {
   source_account_id: string;
   follower_account_id: string;
   status: SelfCopyStatus;
-  copy_settings: FollowerSettingsPatch;
+  copy_settings: SelfCopySettingsInput | null;
   created_at: string;
   updated_at: string;
+  engine_status?: string | null;
+  engine_error?: string | null;
+  engine_heartbeat_at?: string | null;
 }
 
 const ELIGIBLE_ACCOUNT_STATUSES = new Set(["CONNECTED", "SYNCING"]);
+
+const BASE_COLUMNS =
+  "id, trader_id, source_account_id, follower_account_id, status, copy_settings, created_at, updated_at";
+const ENGINE_COLUMNS = `${BASE_COLUMNS}, engine_status, engine_error, engine_heartbeat_at`;
+/** After the engine columns turned out to be missing (migration 061 not applied) they are not asked for again for a while. */
+let engineColumnsMissingUntil = 0;
 
 async function ownedAccountMap(traderId: string, accountIds?: string[]) {
   const supabase = createAdminClient();
@@ -83,32 +139,7 @@ function hasPath(
   return false;
 }
 
-async function loadSelfCopyRiskSymbolSpecifications(
-  adapter: BrokerAdapter,
-  accountId: string,
-  symbol: string,
-  scalingMode: NonNullable<ReturnType<typeof copyModeToScalingMode>>,
-): Promise<Parameters<typeof calculateFollowerLot>[0]["symbolSpecifications"]> {
-  if (scalingMode !== "RISK_PERCENT") return null;
-  if (!adapter.fetchSymbolSpecifications) return null;
-  const specs = await adapter
-    .fetchSymbolSpecifications(accountId, symbol)
-    .catch(() => null);
-  if (!specs) return null;
-  return {
-    tickSize: specs.tickSize,
-    tickValue: specs.tickValue,
-    contractSize: specs.contractSize,
-    volumeStep: specs.volumeStep,
-    minVolume: specs.minVolume,
-    maxVolume: specs.maxVolume,
-    accountCurrency: specs.accountCurrency,
-    profitCurrency: specs.profitCurrency,
-    accountCurrencyConversionRate: specs.accountCurrencyConversionRate,
-  };
-}
-
-function validateSupportedSettings(settings: FollowerSettingsPatch): void {
+function validateSupportedSettings(settings: SelfCopySettingsInput): void {
   if (!copyModeToScalingMode(settings.copyMode)) {
     throw new CopyError(
       COPY_ERROR.VALIDATION_ERROR,
@@ -118,29 +149,93 @@ function validateSupportedSettings(settings: FollowerSettingsPatch): void {
   }
 }
 
+/** What goes into `copy_settings`: the form's values, with the calibration completed and bounded. */
+function storableSettings(settings: SelfCopySettingsInput): Record<string, unknown> {
+  const { calibration, ...rest } = settings;
+  return calibration === undefined ? { ...rest } : { ...rest, calibration: readCalibration(calibration) };
+}
+
+/** The route rows of a person (never archived), with the engine columns when the database has them. */
+async function loadRouteRows(traderId: string): Promise<{ rows: RelationshipRow[]; engineColumns: boolean }> {
+  const supabase = createAdminClient();
+  const select = async (columns: string) =>
+    supabase
+      .from("self_copy_relationships")
+      .select(columns)
+      .eq("trader_id", traderId)
+      .neq("status", "ARCHIVED")
+      .order("created_at", { ascending: false });
+
+  if (Date.now() >= engineColumnsMissingUntil) {
+    const withEngine = await select(ENGINE_COLUMNS);
+    if (!withEngine.error) return { rows: (withEngine.data ?? []) as unknown as RelationshipRow[], engineColumns: true };
+    if (!isMissingSchema(withEngine.error)) {
+      throw new Error(`Failed to load self-copy setups: ${withEngine.error.message}`);
+    }
+    engineColumnsMissingUntil = Date.now() + 10 * 60_000;
+  }
+  const plain = await select(BASE_COLUMNS);
+  if (plain.error) throw new Error(`Failed to load self-copy setups: ${plain.error.message}`);
+  return { rows: (plain.data ?? []) as unknown as RelationshipRow[], engineColumns: false };
+}
+
+/** The latest activity line of every route of a person. Empty when the activity table is not there. */
+async function latestActivityByRoute(traderId: string): Promise<Map<string, SelfCopyLastActivityDto>> {
+  const latest = new Map<string, SelfCopyLastActivityDto>();
+  try {
+    const { data, error } = await createAdminClient()
+      .from("self_copy_events")
+      .select("relationship_id, event_type, outcome, code, message, symbol, created_at")
+      .eq("trader_id", traderId)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    if (error) return latest;
+    for (const row of data ?? []) {
+      const routeId = String(row.relationship_id);
+      if (latest.has(routeId)) continue;
+      latest.set(routeId, {
+        eventType: row.event_type as SelfCopyLastActivityDto["eventType"],
+        outcome: row.outcome as SelfCopyLastActivityDto["outcome"],
+        code: String(row.code),
+        message: String(row.message ?? ""),
+        symbol: row.symbol ?? null,
+        createdAt: String(row.created_at),
+      });
+    }
+  } catch {
+    // the activity is a convenience, never a reason for the list to fail
+  }
+  return latest;
+}
+
 export async function listSelfCopyRelationships(
   traderId: string,
 ): Promise<SelfCopyRelationshipDto[]> {
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("self_copy_relationships")
-    .select(
-      "id, trader_id, source_account_id, follower_account_id, status, copy_settings, created_at, updated_at",
-    )
-    .eq("trader_id", traderId)
-    .neq("status", "ARCHIVED")
-    .order("created_at", { ascending: false });
-  if (error)
-    throw new Error(`Failed to load self-copy setups: ${error.message}`);
-  const rows = (data ?? []) as RelationshipRow[];
-  const accounts = await ownedAccountMap(traderId, [
-    ...new Set(
-      rows.flatMap((row) => [row.source_account_id, row.follower_account_id]),
-    ),
+  const { rows, engineColumns } = await loadRouteRows(traderId);
+  const [accounts, activity] = await Promise.all([
+    ownedAccountMap(traderId, [
+      ...new Set(rows.flatMap((row) => [row.source_account_id, row.follower_account_id])),
+    ]),
+    rows.length > 0 ? latestActivityByRoute(traderId) : Promise.resolve(new Map<string, SelfCopyLastActivityDto>()),
   ]);
+  const now = Date.now();
   return rows.map((row) => {
     const source = accounts.get(row.source_account_id);
     const follower = accounts.get(row.follower_account_id);
+    const stored = (row.copy_settings ?? {}) as SelfCopySettingsInput;
+    let engine: SelfCopyEngineDto | null = null;
+    if (engineColumns) {
+      const verdict = judgeEngine(
+        { status: row.engine_status ?? null, error: row.engine_error ?? null, heartbeatAt: row.engine_heartbeat_at ?? null },
+        now,
+      );
+      engine = {
+        state: verdict.state,
+        listening: verdict.listening,
+        error: row.engine_error ?? null,
+        heartbeatAt: row.engine_heartbeat_at ?? null,
+      };
+    }
     return {
       id: row.id,
       traderId: row.trader_id,
@@ -151,18 +246,35 @@ export async function listSelfCopyRelationships(
       followerAccountName: follower?.account_name ?? "Follower account",
       followerStatus: follower?.status ?? "UNKNOWN",
       status: row.status,
-      copySettings: row.copy_settings,
+      copySettings: { ...stored, calibration: readCalibration(stored.calibration) },
+      engine,
+      lastActivity: activity.get(row.id) ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   });
 }
 
+/** What the platform and the AWS worker allow right now - the banner above the routes. */
+export async function getSelfCopyPlatformStatus(): Promise<SelfCopyPlatformDto> {
+  const [platform, gateway] = await Promise.all([
+    loadSelfCopyPlatform(),
+    gatewayAvailability(createAdminClient()).catch(() => null),
+  ]);
+  return {
+    copyEnabled: platform.copyEnabled,
+    liveCopyEnabled: platform.liveCopyEnabled,
+    emergencyStop: platform.emergencyStop,
+    worker: gateway?.state === "online" ? "online" : gateway?.state === "offline" ? "offline" : "unknown",
+    workerOrdersAllowed: gateway?.state === "online" ? gateway.executionEnabled : null,
+  };
+}
+
 export async function createSelfCopyRelationship(params: {
   traderId: string;
   sourceAccountId: string;
   followerAccountId: string;
-  copySettings: FollowerSettingsPatch;
+  copySettings: SelfCopySettingsInput;
 }): Promise<SelfCopyRelationshipDto> {
   if (params.sourceAccountId === params.followerAccountId) {
     throw new CopyError(
@@ -240,7 +352,8 @@ export async function createSelfCopyRelationship(params: {
       source_account_id: params.sourceAccountId,
       follower_account_id: params.followerAccountId,
       status: "LIVE",
-      copy_settings: params.copySettings,
+      // "live since" is the route's, never the person's: only trades opened after it are new trades for the route
+      copy_settings: { ...storableSettings(params.copySettings), liveSince: new Date().toISOString() },
     })
     .select("id")
     .single();
@@ -253,6 +366,7 @@ export async function createSelfCopyRelationship(params: {
       );
     throw new Error(`Failed to create self-copy setup: ${error?.message}`);
   }
+  forgetSelfCopyFacts();
   await writeAuditLog({
     actorUserId: params.traderId,
     action: "SELF_COPY_CREATED",
@@ -272,13 +386,13 @@ export async function updateSelfCopyRelationship(params: {
   traderId: string;
   id: string;
   status?: SelfCopyStatus;
-  copySettings?: FollowerSettingsPatch;
+  copySettings?: SelfCopySettingsInput;
 }): Promise<void> {
   if (params.copySettings) validateSupportedSettings(params.copySettings);
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("self_copy_relationships")
-    .select("id, copy_settings")
+    .select("id, status, copy_settings")
     .eq("id", params.id)
     .eq("trader_id", params.traderId)
     .maybeSingle();
@@ -290,24 +404,31 @@ export async function updateSelfCopyRelationship(params: {
     );
   const patch: Record<string, unknown> = {};
   if (params.status !== undefined) patch.status = params.status;
-  if (params.copySettings !== undefined) {
-    const existing = (data.copy_settings ??
-      {}) as Partial<FollowerSettingsPatch>;
+  // a route that starts copying again copies the trades that open from now on - not those opened while it was paused
+  const resuming = params.status === "LIVE" && data.status !== "LIVE";
+  if (params.copySettings !== undefined || resuming) {
+    const existing = (data.copy_settings ?? {}) as Record<string, unknown>;
     patch.copy_settings = {
       ...existing,
-      ...params.copySettings,
-      fixedLot:
-        params.copySettings.copyMode === "FIXED_LOT"
-          ? params.copySettings.fixedLot
-          : null,
-      lotMultiplier:
-        params.copySettings.copyMode === "LOT_MULTIPLIER"
-          ? params.copySettings.lotMultiplier
-          : null,
-      riskPercent:
-        params.copySettings.copyMode === "RISK_PERCENT"
-          ? params.copySettings.riskPercent
-          : null,
+      ...(params.copySettings
+        ? {
+            ...storableSettings(params.copySettings),
+            fixedLot:
+              params.copySettings.copyMode === "FIXED_LOT"
+                ? params.copySettings.fixedLot
+                : null,
+            lotMultiplier:
+              params.copySettings.copyMode === "LOT_MULTIPLIER"
+                ? params.copySettings.lotMultiplier
+                : null,
+            riskPercent:
+              params.copySettings.copyMode === "RISK_PERCENT"
+                ? params.copySettings.riskPercent
+                : null,
+          }
+        : {}),
+      // whatever the form sent, the start of the route is only ever set here
+      liveSince: resuming ? new Date().toISOString() : (existing.liveSince ?? null),
     };
   }
   const { error } = await supabase
@@ -316,6 +437,7 @@ export async function updateSelfCopyRelationship(params: {
     .eq("id", params.id);
   if (error)
     throw new Error(`Failed to update self-copy setup: ${error.message}`);
+  forgetSelfCopyFacts();
   await writeAuditLog({
     actorUserId: params.traderId,
     action: "SELF_COPY_UPDATED",
@@ -328,28 +450,196 @@ export async function updateSelfCopyRelationship(params: {
   });
 }
 
-async function latestSnapshot(accountId: string) {
-  const supabase = createAdminClient();
-  const { data } = await supabase
-    .from("account_snapshots")
-    .select("balance, equity")
-    .eq("trading_account_id", accountId)
-    .order("captured_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return data
-    ? { balance: Number(data.balance), equity: Number(data.equity) }
-    : null;
+// ── "Check route": what would happen to a trade like the source's latest ─────
+
+export interface SelfCopyCheckDto {
+  /** a trade like the sample would be copied right now */
+  wouldCopy: boolean;
+  code: string;
+  message: string;
+  checks: SelfCopyCheck[];
+  sample: {
+    symbol: string;
+    side: "BUY" | "SELL";
+    volume: number;
+    entryPrice: number | null;
+    origin: "open-position" | "last-trade" | "example";
+  };
+  /** what the order would look like; null when the cheap checks already said no */
+  plan: {
+    followerSymbol: string;
+    followerSide: "BUY" | "SELL";
+    lot: number;
+    stopLoss: number | null;
+    takeProfit: number | null;
+    symbolMatchedBy: "mapping" | "same-name" | "auto" | "as-is";
+    notes: string[];
+  } | null;
+  checkedAt: string;
 }
 
-export async function simulateSelfCopy(params: {
+async function sampleTrade(sourceAccountId: string): Promise<SelfCopyCheckDto["sample"]> {
+  const supabase = createAdminClient();
+  const select = "symbol, side, volume, open_price";
+  const open = await supabase
+    .from("trades")
+    .select(select)
+    .eq("trading_account_id", sourceAccountId)
+    .eq("status", "OPEN")
+    .order("opened_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const last = open.data
+    ? null
+    : await supabase
+        .from("trades")
+        .select(select)
+        .eq("trading_account_id", sourceAccountId)
+        .order("opened_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+  const row = open.data ?? last?.data ?? null;
+  if (!row) return { symbol: "EURUSD", side: "BUY", volume: 1, entryPrice: 1.1, origin: "example" };
+  return {
+    symbol: String(row.symbol),
+    side: row.side === "SELL" ? "SELL" : "BUY",
+    volume: Number(row.volume),
+    entryPrice: row.open_price == null ? null : Number(row.open_price),
+    origin: open.data ? "open-position" : "last-trade",
+  };
+}
+
+/**
+ * Runs the real decision of the copy engine for a trade like the source's latest one - nothing is
+ * reserved, nothing is sent. It answers "why does my route do nothing" without waiting for a trade.
+ */
+export async function checkSelfCopyRoute(params: {
   traderId: string;
   id: string;
-}) {
+  adapter?: BrokerAdapter;
+}): Promise<SelfCopyCheckDto> {
   const supabase = createAdminClient();
-  const { data } = await supabase
+  const selectRoute = async (columns: string) =>
+    supabase
+      .from("self_copy_relationships")
+      .select(columns)
+      .eq("id", params.id)
+      .eq("trader_id", params.traderId)
+      .maybeSingle();
+  let loaded = Date.now() >= engineColumnsMissingUntil ? await selectRoute(ENGINE_COLUMNS) : null;
+  if (loaded?.error && isMissingSchema(loaded.error)) {
+    engineColumnsMissingUntil = Date.now() + 10 * 60_000;
+    loaded = null;
+  }
+  loaded ??= await selectRoute(BASE_COLUMNS);
+  const row = loaded.data as unknown as RelationshipRow | null;
+  if (!row)
+    throw new CopyError(
+      COPY_ERROR.FORBIDDEN,
+      "Self-copy setup not found or not yours.",
+      404,
+    );
+
+  const route: SelfCopyRoute = routeFromRow({
+    id: row.id,
+    trader_id: row.trader_id,
+    source_account_id: row.source_account_id,
+    follower_account_id: row.follower_account_id,
+    status: row.status,
+    copy_settings: row.copy_settings,
+    created_at: row.created_at,
+  });
+
+  // fresh figures for the check, not the five-second-old ones of the last trade
+  forgetSelfCopyFacts();
+  const [sample, platform, gateway] = await Promise.all([
+    sampleTrade(row.source_account_id),
+    loadSelfCopyPlatform(),
+    gatewayAvailability(supabase).catch(() => null),
+  ]);
+
+  const scalingMode = copyModeToScalingMode(route.settings.copyMode);
+  const notes: string[] = [];
+  // a risk-percent lot comes from each trade's own stop loss; the sample has none to show
+  let stopLoss: number | null = null;
+  if (scalingMode === "RISK_PERCENT" && sample.entryPrice) {
+    stopLoss = sample.entryPrice * (sample.side === "BUY" ? 0.995 : 1.005);
+    notes.push("A risk-percent route sizes each trade from its stop loss. This check assumes a stop loss 0.5 % from the entry.");
+  }
+  const event: SelfCopyPositionEvent = {
+    sourceAccountId: row.source_account_id,
+    eventType: "OPEN",
+    sourcePositionId: "check",
+    symbol: sample.symbol,
+    side: sample.side,
+    volume: sample.volume,
+    entryPrice: sample.entryPrice,
+    stopLoss,
+    takeProfit: null,
+    existing: false,
+  };
+
+  const adapter = params.adapter ?? createBrokerAdapter();
+  const plan = await planSelfCopyOpen(
+    { adapter, store: createSupabaseSelfCopyStore() },
+    {
+      platform,
+      // the order would be sent by the AWS worker, not by this web server
+      executionAvailable: gateway?.state === "online" ? gateway.executionEnabled : true,
+    },
+    route,
+    event,
+  );
+
+  const engine = judgeEngine(
+    row.engine_status !== undefined || row.engine_heartbeat_at !== undefined
+      ? { status: row.engine_status ?? null, error: row.engine_error ?? null, heartbeatAt: row.engine_heartbeat_at ?? null }
+      : null,
+  );
+  const checks: SelfCopyCheck[] = [engine.check, ...plan.verdict.checks];
+  if (gateway?.state === "offline") {
+    checks.push({
+      id: "WORKER_ONLINE",
+      label: "AWS copy system online",
+      status: "warn",
+      detail: "No copy worker has reported to the trade gateway in the last seconds. If it is running, it will show up here shortly.",
+    });
+  }
+  if (plan.complete && !plan.resolution.listKnown && route.settings.calibration.autoSymbolMatch) {
+    notes.push("The follower's symbol list could not be read from this server; the worker checks the exact spelling when a trade arrives.");
+  }
+  if (plan.complete) notes.push(...plan.levels.notes);
+
+  return {
+    wouldCopy: plan.verdict.allowed,
+    code: plan.verdict.code,
+    message: plan.verdict.message,
+    checks,
+    sample,
+    plan: plan.complete
+      ? {
+          followerSymbol: plan.followerSymbol,
+          followerSide: plan.followerSide,
+          lot: plan.lot.lot,
+          stopLoss: plan.levels.stopLoss,
+          takeProfit: plan.levels.takeProfit,
+          symbolMatchedBy: plan.resolution.matchedBy,
+          notes,
+        }
+      : null,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+/** The latest activity of one route; the route must belong to the person. */
+export async function getSelfCopyActivity(params: {
+  traderId: string;
+  id: string;
+  limit?: number;
+}): Promise<SelfCopyActivityResult> {
+  const { data } = await createAdminClient()
     .from("self_copy_relationships")
-    .select("id, source_account_id, follower_account_id, status, copy_settings")
+    .select("id")
     .eq("id", params.id)
     .eq("trader_id", params.traderId)
     .maybeSingle();
@@ -359,431 +649,49 @@ export async function simulateSelfCopy(params: {
       "Self-copy setup not found or not yours.",
       404,
     );
-  if (data.status !== "SIMULATION") {
-    throw new CopyError(
-      COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
-      "Resume this setup before simulating it.",
-      409,
-    );
-  }
-  const accounts = await ownedAccountMap(params.traderId, [
-    data.source_account_id,
-    data.follower_account_id,
-  ]);
-  for (const accountId of [data.source_account_id, data.follower_account_id]) {
-    const status = accounts.get(accountId)?.status ?? "UNKNOWN";
-    if (!ELIGIBLE_ACCOUNT_STATUSES.has(status)) {
-      throw new CopyError(
-        COPY_ERROR.FOLLOWER_NOT_ELIGIBLE,
-        `Simulation paused because an account status is ${status}.`,
-        409,
-      );
-    }
-  }
-  const settings = data.copy_settings as FollowerSettingsPatch;
-  if (!settings.copyEnabled || settings.emergencyStop) {
-    throw new CopyError(
-      COPY_ERROR.COPY_RISK_BLOCKED,
-      "Copying is paused by follower settings.",
-      409,
-    );
-  }
-  const { data: trade } = await supabase
-    .from("trades")
-    .select("id, symbol, side, volume, open_price, opened_at")
-    .eq("trading_account_id", data.source_account_id)
-    .order("opened_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (!trade) {
-    return {
-      simulated: false,
-      message: "No synced source trade is available for a simulation preview.",
-      liveExecution: false,
-    };
-  }
-  const [sourceSnapshot, followerSnapshot] = await Promise.all([
-    latestSnapshot(data.source_account_id),
-    latestSnapshot(data.follower_account_id),
-  ]);
-  const scalingMode = copyModeToScalingMode(settings.copyMode);
-  if (!scalingMode)
-    throw new CopyError(
-      COPY_ERROR.COPY_INVALID_LOT,
-      "Selected mode is not supported.",
-      400,
-    );
-  const followerSymbol = mapFollowerSymbol(
-    trade.symbol,
-    settings.symbolMapping,
-  );
-  const adapter = createBrokerAdapter();
-  const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(
-    adapter,
-    data.follower_account_id,
-    followerSymbol,
-    scalingMode,
-  );
-  const lot = calculateFollowerLot({
-    masterLot: Number(trade.volume),
-    entryPrice: trade.open_price === null ? null : Number(trade.open_price),
-    stopLoss: null,
-    masterBalance: sourceSnapshot?.balance ?? null,
-    masterEquity: sourceSnapshot?.equity ?? null,
-    followerBalance: followerSnapshot?.balance ?? null,
-    followerEquity: followerSnapshot?.equity ?? null,
-    scalingMode,
-    fixedLot: settings.fixedLot,
-    lotMultiplier:
-      settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
-    riskMultiplier: null,
-    riskPercent:
-      settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null,
-    minLot: settings.minLot,
-    maxLot: settings.maxLot,
-    symbolSpecifications,
-  });
-  const result = {
-    simulated: lot.lot > 0,
-    message:
-      lot.lot > 0
-        ? "Simulation preview calculated. No broker order was sent."
-        : (lot.reason ?? "Simulation could not calculate a safe lot."),
-    sourceTradeId: trade.id,
-    sourceSymbol: trade.symbol,
-    followerSymbol,
-    followerSide: reverseFollowerSide(trade.side, settings.reverseCopy),
-    calculatedLot: lot.lot,
-    liveExecution: false,
-  };
-  await writeAuditLog({
-    actorUserId: params.traderId,
-    action: "SELF_COPY_SIMULATED",
-    entityType: "self_copy_relationship",
-    entityId: params.id,
-    metadata: { simulated: result.simulated, liveExecution: false },
-  });
-  return result;
+  return listSelfCopyActivity(params.id, params.limit ?? 40);
 }
 
 export const selfCopyGraphHasPath = hasPath;
 
-export interface SelfCopyPositionEvent {
-  sourceAccountId: string;
-  eventType: "OPEN" | "MODIFY" | "CLOSE";
-  sourcePositionId: string;
-  symbol: string;
-  side: "BUY" | "SELL";
-  volume: number;
-  previousVolume?: number | null;
-  entryPrice?: number | null;
-  stopLoss?: number | null;
-  takeProfit?: number | null;
+let sharedStore: ReturnType<typeof createSupabaseSelfCopyStore> | null = null;
+
+/**
+ * After the copy worker was away: closes the copies whose source position is gone (run by the AWS
+ * copy worker). The live positions come from a function so that they are read AFTER the open copies
+ * were looked up - see `closeVanishedPositions`.
+ */
+export async function closeVanishedSelfCopyPositions(
+  sourceAccountId: string,
+  readLivePositionIds: () => Promise<ReadonlySet<string>>,
+  options: { adapter?: BrokerAdapter; log?: (line: string) => void } = {},
+): Promise<SelfCopySummary> {
+  sharedStore ??= createSupabaseSelfCopyStore();
+  return closeVanishedPositions(
+    {
+      adapter: options.adapter ?? createBrokerAdapter(),
+      store: sharedStore,
+      ...(options.log ? { log: options.log } : {}),
+    },
+    sourceAccountId,
+    readLivePositionIds,
+  );
 }
 
 /**
- * Executes one real broker position event across every matching self-copy
- * relationship. A copied public-strategy position is just another real source
- * position, so it naturally continues through A -> B -> C chains.
+ * Copies one real broker position event across the self-copy routes of its source account (run by the
+ * AWS copy worker). A copied public-strategy position is just another real source position, so it
+ * naturally continues through A -> B -> C chains.
  */
 export async function executeSelfCopyPositionEvent(
   event: SelfCopyPositionEvent,
-) {
-  const supabase = createAdminClient();
-  const adapter = createBrokerAdapter();
-  const global = await getCopyGlobalSettings();
-  const result = { attempted: 0, success: 0, failed: 0, skipped: 0 };
-
-  if (!adapter.executionAvailable()) {
-    throw new CopyError(
-      COPY_ERROR.COPY_EXECUTION_NOT_CONFIGURED,
-      "Live broker execution is disabled.",
-      503,
-    );
-  }
-
-  if (event.eventType !== "OPEN") {
-    const { data: links } = await supabase
-      .from("self_copy_trade_links")
-      .select(
-        "id, follower_account_id, follower_position_id, copied_volume, status",
-      )
-      .eq("source_account_id", event.sourceAccountId)
-      .eq("source_position_id", event.sourcePositionId)
-      .in("status", ["OPEN", "CLOSING"]);
-    for (const link of links ?? []) {
-      if (!link.follower_position_id) {
-        result.skipped++;
-        continue;
-      }
-      result.attempted++;
-      try {
-        if (event.eventType === "CLOSE") {
-          await supabase
-            .from("self_copy_trade_links")
-            .update({ status: "CLOSING" })
-            .eq("id", link.id);
-          await adapter.closeTrade({
-            accountId: link.follower_account_id,
-            brokerPositionId: link.follower_position_id,
-            comment: "wsa:self-copy:close",
-          });
-          await supabase
-            .from("self_copy_trade_links")
-            .update({
-              status: "CLOSED",
-              closed_at: new Date().toISOString(),
-              error_code: null,
-              error_message: null,
-            })
-            .eq("id", link.id);
-        } else {
-          const previous = Number(event.previousVolume ?? event.volume);
-          if (previous > event.volume && previous > 0) {
-            const partialVolume =
-              Number(link.copied_volume) *
-              ((previous - event.volume) / previous);
-            if (partialVolume > 0) {
-              await adapter.closeTrade({
-                accountId: link.follower_account_id,
-                brokerPositionId: link.follower_position_id,
-                volume: partialVolume,
-                comment: "wsa:self-copy:partial",
-              });
-              await supabase
-                .from("self_copy_trade_links")
-                .update({
-                  copied_volume: Math.max(
-                    0,
-                    Number(link.copied_volume) - partialVolume,
-                  ),
-                })
-                .eq("id", link.id);
-            }
-          }
-          await adapter.modifyTrade({
-            accountId: link.follower_account_id,
-            brokerPositionId: link.follower_position_id,
-            stopLoss: event.stopLoss ?? null,
-            takeProfit: event.takeProfit ?? null,
-          });
-        }
-        result.success++;
-      } catch (error) {
-        const message = (
-          error instanceof Error
-            ? error.message
-            : "Self-copy broker operation failed"
-        ).slice(0, 400);
-        await supabase
-          .from("self_copy_trade_links")
-          .update({
-            status: event.eventType === "CLOSE" ? "OPEN" : link.status,
-            error_code:
-              error instanceof BrokerExecutionError
-                ? error.code
-                : COPY_ERROR.COPY_PROVIDER_ERROR,
-            error_message: message,
-          })
-          .eq("id", link.id);
-        result.failed++;
-      }
-    }
-    return result;
-  }
-
-  if (
-    !global.copyEnabled ||
-    !global.liveCopyEnabled ||
-    global.emergencyStopEnabled
-  ) {
-    return { ...result, skipped: 1 };
-  }
-
-  const { data: relationships, error } = await supabase
-    .from("self_copy_relationships")
-    .select(
-      "id, trader_id, source_account_id, follower_account_id, status, copy_settings",
-    )
-    .eq("source_account_id", event.sourceAccountId)
-    .eq("status", "LIVE");
-  if (error)
-    throw new Error(
-      `Failed to load live self-copy relationships: ${error.message}`,
-    );
-
-  const sourceSnapshot = await latestSnapshot(event.sourceAccountId);
-  for (const relationship of relationships ?? []) {
-    const settings = relationship.copy_settings as FollowerSettingsPatch;
-    const followerSymbol = mapFollowerSymbol(
-      event.symbol,
-      settings.symbolMapping,
-    );
-    const followerSide =
-      reverseFollowerSide(event.side, settings.reverseCopy) === "SELL"
-        ? "SELL"
-        : "BUY";
-
-    const { data: existing } = await supabase
-      .from("self_copy_trade_links")
-      .select("id, status")
-      .eq("relationship_id", relationship.id)
-      .eq("source_position_id", event.sourcePositionId)
-      .maybeSingle();
-    if (existing && existing.status !== "FAILED") {
-      result.skipped++;
-      continue;
-    }
-
-    const [{ data: followerAccount }, riskState, followerSnapshot, openLinks] =
-      await Promise.all([
-        supabase
-          .from("trading_accounts")
-          .select("status")
-          .eq("id", relationship.follower_account_id)
-          .maybeSingle(),
-        getRiskEnforcementState(relationship.follower_account_id),
-        latestSnapshot(relationship.follower_account_id),
-        supabase
-          .from("self_copy_trade_links")
-          .select("id", { count: "exact", head: true })
-          .eq("follower_account_id", relationship.follower_account_id)
-          .eq("status", "OPEN"),
-      ]);
-    const symbolAllowed =
-      !settings.allowedSymbols?.length ||
-      settings.allowedSymbols.includes(followerSymbol);
-    const symbolBlocked =
-      settings.blockedSymbols?.includes(followerSymbol) ?? false;
-    const maxOpenReached =
-      settings.maxOpenTrades !== null &&
-      (openLinks.count ?? 0) >= settings.maxOpenTrades;
-    if (
-      !settings.copyEnabled ||
-      settings.emergencyStop ||
-      followerAccount?.status !== "CONNECTED" ||
-      riskState?.blockedNewTrades ||
-      !symbolAllowed ||
-      symbolBlocked ||
-      maxOpenReached
-    ) {
-      result.skipped++;
-      continue;
-    }
-
-    const scalingMode = copyModeToScalingMode(settings.copyMode);
-    if (!scalingMode) {
-      result.skipped++;
-      continue;
-    }
-    const symbolSpecifications = await loadSelfCopyRiskSymbolSpecifications(
-      adapter,
-      relationship.follower_account_id,
-      followerSymbol,
-      scalingMode,
-    );
-    const lot = calculateFollowerLot({
-      masterLot: event.volume,
-      entryPrice: event.entryPrice ?? null,
-      stopLoss: event.stopLoss ?? null,
-      masterBalance: sourceSnapshot?.balance ?? null,
-      masterEquity: sourceSnapshot?.equity ?? null,
-      followerBalance: followerSnapshot?.balance ?? null,
-      followerEquity: followerSnapshot?.equity ?? null,
-      scalingMode,
-      fixedLot: settings.fixedLot,
-      lotMultiplier:
-        settings.copyMode === "LOT_MULTIPLIER" ? settings.lotMultiplier : null,
-      riskMultiplier: null,
-      riskPercent:
-        settings.copyMode === "RISK_PERCENT" ? settings.riskPercent : null,
-      minLot: settings.minLot,
-      maxLot: settings.maxLot,
-      symbolSpecifications,
-    });
-    if (lot.lot <= 0) {
-      result.skipped++;
-      continue;
-    }
-
-    result.attempted++;
-    let linkId = existing?.id as string | undefined;
-    try {
-      if (linkId) {
-        await supabase
-          .from("self_copy_trade_links")
-          .update({
-            status: "PENDING",
-            error_code: null,
-            error_message: null,
-          })
-          .eq("id", linkId);
-      } else {
-        const { data: reserved, error: reserveError } = await supabase
-          .from("self_copy_trade_links")
-          .insert({
-            relationship_id: relationship.id,
-            trader_id: relationship.trader_id,
-            source_account_id: relationship.source_account_id,
-            follower_account_id: relationship.follower_account_id,
-            source_position_id: event.sourcePositionId,
-            symbol: followerSymbol,
-            side: followerSide,
-            copied_volume: lot.lot,
-            status: "PENDING",
-          })
-          .select("id")
-          .single();
-        if (reserveError || !reserved)
-          throw new Error(
-            `Self-copy reservation failed: ${reserveError?.message}`,
-          );
-        linkId = reserved.id;
-      }
-      const opened = await adapter.openTrade({
-        accountId: relationship.follower_account_id,
-        symbol: followerSymbol,
-        side: followerSide,
-        volume: lot.lot,
-        stopLoss: event.stopLoss ?? null,
-        takeProfit: event.takeProfit ?? null,
-        comment: `wsa:self:${relationship.id.slice(0, 8)}`,
-      });
-      await supabase
-        .from("self_copy_trade_links")
-        .update({
-          status: "OPEN",
-          follower_position_id:
-            opened.brokerPositionId ?? opened.brokerOrderId ?? null,
-          follower_order_id: opened.brokerOrderId ?? null,
-          copied_volume: opened.executedVolume ?? lot.lot,
-          opened_at: new Date().toISOString(),
-          error_code: null,
-          error_message: null,
-        })
-        .eq("id", linkId);
-      result.success++;
-    } catch (error) {
-      const message = (
-        error instanceof Error
-          ? error.message
-          : "Self-copy broker execution failed"
-      ).slice(0, 400);
-      if (linkId) {
-        await supabase
-          .from("self_copy_trade_links")
-          .update({
-            status: "FAILED",
-            error_code:
-              error instanceof BrokerExecutionError
-                ? error.code
-                : COPY_ERROR.COPY_PROVIDER_ERROR,
-            error_message: message,
-          })
-          .eq("id", linkId);
-      }
-      result.failed++;
-    }
-  }
-  return result;
+  options: { routes?: SelfCopyRoute[]; adapter?: BrokerAdapter; log?: (line: string) => void } = {},
+): Promise<SelfCopySummary> {
+  sharedStore ??= createSupabaseSelfCopyStore();
+  const adapter = options.adapter ?? createBrokerAdapter();
+  return runSelfCopyEvent(
+    { adapter, store: sharedStore, ...(options.log ? { log: options.log } : {}) },
+    event,
+    options.routes ? { routes: options.routes } : {},
+  );
 }
