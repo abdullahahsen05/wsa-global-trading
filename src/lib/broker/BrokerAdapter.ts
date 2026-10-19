@@ -13,6 +13,20 @@ export interface BrokerConnectionHealth {
 /** MARKET executes now; LIMIT / STOP wait for `price` (a pending order). */
 export type OrderKind = "MARKET" | "LIMIT" | "STOP";
 
+/**
+ * Where the time of one order call went. The caller creates the object and passes it with
+ * the request; an adapter that measures fills it in (the others leave it empty). It never
+ * changes what is sent - it only says how long each part took.
+ */
+export interface ExecutionStages {
+  /** getting a ready broker session (a status check or a reconnect); 0 = it was already warm */
+  sessionMs?: number;
+  /** the order request(s) to the bridge, all attempts together */
+  sendMs?: number;
+  /** how often the request was sent (more than once after a requote or a busy trade context) */
+  attempts?: number;
+}
+
 export interface OpenTradeRequest {
   accountId: string;
   symbol: string;
@@ -27,6 +41,7 @@ export interface OpenTradeRequest {
   comment?: string | null;
   magic?: number | null;
   slippage?: number | null;
+  stages?: ExecutionStages;
 }
 
 export interface CloseTradeRequest {
@@ -35,6 +50,7 @@ export interface CloseTradeRequest {
   symbol?: string;
   volume?: number | null;
   comment?: string | null;
+  stages?: ExecutionStages;
 }
 
 export interface ModifyTradeRequest {
@@ -44,12 +60,14 @@ export interface ModifyTradeRequest {
   takeProfit?: number | null;
   /** new entry price - only for a PENDING order */
   price?: number | null;
+  stages?: ExecutionStages;
 }
 
 /** Cancel (delete) a pending order. */
 export interface CancelOrderRequest {
   accountId: string;
   brokerOrderId: string;
+  stages?: ExecutionStages;
 }
 
 /** One tradable symbol of a broker account, spelled the way THAT broker spells it. */

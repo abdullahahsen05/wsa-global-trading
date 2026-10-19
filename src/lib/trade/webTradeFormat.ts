@@ -1,3 +1,5 @@
+import type { WebTradeTiming } from "@/lib/trade/webTrade";
+
 /**
  * Reading what the user types into the order panel and showing numbers the way a
  * trading terminal does. Pure.
@@ -57,11 +59,52 @@ export function formatDuration(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 2 : 1)} s`;
 }
 
-/** "183 ms (queue 120 ms · broker 63 ms)" for the timing the trading system reports; "" when there is none. */
-export function timingText(timing: { queueMs: number; runMs: number } | null | undefined): string {
+function isMs(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+/** "310 ms" or "330 ms (send 310 ms · session 12 ms)": the trading system's own time with what it was spent on. */
+function brokerText(timing: WebTradeTiming, runMs: number): string {
+  const parts: string[] = [];
+  if (isMs(timing.readMs) && timing.readMs > 0) parts.push(`read ${formatDuration(timing.readMs)}`);
+  if (isMs(timing.sessionMs) && timing.sessionMs > 0) parts.push(`session ${formatDuration(timing.sessionMs)}`);
+  if (isMs(timing.sendMs)) parts.push(`send ${formatDuration(timing.sendMs)}`);
+  if (typeof timing.attempts === "number" && timing.attempts > 1) parts.push(`${timing.attempts} attempts`);
+  return parts.length > 0 ? `${formatDuration(runMs)} (${parts.join(" · ")})` : formatDuration(runMs);
+}
+
+/**
+ * The time report of an order.
+ *
+ *  - the whole picture (the browser measured the total and the web server reported its part):
+ *    "640 ms in total: network 120 ms · server 90 ms · queue 60 ms · broker 330 ms (send 310 ms) · relay 40 ms"
+ *  - only what the trading system reports: "183 ms (queue 120 ms · broker 63 ms)"
+ *  - nothing to report: ""
+ */
+export function timingText(timing: WebTradeTiming | null | undefined): string {
   if (!timing) return "";
-  const total = timing.queueMs + timing.runMs;
-  return `${formatDuration(total)} (queue ${formatDuration(timing.queueMs)} · broker ${formatDuration(timing.runMs)})`;
+  const { queueMs, runMs, serverMs, waitMs, totalMs } = timing;
+  if (!isMs(queueMs) || !isMs(runMs)) return "";
+  const broker = brokerText(timing, runMs);
+  if (isMs(totalMs) && isMs(serverMs) && isMs(waitMs)) {
+    const network = Math.max(0, totalMs - serverMs);
+    const server = Math.max(0, serverMs - waitMs);
+    const relay = Math.max(0, waitMs - queueMs - runMs);
+    return `${formatDuration(totalMs)} in total: network ${formatDuration(network)} · server ${formatDuration(server)} · queue ${formatDuration(queueMs)} · broker ${broker} · relay ${formatDuration(relay)}`;
+  }
+  return `${formatDuration(queueMs + runMs)} (queue ${formatDuration(queueMs)} · broker ${broker})`;
+}
+
+/**
+ * The one number shown next to a result: the whole wait ("412 ms") when the browser measured it,
+ * else the trading system's own time (queue + broker). "" when nothing was reported.
+ */
+export function timingHeadline(timing: WebTradeTiming | null | undefined): string {
+  if (!timing) return "";
+  const { queueMs, runMs, totalMs } = timing;
+  if (isMs(totalMs)) return formatDuration(totalMs);
+  if (isMs(queueMs) && isMs(runMs)) return formatDuration(queueMs + runMs);
+  return "";
 }
 
 export type ResultTone = "gain" | "loss" | "flat";

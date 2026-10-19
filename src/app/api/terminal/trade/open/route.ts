@@ -7,6 +7,16 @@ import { issuesText, webTradeOpenSchema } from "@/lib/trade/webTradeSchemas";
 export const maxDuration = 30;
 
 /**
+ * GET /api/terminal/trade/open
+ *
+ * Wakes this route up - nothing else (no data, no sign-in, no database). The order panel
+ * calls it when it opens so the first order does not pay for a cold start.
+ */
+export function GET() {
+  return jsonOk({ warm: true }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
+}
+
+/**
  * POST /api/terminal/trade/open
  * { accountId, symbol, side: "BUY"|"SELL", volume, orderKind?: "MARKET"|"LIMIT"|"STOP",
  *   price? (pending orders), stopLoss?, takeProfit?, clientRequestId }
@@ -18,11 +28,12 @@ export const maxDuration = 30;
  * A repeated `clientRequestId` never places a second order.
  */
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   try {
     const user = await requireTrader();
     const parsed = webTradeOpenSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return jsonFail("VALIDATION_ERROR", issuesText(parsed.error), 400);
-    return jsonOk(await placeWebTradeOrder(user, parsed.data), {
+    return jsonOk(await placeWebTradeOrder(user, parsed.data, { startedAt }), {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });
   } catch (error) {

@@ -998,9 +998,14 @@ async function main() {
       adapter: createBrokerAdapter(),
       workerId,
       pollMs: intFromEnv("WSA_TRADE_GATEWAY_POLL_MS", 100, 50, 5_000),
-      idlePollMs: intFromEnv("WSA_TRADE_GATEWAY_IDLE_POLL_MS", 750, 100, 10_000),
+      // a command that arrives while the loop is idle waits at most this long before it is claimed
+      idlePollMs: intFromEnv("WSA_TRADE_GATEWAY_IDLE_POLL_MS", 400, 100, 10_000),
       stateRefreshMs: intFromEnv("WSA_TRADE_GATEWAY_STATE_MS", 1_000, 250, 10_000),
+      // in the seconds after an order the picture of that account is renewed this often
+      hotRefreshMs: intFromEnv("WSA_TRADE_GATEWAY_HOT_STATE_MS", 350, 150, 5_000),
       commandConcurrency: intFromEnv("WSA_TRADE_GATEWAY_CONCURRENCY", 8, 1, 32),
+      // STATE / SYMBOLS commands have slots of their own, so they never wait behind an order
+      readConcurrency: intFromEnv("WSA_TRADE_GATEWAY_READ_CONCURRENCY", 6, 1, 32),
       stateConcurrency: intFromEnv("WSA_TRADE_GATEWAY_STATE_CONCURRENCY", 6, 1, 32),
     });
     console.log("[copy-worker] WSA Trade gateway started (orders and live account state for the web terminal).");

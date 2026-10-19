@@ -1,8 +1,11 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import {
   isUncertainTradeCode,
+  WEB_TRADE_BURST_MS,
+  WEB_TRADE_BURST_POLL_MS,
   WEB_TRADE_POLL_MS,
   type WebTradeAccountsResponse,
   type WebTradeOrderResult,
@@ -66,9 +69,27 @@ export function useWebTradeAccounts(enabled: boolean) {
   });
 }
 
+/** Until when the state is asked for faster than usual (set right after an order). */
+let fastRefreshUntil = 0;
+
 /**
- * Live state of one account. Refreshes every couple of seconds while `active` (the pane is
- * on screen and the browser tab is visible), never when hidden. `symbol` decides
+ * Right after an order or a change the picture is read every `WEB_TRADE_BURST_POLL_MS` for a
+ * few seconds, so the new position / level shows up as soon as the AWS trading system has read
+ * it from the broker, instead of up to a full normal interval later. Safe to call any time.
+ */
+export function requestFastRefresh(): void {
+  fastRefreshUntil = Date.now() + WEB_TRADE_BURST_MS;
+}
+
+/** The pause before the next read of the state: short while a burst is running, normal otherwise. */
+export function nextStatePollMs(now: number = Date.now()): number {
+  return now < fastRefreshUntil ? WEB_TRADE_BURST_POLL_MS : WEB_TRADE_POLL_MS;
+}
+
+/**
+ * Live state of one account. Refreshes every second while `active` (the pane is
+ * on screen and the browser tab is visible) - every 400 ms for a few seconds after an
+ * order (`requestFastRefresh`) - never when hidden. `symbol` decides
  * which price is read; it is the symbol the user has COMMITTED (not every keystroke),
  * and the previous answer stays on screen while the new one loads, so changing the
  * symbol never blanks the positions.
@@ -77,7 +98,7 @@ export function useWebTradeState(accountId: string | null, symbol: string, activ
   return useQuery<WebTradeState>({
     queryKey: [WEB_TRADE_STATE_QUERY_KEY, accountId, symbol],
     enabled: active && accountId !== null,
-    refetchInterval: active ? WEB_TRADE_POLL_MS : false,
+    refetchInterval: active ? () => nextStatePollMs() : false,
     refetchIntervalInBackground: false,
     staleTime: 0,
     retry: false,
@@ -121,8 +142,20 @@ export function useWebTradeSymbols(accountId: string | null, enabled: boolean) {
 
 export type WebTradeAction = "open" | "modify" | "close" | "cancel" | "close-bulk";
 
-/** One order / change. The server answers with the ticket; a network failure is reported as `uncertain`. */
+const WEB_TRADE_ACTIONS: readonly WebTradeAction[] = ["open", "modify", "close", "cancel", "close-bulk"];
+
+/** The browser's high-resolution clock (falls back to the wall clock where there is none). */
+function clockMs(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+}
+
+/**
+ * One order / change. The server answers with the ticket; a network failure is reported as `uncertain`.
+ * The browser adds the total time it waited (`timing.totalMs`), so the report can show how much of it
+ * was the network and how much the trading system.
+ */
 export async function sendWebTrade(action: WebTradeAction, body: Record<string, unknown>): Promise<WebTradeOrderResult> {
+  const startedAt = clockMs();
   let response: Response;
   try {
     response = await fetch(`/api/terminal/trade/${action}`, {
@@ -139,7 +172,41 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
       action !== "modify",
     );
   }
-  return readEnvelope<WebTradeOrderResult>(response, "The broker did not answer.");
+  const result = await readEnvelope<WebTradeOrderResult>(response, "The broker did not answer.");
+  if (!result.timing) return result;
+  return { ...result, timing: { ...result.timing, totalMs: Math.max(0, Math.round(clockMs() - startedAt)) } };
+}
+
+const WARM_EVERY_MS = 4 * 60_000;
+
+/** Wakes the five order routes up (a plain GET each - no data, no sign-in, no database), ignoring any failure. */
+export function warmWebTradeRoutes(): void {
+  if (typeof fetch !== "function") return;
+  for (const action of WEB_TRADE_ACTIONS) {
+    try {
+      void Promise.resolve(
+        fetch(`/api/terminal/trade/${action}`, { method: "GET", cache: "no-store", credentials: "same-origin" }),
+      ).catch(() => undefined);
+    } catch {
+      // A warm-up is a courtesy; it must never get in the way of the panel.
+    }
+  }
+}
+
+/**
+ * Keeps the order routes warm while the panel is on screen: once when it opens and then every few
+ * minutes while the browser tab is visible. Each route is its own serverless function, and the first
+ * request to a cold one pays for its start-up - this makes sure that is never an order.
+ */
+export function useWarmWebTradeRoutes(enabled: boolean): void {
+  useEffect(() => {
+    if (!enabled) return;
+    warmWebTradeRoutes();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") warmWebTradeRoutes();
+    }, WARM_EVERY_MS);
+    return () => window.clearInterval(timer);
+  }, [enabled]);
 }
 
 /** One id per click on "Send order" - the server never places two orders for the same id. */

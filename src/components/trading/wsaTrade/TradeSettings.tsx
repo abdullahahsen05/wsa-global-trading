@@ -16,6 +16,7 @@ import { CommitField, LABEL_CLASS, ToggleRow } from "./ui";
  * The person's own trade rules. They are checked in the panel before an order is sent and are
  * saved with the terminal layout (per user, not per account). The platform's own gates
  * (subscription, execution switch, risk rules) are enforced by the server whatever is set here.
+ * There is no "ask before sending" switch: Buy, Sell, Close and Delete are the command itself.
  */
 
 const MODE_LABEL: Record<WsaTradeLevelMode, string> = { price: "Prices", points: "Points" };
@@ -37,14 +38,6 @@ export function TradeSettings({ settings, onChange }: TradeSettingsProps) {
   const id = useId();
   return (
     <div className="space-y-4 rounded-[4px] border border-line bg-background p-3" aria-label="Trade settings">
-      <ToggleRow
-        id={`${id}-confirm`}
-        label="Ask before an order is sent"
-        hint="Off: one click on Buy / Sell, Close or Delete acts at once."
-        checked={settings.confirm}
-        onChange={(confirm) => onChange({ confirm })}
-      />
-
       <div>
         <span className={LABEL_CLASS} id={`${id}-mode`}>
           Stop loss and take profit are typed as

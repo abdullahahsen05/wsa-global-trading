@@ -1,12 +1,27 @@
 "use client";
 
-import { useCallback, useRef, useState, type KeyboardEvent } from "react";
-import { CandlestickChart, Columns2, Crosshair, Monitor, Rows2 } from "lucide-react";
+import {
+  useCallback,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
+import { CandlestickChart, Columns2, Crosshair, GripVertical, Monitor, Rows2 } from "lucide-react";
 import { TradingChart } from "@/components/charts/TradingChart";
 import { MetaTraderTerminal } from "@/components/trading/MetaTraderTerminal";
 import { WsaTradePanel } from "@/components/trading/WsaTradePanel";
 import { useTerminalWorkspace, type WorkspaceSaveState } from "@/hooks/useTerminalWorkspace";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
+import {
+  clampShare,
+  PANEL_SHARE_MAX,
+  PANEL_SHARE_MIN,
+  shareFromPointer,
+  splitColumns,
+  stepShare,
+} from "@/lib/trade/panelLayout";
 import {
   TERMINAL_VIEWS,
   type MetaTraderPatch,
@@ -32,7 +47,15 @@ import {
  * switching tabs never reloads a chart or drops a terminal session - they keep
  * running in the background, which is what "both open in real time" needs. A hidden
  * pane is not polled (WSA Trade stops asking the broker while it is out of sight).
+ *
+ * Side by side, the divider between the chart and the order panel can be dragged (or moved with
+ * the arrow keys; a double click gives the usual column back), and the order panel scales its own
+ * contents (zoom, or "Auto" to fit) - so nobody has to zoom the whole browser to reach the buttons.
+ * Both are saved with the workspace.
  */
+
+/** What a screen reader hears for the divider while the panel still has its usual column. */
+const USUAL_PANEL_SHARE = 0.33;
 
 const VIEW_TABS: ReadonlyArray<{
   id: TerminalView;
@@ -102,6 +125,11 @@ export function TerminalWorkspace() {
   }
 
   const tabRefs = useRef<Partial<Record<TerminalView, HTMLButtonElement | null>>>({});
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const wsaPaneRef = useRef<HTMLDivElement | null>(null);
+  const dragging = useRef(false);
+  /** the share of the width the panel has while the divider is being dragged (saved when it is let go) */
+  const [dragShare, setDragShare] = useState<number | null>(null);
 
   const changeTradingView = useCallback((patch: TradingViewPatch) => update({ tradingview: patch }), [update]);
   const changeMetaTrader = useCallback((patch: MetaTraderPatch) => update({ metatrader: patch }), [update]);
@@ -124,19 +152,81 @@ export function TerminalWorkspace() {
   }
 
   const stackedSplit = inSplit && split === "rows";
-  const paneHeight = stackedSplit ? "clamp(380px, 56dvh, 620px)" : "clamp(520px, 78dvh, 820px)";
+  // tall enough for the whole ticket and a few positions on a big screen, never taller than the screen
+  const paneHeight = stackedSplit ? "clamp(380px, 56dvh, 620px)" : "clamp(520px, 80dvh, 1100px)";
 
   // The container is always `relative`: a pane that is not on screen is taken out of the flow
   // (absolute, invisible) but stays mounted, and needs something to be positioned against.
-  // Side by side the chart gets the room; the order panel has a fixed, narrower column (two equal halves
-  // stay for the MetaTrader web terminal, which needs the width).
+  // Side by side the chart gets the room; the order panel has a narrower column of its own - 380-440 px
+  // unless the person dragged the divider (two equal halves stay for the MetaTrader web terminal, which
+  // needs the width). The divider is a third, 16 px column that replaces the gap.
+  const withDivider = inSplit && split === "columns" && splitWith === "wsatrade";
+  const panelShare = dragShare ?? workspace.wsatrade.panelShare;
   const containerClass = inSplit
     ? split === "columns"
       ? splitWith === "wsatrade"
-        ? "relative grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,440px)]"
+        ? "relative grid gap-4 lg:grid-cols-[var(--split-columns)] lg:gap-0"
         : "relative grid gap-4 lg:grid-cols-2"
       : "relative grid gap-4"
     : "relative";
+  const containerStyle = withDivider ? ({ "--split-columns": splitColumns(panelShare) } as CSSProperties) : undefined;
+
+  /** The share the order panel has right now, measured (the usual column has no stored number). */
+  function currentShare(): number {
+    const grid = gridRef.current?.getBoundingClientRect().width ?? 0;
+    const pane = wsaPaneRef.current?.getBoundingClientRect().width ?? 0;
+    return grid > 0 && pane > 0 ? clampShare(pane / grid) : USUAL_PANEL_SHARE;
+  }
+
+  function shareAt(event: ReactPointerEvent<HTMLDivElement>): number | null {
+    const rect = gridRef.current?.getBoundingClientRect();
+    return rect ? shareFromPointer(event.clientX, rect.left, rect.width) : null;
+  }
+
+  function startResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    // the chart is an iframe: capturing the pointer keeps the drag going when it crosses it
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragging.current = true;
+  }
+
+  function moveResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragging.current) return;
+    const share = shareAt(event);
+    if (share !== null) setDragShare(share);
+  }
+
+  function endResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!dragging.current) return;
+    dragging.current = false;
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // the pointer was already released
+    }
+    const share = shareAt(event);
+    setDragShare(null);
+    if (share !== null) update({ wsatrade: { panelShare: share } });
+  }
+
+  function cancelResize() {
+    dragging.current = false;
+    setDragShare(null);
+  }
+
+  function resizeWithKeys(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Home" || event.key === "Enter") {
+      event.preventDefault();
+      update({ wsatrade: { panelShare: null } });
+      return;
+    }
+    // the divider moves left = the panel gets wider
+    const direction = event.key === "ArrowLeft" ? 1 : event.key === "ArrowRight" ? -1 : 0;
+    if (direction === 0) return;
+    event.preventDefault();
+    update({ wsatrade: { panelShare: stepShare(workspace.wsatrade.panelShare ?? currentShare(), direction) } });
+  }
   const paneClass = (visible: boolean) => {
     if (!visible) return "pointer-events-none invisible absolute inset-0 overflow-hidden";
     return inSplit ? "min-w-0" : "relative min-w-0";
@@ -231,7 +321,7 @@ export function TerminalWorkspace() {
         </div>
       </div>
 
-      <div className={containerClass}>
+      <div ref={gridRef} className={containerClass} style={containerStyle}>
         {created.tradingview ? (
           <div
             id={PANE_ID.tradingview}
@@ -247,6 +337,32 @@ export function TerminalWorkspace() {
               onSettingsChange={changeTradingView}
               chartHeight={paneHeight}
             />
+          </div>
+        ) : null}
+        {withDivider ? (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize the order panel"
+            aria-valuemin={Math.round(PANEL_SHARE_MIN * 100)}
+            aria-valuemax={Math.round(PANEL_SHARE_MAX * 100)}
+            aria-valuenow={Math.round((panelShare ?? USUAL_PANEL_SHARE) * 100)}
+            aria-valuetext={
+              panelShare === null ? "The usual width" : `${Math.round(panelShare * 100)} percent of the width`
+            }
+            tabIndex={0}
+            title="Drag to resize the order panel · arrow keys · double click for the usual width"
+            onPointerDown={startResize}
+            onPointerMove={moveResize}
+            onPointerUp={endResize}
+            onPointerCancel={cancelResize}
+            onDoubleClick={() => update({ wsatrade: { panelShare: null } })}
+            onKeyDown={resizeWithKeys}
+            className="group hidden cursor-col-resize touch-none select-none items-center justify-center outline-none lg:flex"
+          >
+            <span className="flex h-16 w-3 items-center justify-center rounded-[4px] border border-line bg-background text-muted transition group-hover:border-accent group-focus-visible:border-accent">
+              <GripVertical className="h-4 w-4" aria-hidden="true" />
+            </span>
           </div>
         ) : null}
         {created.metatrader ? (
@@ -270,6 +386,7 @@ export function TerminalWorkspace() {
         ) : null}
         {created.wsatrade ? (
           <div
+            ref={wsaPaneRef}
             id={PANE_ID.wsatrade}
             role="tabpanel"
             aria-label="WSA Trade order panel"

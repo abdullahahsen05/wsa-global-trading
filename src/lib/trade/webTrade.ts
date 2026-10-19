@@ -34,7 +34,10 @@ export type WebTradeBulkScope = (typeof WEB_TRADE_BULK_SCOPES)[number];
 export const WEB_TRADE_MIN_LOTS = 0.001;
 export const WEB_TRADE_MAX_LOTS = 100;
 /** How often the open panel refreshes positions and price (the AWS system renews its picture about once a second). */
-export const WEB_TRADE_POLL_MS = 2000;
+export const WEB_TRADE_POLL_MS = 1000;
+/** Right after an order the panel asks this often, for `WEB_TRADE_BURST_MS`, so the result shows up as soon as the AWS system has read it. */
+export const WEB_TRADE_BURST_POLL_MS = 400;
+export const WEB_TRADE_BURST_MS = 3500;
 /** Order comment seen in the broker's history. It must NOT start with `wsa:` (the copy engine's own marker). */
 export const WEB_TRADE_COMMENT = "WSA Trade";
 
@@ -221,6 +224,49 @@ export interface WebTradeBulkFailure {
   message: string;
 }
 
+/**
+ * Where the time of one order went, in milliseconds. Every part is optional: an older server or
+ * the direct route reports less, and a step that was not needed (no read in front of a close) is absent.
+ *
+ *   total   = network + server + queue + broker + relay
+ *   network : browser <-> web server (also a cold start of the function)        totalMs - serverMs
+ *   server  : the web server's own work: sign-in check, gates, audit            serverMs - waitMs
+ *   queue   : the command waited for the AWS worker                             queueMs
+ *   broker  : the AWS worker's work, from taking the command to the broker's    runMs
+ *             answer (of which `readMs` + `sessionMs` + `sendMs`)
+ *   relay   : the database round trips between the web server and the worker    waitMs - queueMs - runMs
+ */
+export interface WebTradeTiming {
+  queueMs?: number;
+  runMs?: number;
+  /** reading the account in front of the change */
+  readMs?: number;
+  /** getting a ready broker session (0 = it was warm) */
+  sessionMs?: number;
+  /** the order request(s) to the broker bridge */
+  sendMs?: number;
+  /** how often the order was sent (more than once after a requote) */
+  attempts?: number;
+  /** web server: from the request arriving to the answer leaving */
+  serverMs?: number;
+  /** web server: from writing the command to seeing its answer */
+  waitMs?: number;
+  /** browser: from the click to the answer (added by the panel's request helper) */
+  totalMs?: number;
+}
+
+/** What the broker said about the order, for showing the result before the next picture arrives. */
+export interface WebTradeOrderDetail {
+  symbol?: string;
+  /** lots the broker executed / closed */
+  volume?: number;
+  /** the price a market order was filled at */
+  fillPrice?: number;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  price?: number | null;
+}
+
 export interface WebTradeOrderResult {
   ok: true;
   /** the broker's ticket of the new position / order / the one that was changed */
@@ -233,8 +279,10 @@ export interface WebTradeOrderResult {
   closed?: number;
   failed?: number;
   failures?: WebTradeBulkFailure[];
-  /** how long the command waited for the trading system and how long it needed there, in milliseconds */
-  timing?: { queueMs: number; runMs: number } | null;
+  /** what the broker confirmed (fill price, executed lots, the levels now in force) */
+  detail?: WebTradeOrderDetail;
+  /** how long the command waited for the trading system and where the time went, in milliseconds */
+  timing?: WebTradeTiming | null;
 }
 
 /** Every symbol of an account, spelled the way its broker spells it. */

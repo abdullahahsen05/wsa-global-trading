@@ -45,7 +45,9 @@ describe("defaults", () => {
       symbol: "XAUUSD",
       volume: 0.01,
       orderKind: "MARKET",
-      confirm: true,
+      // fit to the room the pane has, and the panel's usual column next to the chart
+      zoom: null,
+      panelShare: null,
       levelMode: "price",
       stopLossPoints: null,
       takeProfitPoints: null,
@@ -662,7 +664,6 @@ describe("WSA Trade settings and the split partner", () => {
     const ok = sanitizeWorkspace({
       wsatrade: {
         orderKind: "LIMIT",
-        confirm: false,
         levelMode: "points",
         stopLossPoints: 250,
         takeProfitPoints: 500,
@@ -673,7 +674,6 @@ describe("WSA Trade settings and the split partner", () => {
     expect(ok).toEqual({
       ...defaultWsaTrade(),
       orderKind: "LIMIT",
-      confirm: false,
       levelMode: "points",
       stopLossPoints: 250,
       takeProfitPoints: 500,
@@ -685,12 +685,13 @@ describe("WSA Trade settings and the split partner", () => {
     const bad = sanitizeWorkspace({
       wsatrade: {
         orderKind: "MARKET_ON_CLOSE",
-        confirm: "no",
         levelMode: "pips",
         stopLossPoints: 12.5,
         takeProfitPoints: 0,
         requireStopLoss: 1,
         maxVolume: -3,
+        zoom: "big",
+        panelShare: 7,
         volume: 0.5,
       },
     }).wsatrade;
@@ -710,6 +711,33 @@ describe("WSA Trade settings and the split partner", () => {
     expect(sanitizeWorkspace({ wsatrade: { maxVolume: 0.0004 } }).wsatrade.maxVolume).toBeNull();
     expect(sanitizeWorkspace({ wsatrade: { maxVolume: 1000 } }).wsatrade.maxVolume).toBeNull();
     expect(sanitizeWorkspace({ wsatrade: { maxVolume: 0.001 } }).wsatrade.maxVolume).toBe(0.001);
+  });
+
+  test("there is no 'ask before sending' switch any more: a stored one is dropped", () => {
+    // an older document still carries `confirm`; it is ignored and never written back
+    const stored = sanitizeWorkspace({ wsatrade: { confirm: true, volume: 0.5 } }).wsatrade;
+    expect(stored).toEqual({ ...defaultWsaTrade(), volume: 0.5 });
+    expect(stored).not.toHaveProperty("confirm");
+    expect(mergeWorkspace(defaultWorkspace(), { wsatrade: { confirm: true } }).wsatrade).not.toHaveProperty("confirm");
+  });
+
+  test("the size of the panel and its share of the split view are validated", () => {
+    expect(sanitizeWorkspace({ wsatrade: { zoom: 0.9, panelShare: 0.35 } }).wsatrade).toMatchObject({ zoom: 0.9, panelShare: 0.35 });
+    // the limits themselves are valid, a hair outside is not
+    expect(sanitizeWorkspace({ wsatrade: { zoom: 0.6 } }).wsatrade.zoom).toBe(0.6);
+    expect(sanitizeWorkspace({ wsatrade: { zoom: 1.6 } }).wsatrade.zoom).toBe(1.6);
+    expect(sanitizeWorkspace({ wsatrade: { zoom: 0.59 } }).wsatrade.zoom).toBeNull();
+    expect(sanitizeWorkspace({ wsatrade: { zoom: 1.61 } }).wsatrade.zoom).toBeNull();
+    expect(sanitizeWorkspace({ wsatrade: { panelShare: 0.2 } }).wsatrade.panelShare).toBe(0.2);
+    expect(sanitizeWorkspace({ wsatrade: { panelShare: 0.6 } }).wsatrade.panelShare).toBe(0.6);
+    expect(sanitizeWorkspace({ wsatrade: { panelShare: 0.19 } }).wsatrade.panelShare).toBeNull();
+    expect(sanitizeWorkspace({ wsatrade: { panelShare: 0.61 } }).wsatrade.panelShare).toBeNull();
+    // not numbers: back to "fit" / the usual column
+    for (const value of ["1", "0.9", true, [], {}, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(sanitizeWorkspace({ wsatrade: { zoom: value, panelShare: value } }).wsatrade).toMatchObject({ zoom: null, panelShare: null });
+    }
+    // odd decimals are rounded, so a stored document does not grow noise
+    expect(sanitizeWorkspace({ wsatrade: { zoom: 0.9000004, panelShare: 0.3500004 } }).wsatrade).toMatchObject({ zoom: 0.9, panelShare: 0.35 });
   });
 
   test("a patch changes only the ticket fields it names; null clears the account; garbage is ignored", () => {
@@ -742,7 +770,6 @@ describe("WSA Trade settings and the split partner", () => {
     const rules = mergeWorkspace(defaultWorkspace(), {
       wsatrade: {
         orderKind: "STOP",
-        confirm: false,
         levelMode: "points",
         stopLossPoints: 300,
         takeProfitPoints: 900,
@@ -753,7 +780,6 @@ describe("WSA Trade settings and the split partner", () => {
     expect(rules).toEqual({
       ...defaultWsaTrade(),
       orderKind: "STOP",
-      confirm: false,
       levelMode: "points",
       stopLossPoints: 300,
       takeProfitPoints: 900,
@@ -778,15 +804,35 @@ describe("WSA Trade settings and the split partner", () => {
     const garbage = mergeWorkspace(start, {
       wsatrade: {
         orderKind: "NOPE",
-        confirm: "yes",
         levelMode: "pips",
         stopLossPoints: -4,
         takeProfitPoints: 1.5,
         requireStopLoss: "true",
         maxVolume: 1000,
+        zoom: 9,
+        panelShare: "wide",
       },
     });
     expect(garbage.wsatrade).toEqual(rules);
+  });
+
+  test("a patch sets, changes and clears the size of the panel and its share; a bad value changes nothing", () => {
+    const sized = mergeWorkspace(defaultWorkspace(), { wsatrade: { zoom: 0.8, panelShare: 0.4 } });
+    expect(sized.wsatrade).toEqual({ ...defaultWsaTrade(), zoom: 0.8, panelShare: 0.4 });
+
+    // one at a time
+    expect(mergeWorkspace(sized, { wsatrade: { zoom: 1.2 } }).wsatrade).toEqual({ ...sized.wsatrade, zoom: 1.2 });
+    expect(mergeWorkspace(sized, { wsatrade: { panelShare: 0.3 } }).wsatrade).toEqual({ ...sized.wsatrade, panelShare: 0.3 });
+    // null = fit to the room / the usual column
+    expect(mergeWorkspace(sized, { wsatrade: { zoom: null } }).wsatrade).toEqual({ ...sized.wsatrade, zoom: null });
+    expect(mergeWorkspace(sized, { wsatrade: { panelShare: null } }).wsatrade).toEqual({ ...sized.wsatrade, panelShare: null });
+    // a value out of range or of the wrong type keeps what is there
+    expect(mergeWorkspace(sized, { wsatrade: { zoom: 3, panelShare: 0.9 } }).wsatrade).toEqual(sized.wsatrade);
+    expect(mergeWorkspace(sized, { wsatrade: { zoom: "1", panelShare: "0.3" } }).wsatrade).toEqual(sized.wsatrade);
+    // a patch about something else leaves them alone
+    expect(mergeWorkspace(sized, { wsatrade: { volume: 0.5 } }).wsatrade).toEqual({ ...sized.wsatrade, volume: 0.5 });
+    // and the result is a valid document
+    expect(sanitizeWorkspace(sized)).toEqual(sized);
   });
 
   test("the document stays valid and idempotent, and still holds no password", () => {
@@ -798,15 +844,16 @@ describe("WSA Trade settings and the split partner", () => {
     expect(JSON.stringify(next)).not.toMatch(/secret|password|token/i);
     expect(Object.keys(next.wsatrade).sort()).toEqual([
       "accountId",
-      "confirm",
       "levelMode",
       "maxVolume",
       "orderKind",
+      "panelShare",
       "requireStopLoss",
       "stopLossPoints",
       "symbol",
       "takeProfitPoints",
       "volume",
+      "zoom",
     ]);
   });
 });

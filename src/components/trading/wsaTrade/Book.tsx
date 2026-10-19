@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2, Pencil, X } from "lucide-react";
-import { bulkPreview, bulkQuestion, partialLots } from "@/lib/trade/ticketMath";
+import { bulkPreview, partialLots } from "@/lib/trade/ticketMath";
 import {
   isValidLots,
   roundLots,
@@ -10,15 +10,19 @@ import {
   type WebTradePosition,
 } from "@/lib/trade/webTrade";
 import { formatLots, formatPrice, formatSigned, parseDecimal, resultTone } from "@/lib/trade/webTradeFormat";
-import { CHIP_CLASS, FIELD_CLASS, LABEL_CLASS, toneClass } from "./ui";
+import { CHIP_CLASS, DANGER_CHIP_CLASS, FIELD_CLASS, LABEL_CLASS, toneClass } from "./ui";
 
-/** The lists under the ticket: open positions, pending orders and the "close several" bar. */
+/**
+ * The lists under the ticket: open positions, pending orders and the "close several" bar.
+ * Every button here is the command itself - Close, Delete, BE and the "close several" chips act at
+ * once; the only forms are the ones that need a number from the person (levels, lots, a pending
+ * order's price), and their Save / Close button is the command.
+ */
 
 export type RowEdit =
   | { kind: "levels"; ticket: string; stopLoss: string; takeProfit: string }
   | { kind: "close"; ticket: string; lots: string }
-  | { kind: "pending"; ticket: string; price: string; stopLoss: string; takeProfit: string }
-  | { kind: "cancel"; ticket: string };
+  | { kind: "pending"; ticket: string; price: string; stopLoss: string; takeProfit: string };
 
 const SHARES: ReadonlyArray<{ share: number; label: string }> = [
   { share: 0.25, label: "25%" },
@@ -51,7 +55,8 @@ export interface PositionCardProps {
   /** can the stop loss be moved to the entry (not already there or beyond) */
   canBreakEven: boolean;
   onStartLevels: () => void;
-  onStartClose: () => void;
+  /** closes the whole position at once */
+  onClose: () => void;
   onStartPartial: () => void;
   onBreakEven: () => void;
   onChange: (edit: RowEdit) => void;
@@ -67,7 +72,7 @@ export function PositionCard({
   canManage,
   canBreakEven,
   onStartLevels,
-  onStartClose,
+  onClose,
   onStartPartial,
   onBreakEven,
   onChange,
@@ -128,7 +133,7 @@ export function PositionCard({
           type="button"
           className="btn-dark text-xs"
           disabled={off}
-          onClick={onStartClose}
+          onClick={onClose}
           aria-label={`Close ${name}`}
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -245,11 +250,11 @@ export interface PendingCardProps {
   busy: boolean;
   canManage: boolean;
   onStartEdit: () => void;
-  onStartCancel: () => void;
+  /** deletes the pending order at once */
+  onDelete: () => void;
   onChange: (edit: RowEdit) => void;
   onCancelEdit: () => void;
   onSave: (edit: Extract<RowEdit, { kind: "pending" }>) => void;
-  onConfirmCancel: () => void;
 }
 
 export function PendingCard({
@@ -258,11 +263,10 @@ export function PendingCard({
   busy,
   canManage,
   onStartEdit,
-  onStartCancel,
+  onDelete,
   onChange,
   onCancelEdit,
   onSave,
-  onConfirmCancel,
 }: PendingCardProps) {
   const name = `${order.symbol} ${order.ticket}`;
   const off = !canManage || busy;
@@ -296,7 +300,7 @@ export function PendingCard({
           type="button"
           className="btn-dark text-xs"
           disabled={off}
-          onClick={onStartCancel}
+          onClick={onDelete}
           aria-label={`Delete pending order ${name}`}
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -357,19 +361,6 @@ export function PendingCard({
           </div>
         </div>
       ) : null}
-
-      {editing?.kind === "cancel" ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-          <span className="text-xs font-semibold text-foreground">Delete this order?</span>
-          <button type="button" className="btn-active text-xs" disabled={busy} onClick={onConfirmCancel}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            Delete order
-          </button>
-          <button type="button" className="btn-dark text-xs" disabled={busy} onClick={onCancelEdit}>
-            Keep it
-          </button>
-        </div>
-      ) : null}
     </li>
   );
 }
@@ -393,17 +384,14 @@ export interface BulkBarProps {
   symbol: string;
   positions: ReadonlyArray<WebTradePosition>;
   pending: ReadonlyArray<WebTradePendingOrder>;
-  /** the scope waiting for its second click */
-  asked: WebTradeBulkScope | null;
   busy: boolean;
   canManage: boolean;
-  onAsk: (scope: WebTradeBulkScope) => void;
-  onConfirm: (scope: WebTradeBulkScope) => void;
-  onCancel: () => void;
+  /** does it at once: there is no second click */
+  onRun: (scope: WebTradeBulkScope) => void;
 }
 
-/** Counts what a scope would touch and asks once before it does it. */
-export function BulkBar({ list, symbol, positions, pending, asked, busy, canManage, onAsk, onConfirm, onCancel }: BulkBarProps) {
+/** One chip per choice, each with the number of orders it will touch; a chip is the command. */
+export function BulkBar({ list, symbol, positions, pending, busy, canManage, onRun }: BulkBarProps) {
   const scopes: ReadonlyArray<{ scope: WebTradeBulkScope; label: string }> =
     list === "positions" ? POSITION_SCOPES : [{ scope: "PENDING", label: "Delete all pending orders" }];
   const symbolFor = (scope: WebTradeBulkScope) => (scope === "SYMBOL" ? symbol : null);
@@ -412,44 +400,29 @@ export function BulkBar({ list, symbol, positions, pending, asked, busy, canMana
     return targets.positions.length + targets.pending.length;
   };
 
-  if (asked && scopes.some((entry) => entry.scope === asked)) {
-    const count = countFor(asked);
-    return (
-      <div
-        role="group"
-        aria-label="Confirm"
-        className="flex flex-wrap items-center gap-2 rounded-[4px] border border-accent px-3 py-2 text-xs"
-      >
-        <span className="font-semibold text-foreground">
-          {count === 0 ? "There is nothing to do for this choice." : bulkQuestion(asked, symbolFor(asked), count)}
-        </span>
-        {count > 0 ? (
-          <button type="button" className="btn-active text-xs" disabled={busy || !canManage} onClick={() => onConfirm(asked)}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-            {asked === "PENDING" ? "Yes, delete" : "Yes, close"}
-          </button>
-        ) : null}
-        <button type="button" className="btn-dark text-xs" disabled={busy} onClick={onCancel}>
-          {count > 0 ? "No" : "Back"}
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={list === "positions" ? "Close several positions" : "Delete pending orders"}>
+    <div
+      className="flex flex-wrap items-center gap-1.5"
+      role="group"
+      aria-label={list === "positions" ? "Close several positions" : "Delete pending orders"}
+    >
       {list === "positions" ? <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Close</span> : null}
-      {scopes.map((entry) => (
-        <button
-          key={entry.scope}
-          type="button"
-          className={CHIP_CLASS}
-          disabled={!canManage || busy || countFor(entry.scope) === 0}
-          onClick={() => onAsk(entry.scope)}
-        >
-          {entry.label}
-        </button>
-      ))}
+      {scopes.map((entry) => {
+        const count = countFor(entry.scope);
+        return (
+          <button
+            key={entry.scope}
+            type="button"
+            className={DANGER_CHIP_CLASS}
+            disabled={!canManage || busy || count === 0}
+            onClick={() => onRun(entry.scope)}
+            aria-label={`${entry.scope === "PENDING" ? entry.label : `Close ${entry.label.toLowerCase()}`} (${count})`}
+          >
+            {entry.label}
+            <span className="ml-1 tabular-nums opacity-70">{count}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

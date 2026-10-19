@@ -647,6 +647,31 @@ export async function getPlatformSubscriptionAccess(userId: string): Promise<Sub
   return summary.platformSubscription;
 }
 
+/**
+ * The quick yes/no the order path needs: does this user hold an ACTIVE platform subscription
+ * right now? ONE query, where `getPlatformSubscriptionAccess` builds the whole billing picture
+ * (a dozen queries, some of them repairs that write). It is exactly the rule
+ * `derivePlatformSubscriptionAccess` applies first - an ACTIVE subscription of the platform
+ * product whose period has not ended. "false" only means "not seen here": callers that must
+ * explain or repair a state fall back to `getPlatformSubscriptionAccess`.
+ */
+export async function hasActivePlatformProductSubscription(userId: string): Promise<boolean> {
+  const { data, error } = await createAdminClient()
+    .from("subscriptions")
+    .select("id, billing_products(code)")
+    .eq("user_id", userId)
+    .eq("status", "ACTIVE")
+    .gt("current_period_end", new Date().toISOString())
+    .limit(10);
+  if (error || !data) return false;
+  return (data as unknown as Array<{ billing_products: { code?: string } | Array<{ code?: string }> | null }>).some(
+    (row) => {
+      const product = Array.isArray(row.billing_products) ? row.billing_products[0] : row.billing_products;
+      return product?.code === "PLATFORM_MONTHLY";
+    },
+  );
+}
+
 export async function getCopyEntitlementAccess(
   userId: string,
   tradingAccountId: string,

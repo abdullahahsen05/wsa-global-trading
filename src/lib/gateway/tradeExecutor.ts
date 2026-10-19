@@ -16,9 +16,11 @@ if (typeof window !== "undefined") {
  * pending order is really there, and that the levels make sense for it.
  *
  * Speed rules: closing a position and sending an order read nothing first (the broker
- * answers "no such order" itself); only changes that need the current levels, and
- * cancelling (which must be sure the ticket is a PENDING order - a "cancel" that fell
- * through to a close would close a real position), read the account first.
+ * answers "no such order" itself); a change that needs the current levels uses the picture
+ * the worker took a moment ago when it has one that is certain to be current (see
+ * `ExecuteContext.recentState`) and only reads the account otherwise; cancelling always
+ * reads it (a "cancel" that fell through to a close would close a real position, so the
+ * ticket must be seen to be a PENDING order right now).
  *
  * No Next / React imports: shared with the AWS worker.
  */
@@ -31,6 +33,7 @@ import {
   type BrokerOpenPosition,
   type BrokerPendingOrder,
   type BrokerTradingState,
+  type ExecutionStages,
 } from "@/lib/broker/BrokerAdapter";
 import { runPool } from "@/lib/copy/pool";
 import { levelsProblem, pendingLevelsProblem, resolveModifyLevels, WEB_TRADE_COMMENT } from "@/lib/trade/webTrade";
@@ -39,6 +42,7 @@ import {
   type BulkFailure,
   type BulkScope,
   type CommandDetail,
+  type CommandTiming,
   type GatewayQuote,
   type GatewayTradingState,
   type ModifyCommand,
@@ -46,6 +50,19 @@ import {
   type StoredCommandError,
   type TradeCommandOutcome,
 } from "./tradeCommands";
+
+/** What the caller (the AWS worker) can hand to a command besides the command itself. */
+export interface ExecuteContext {
+  /**
+   * A picture of the account that was read AFTER the last order on it finished and is only a
+   * moment old. A modify takes the levels from it instead of reading the broker again in front
+   * of the change. Never used to say "not found": a ticket that is not in it is looked up
+   * with a fresh read before the command gives up.
+   */
+  recentState?: BrokerTradingState | null;
+  /** Filled in while the command runs: where its time went (the worker adds the queue time and the total). */
+  timing?: Partial<CommandTiming>;
+}
 
 /** Orders sent at the same time by one bulk command (the broker session is shared). */
 export const BULK_CONCURRENCY = 3;
@@ -154,7 +171,30 @@ function outcomeOf(
   detail: CommandDetail = {},
 ): TradeCommandOutcome {
   const executed = result.executedVolume !== undefined && result.executedVolume > 0 ? { volume: result.executedVolume } : {};
-  return { ticket: ticket ?? null, note: result.note ?? null, detail: { ...executed, ...detail } };
+  const filled =
+    typeof result.executedPrice === "number" && Number.isFinite(result.executedPrice) && result.executedPrice > 0
+      ? { fillPrice: result.executedPrice }
+      : {};
+  return { ticket: ticket ?? null, note: result.note ?? null, detail: { ...executed, ...filled, ...detail } };
+}
+
+/** Copies what an adapter measured for one order call into the timing of the command. */
+function recordStages(context: ExecuteContext | undefined, stages: ExecutionStages): void {
+  const timing = context?.timing;
+  if (!timing) return;
+  if (stages.sessionMs !== undefined) timing.sessionMs = stages.sessionMs;
+  if (stages.sendMs !== undefined) timing.sendMs = stages.sendMs;
+  if (stages.attempts !== undefined) timing.attempts = stages.attempts;
+}
+
+/** Reads the account and notes how long that took. */
+async function readTimed(adapter: BrokerAdapter, accountId: string, context: ExecuteContext | undefined): Promise<BrokerTradingState> {
+  const startedAt = Date.now();
+  try {
+    return await stateReader(adapter).fetchTradingState(accountId);
+  } finally {
+    if (context?.timing) context.timing.readMs = (context.timing.readMs ?? 0) + (Date.now() - startedAt);
+  }
 }
 
 /** The value a level gets in a modification: the patch wins, `null` removes it, a missing key keeps the current one. 0 = none. */
@@ -167,6 +207,7 @@ async function modifyPosition(
   accountId: string,
   position: BrokerOpenPosition,
   patch: ModifyCommand,
+  context: ExecuteContext | undefined,
 ): Promise<TradeCommandOutcome> {
   if (patch.price !== undefined) {
     throw new TradeCommandError("VALIDATION_ERROR", "The entry price can only be changed on a pending order.", 400);
@@ -177,17 +218,23 @@ async function modifyPosition(
   if (levels.stopLoss === (position.stopLoss ?? 0) && levels.takeProfit === (position.takeProfit ?? 0)) {
     throw new TradeCommandError("NO_CHANGE", "Stop loss and take profit already have these values.", 400);
   }
-  const result = await adapter.modifyTrade({
-    accountId,
-    brokerPositionId: position.ticket,
-    stopLoss: levels.stopLoss,
-    takeProfit: levels.takeProfit,
-  });
-  return outcomeOf(position.ticket, result, {
-    symbol: position.symbol,
-    stopLoss: levels.stopLoss || null,
-    takeProfit: levels.takeProfit || null,
-  });
+  const stages: ExecutionStages = {};
+  try {
+    const result = await adapter.modifyTrade({
+      accountId,
+      brokerPositionId: position.ticket,
+      stopLoss: levels.stopLoss,
+      takeProfit: levels.takeProfit,
+      stages,
+    });
+    return outcomeOf(position.ticket, result, {
+      symbol: position.symbol,
+      stopLoss: levels.stopLoss || null,
+      takeProfit: levels.takeProfit || null,
+    });
+  } finally {
+    recordStages(context, stages);
+  }
 }
 
 async function modifyPendingOrder(
@@ -195,6 +242,7 @@ async function modifyPendingOrder(
   accountId: string,
   order: BrokerPendingOrder,
   patch: ModifyCommand,
+  context: ExecuteContext | undefined,
 ): Promise<TradeCommandOutcome> {
   const price = patch.price ?? order.price;
   const stopLoss = levelAfter(patch.stopLoss, order.stopLoss);
@@ -204,19 +252,25 @@ async function modifyPendingOrder(
   if (price === order.price && stopLoss === (order.stopLoss ?? 0) && takeProfit === (order.takeProfit ?? 0)) {
     throw new TradeCommandError("NO_CHANGE", "The order already has these values.", 400);
   }
-  const result = await adapter.modifyTrade({
-    accountId,
-    brokerPositionId: order.ticket,
-    price,
-    stopLoss,
-    takeProfit,
-  });
-  return outcomeOf(order.ticket, result, {
-    symbol: order.symbol,
-    price,
-    stopLoss: stopLoss || null,
-    takeProfit: takeProfit || null,
-  });
+  const stages: ExecutionStages = {};
+  try {
+    const result = await adapter.modifyTrade({
+      accountId,
+      brokerPositionId: order.ticket,
+      price,
+      stopLoss,
+      takeProfit,
+      stages,
+    });
+    return outcomeOf(order.ticket, result, {
+      symbol: order.symbol,
+      price,
+      stopLoss: stopLoss || null,
+      takeProfit: takeProfit || null,
+    });
+  } finally {
+    recordStages(context, stages);
+  }
 }
 
 async function closeBulk(
@@ -224,9 +278,11 @@ async function closeBulk(
   accountId: string,
   scope: BulkScope,
   symbol: string | null,
+  context: ExecuteContext | undefined,
 ): Promise<TradeCommandOutcome> {
   assertExecution(adapter);
-  const state = await stateReader(adapter).fetchTradingState(accountId);
+  // always a fresh read: "close everything" must act on what is open right now
+  const state = await readTimed(adapter, accountId, context);
   const targets = bulkTargets(state, scope, symbol);
 
   type Item = { ticket: string; symbol: string; pending: boolean };
@@ -273,48 +329,71 @@ async function closeBulk(
   };
 }
 
-/** Runs one (already parsed) command on one account. Throws `TradeCommandError` / `BrokerExecutionError` / whatever the broker path throws. */
+/**
+ * Runs one (already parsed) command on one account. Throws `TradeCommandError` / `BrokerExecutionError` /
+ * whatever the broker path throws. `context` is optional: without it every read is fresh and nothing is timed.
+ */
 export async function executeTradeCommand(
   adapter: BrokerAdapter,
   accountId: string,
   command: ParsedTradeCommand,
+  context?: ExecuteContext,
 ): Promise<TradeCommandOutcome> {
   switch (command.kind) {
     case "OPEN": {
       assertExecution(adapter);
       const order = command.payload;
-      const result = await adapter.openTrade({
-        accountId,
-        symbol: order.symbol,
-        side: order.side,
-        volume: order.volume,
-        orderKind: order.orderKind,
-        price: order.price,
-        stopLoss: order.stopLoss,
-        takeProfit: order.takeProfit,
-        comment: WEB_TRADE_COMMENT,
-      });
-      return outcomeOf(result.brokerPositionId ?? result.brokerOrderId ?? null, result, { symbol: order.symbol });
+      const stages: ExecutionStages = {};
+      try {
+        const result = await adapter.openTrade({
+          accountId,
+          symbol: order.symbol,
+          side: order.side,
+          volume: order.volume,
+          orderKind: order.orderKind,
+          price: order.price,
+          stopLoss: order.stopLoss,
+          takeProfit: order.takeProfit,
+          comment: WEB_TRADE_COMMENT,
+          stages,
+        });
+        return outcomeOf(result.brokerPositionId ?? result.brokerOrderId ?? null, result, { symbol: order.symbol });
+      } finally {
+        recordStages(context, stages);
+      }
     }
 
     case "CLOSE": {
       assertExecution(adapter);
-      const result = await adapter.closeTrade({
-        accountId,
-        brokerPositionId: command.payload.ticket,
-        volume: command.payload.volume,
-        comment: WEB_TRADE_COMMENT,
-      });
-      return outcomeOf(command.payload.ticket, result);
+      const stages: ExecutionStages = {};
+      try {
+        const result = await adapter.closeTrade({
+          accountId,
+          brokerPositionId: command.payload.ticket,
+          volume: command.payload.volume,
+          comment: WEB_TRADE_COMMENT,
+          stages,
+        });
+        return outcomeOf(command.payload.ticket, result);
+      } finally {
+        recordStages(context, stages);
+      }
     }
 
     case "MODIFY": {
       assertExecution(adapter);
-      const state = await stateReader(adapter).fetchTradingState(accountId);
-      const position = state.positions.find((entry) => entry.ticket === command.payload.ticket);
-      if (position) return modifyPosition(adapter, accountId, position, command.payload);
-      const order = state.pending.find((entry) => entry.ticket === command.payload.ticket);
-      if (order) return modifyPendingOrder(adapter, accountId, order, command.payload);
+      const find = (state: BrokerTradingState) => ({
+        position: state.positions.find((entry) => entry.ticket === command.payload.ticket),
+        order: state.pending.find((entry) => entry.ticket === command.payload.ticket),
+      });
+      // The picture the worker took a moment ago is enough to know the current levels. It is never
+      // enough to say "gone": a ticket it does not list is looked up with a fresh read.
+      let found = context?.recentState ? find(context.recentState) : null;
+      if (!found || (!found.position && !found.order)) {
+        found = find(await readTimed(adapter, accountId, context));
+      }
+      if (found.position) return modifyPosition(adapter, accountId, found.position, command.payload, context);
+      if (found.order) return modifyPendingOrder(adapter, accountId, found.order, command.payload, context);
       throw new TradeCommandError("POSITION_NOT_FOUND", "This position is no longer open on the account.", 404);
     }
 
@@ -323,7 +402,8 @@ export async function executeTradeCommand(
       if (!adapter.cancelOrder) {
         throw new TradeCommandError("NOT_SUPPORTED", "The broker connection cannot delete pending orders.", 501);
       }
-      const state = await stateReader(adapter).fetchTradingState(accountId);
+      // always a fresh read: a delete that fell through to a close would close a real position
+      const state = await readTimed(adapter, accountId, context);
       const order = state.pending.find((entry) => entry.ticket === command.payload.ticket);
       if (!order) {
         const isPosition = state.positions.some((entry) => entry.ticket === command.payload.ticket);
@@ -335,12 +415,17 @@ export async function executeTradeCommand(
           isPosition ? 400 : 404,
         );
       }
-      const result = await adapter.cancelOrder({ accountId, brokerOrderId: order.ticket });
-      return outcomeOf(order.ticket, result, { symbol: order.symbol });
+      const stages: ExecutionStages = {};
+      try {
+        const result = await adapter.cancelOrder({ accountId, brokerOrderId: order.ticket, stages });
+        return outcomeOf(order.ticket, result, { symbol: order.symbol });
+      } finally {
+        recordStages(context, stages);
+      }
     }
 
     case "CLOSE_BULK":
-      return closeBulk(adapter, accountId, command.payload.scope, command.payload.symbol);
+      return closeBulk(adapter, accountId, command.payload.scope, command.payload.symbol, context);
 
     case "STATE":
       return { state: await readGatewayState(adapter, accountId, command.payload.symbols) };

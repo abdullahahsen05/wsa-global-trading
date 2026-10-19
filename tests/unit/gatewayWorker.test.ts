@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { BrokerExecutionError, type BrokerAdapter, type BrokerTradingState } from "@/lib/broker/BrokerAdapter";
+import {
+  BrokerExecutionError,
+  type BrokerAdapter,
+  type BrokerTradingState,
+  type ExecutionStages,
+} from "@/lib/broker/BrokerAdapter";
 import { GatewayNotInstalledError } from "@/lib/gateway/gatewayDb";
 import type { ClaimedCommand, GatewayStore, WatchedAccount } from "@/lib/gateway/gatewayStore";
 import { GatewayWorker, startGatewayWorker } from "@/lib/gateway/gatewayWorker";
@@ -119,6 +124,17 @@ function rig(options: { adapter?: Record<string, unknown>; stateRefreshMs?: numb
 async function settle(ms = 15): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/** A promise the test settles by hand: the broker "answers" exactly when the test says so. */
+function deferred<T = void>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const SECOND_ID = "cccccccc-0000-4000-8000-000000000002";
 
 beforeEach(() => {
   clock.t = Date.parse("2026-10-12T12:00:00.000Z");
@@ -646,7 +662,7 @@ describe("the live picture of watched accounts", () => {
     expect(store.saveState.mock.calls[0][2]).toBeNull();
   });
 
-  test("an order that has just been sent refreshes the picture at once", async () => {
+  test("an order that has just been sent refreshes the picture at once - the order itself starts the read", async () => {
     const { store, worker } = rig();
     store.watched.mockResolvedValue([watched]);
     await worker.refreshStatesOnce();
@@ -658,9 +674,10 @@ describe("the live picture of watched accounts", () => {
     await worker.pollCommandsOnce();
     await worker.idle();
 
-    expect(await worker.refreshStatesOnce()).toBe(1);
-    await worker.idle();
+    // the picture was read again by the order, not by the next tick of the watch loop ...
     expect(store.saveState).toHaveBeenCalledTimes(2);
+    // ... and that read counts: the tick that follows has nothing left to do yet
+    expect(await worker.refreshStatesOnce()).toBe(0);
   });
 
   test("a read-only command does not reset the refresh", async () => {
@@ -694,6 +711,411 @@ describe("the live picture of watched accounts", () => {
     await expect(worker.refreshStatesOnce()).rejects.toThrow("timeout");
     expect(await worker.refreshStatesOnce()).toBe(1);
     await worker.idle();
+  });
+});
+
+describe("reads and orders on one account", () => {
+  test("a slow symbol list does not hold up an order", async () => {
+    const symbols = deferred<Array<{ name: string; description: string; path: string | null; digits: number }>>();
+    const { store, adapter, worker } = rig({ adapter: { fetchSymbolList: vi.fn(() => symbols.promise) } });
+    store.queue.push(command({ kind: "SYMBOLS", payload: {} }));
+    store.queue.push(command({ id: SECOND_ID }));
+
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
+    expect(store.complete.mock.calls[0][0]).toBe(SECOND_ID);
+    expect(adapter.openTrade).toHaveBeenCalledTimes(1);
+
+    symbols.resolve([{ name: "EURUSD.r", description: "Euro", path: null, digits: 5 }]);
+    await worker.idle();
+    expect(store.complete).toHaveBeenCalledTimes(2);
+  });
+
+  test("a read is answered while an order on the same account is still with the broker", async () => {
+    const sent = deferred<{ ok: boolean; brokerPositionId: string }>();
+    const { store, worker } = rig({ adapter: { openTrade: vi.fn(() => sent.promise) } });
+    store.queue.push(command());
+    store.queue.push(command({ id: SECOND_ID, kind: "STATE", payload: { symbols: [] } }));
+
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
+    expect(store.complete.mock.calls[0][0]).toBe(SECOND_ID);
+
+    sent.resolve({ ok: true, brokerPositionId: "9001" });
+    await worker.idle();
+    expect(store.complete).toHaveBeenCalledTimes(2);
+  });
+
+  test("the next order on an account does not wait for the answer of the one before to be stored", async () => {
+    const stored = deferred();
+    const { store, adapter, worker } = rig();
+    store.complete.mockImplementationOnce(() => stored.promise);
+    store.queue.push(command());
+    store.queue.push(command({ id: SECOND_ID, kind: "CLOSE", payload: { ticket: "5001" } }));
+
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(adapter.closeTrade).toHaveBeenCalledTimes(1));
+    expect(adapter.openTrade).toHaveBeenCalledTimes(1);
+
+    stored.resolve();
+    await worker.idle();
+    expect(store.complete).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("right after an order", () => {
+  const watched: WatchedAccount = { accountId: ACCOUNT, userId: USER, symbols: ["EURUSD.r"] };
+
+  test("a refused order is followed by a fresh picture too: it may have changed something", async () => {
+    const { store, worker } = rig({
+      adapter: {
+        closeTrade: vi.fn(async () => {
+          throw new BrokerExecutionError("BROKER_PROVIDER_ERROR", "Timed out.", 502);
+        }),
+      },
+    });
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    store.queue.push(command({ kind: "CLOSE", payload: { ticket: "5001" } }));
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(store.fail).toHaveBeenCalledTimes(1);
+    expect(store.saveState).toHaveBeenCalledTimes(2);
+  });
+
+  test("an order that never reached the broker changes nothing, so nothing is read again", async () => {
+    const { store, adapter, worker } = rig();
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    store.queue.push(command({ expiresAt: new Date(clock.t - 1).toISOString() }));
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(adapter.openTrade).not.toHaveBeenCalled();
+    expect(store.fail.mock.calls[0][1]).toMatchObject({ code: "NOT_SENT" });
+    expect(store.saveState).toHaveBeenCalledTimes(1);
+  });
+
+  test("an account nobody is looking at is not read just because it traded", async () => {
+    const { store, adapter, worker } = rig();
+    store.queue.push(command());
+
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(store.complete).toHaveBeenCalledTimes(1);
+    expect(adapter.fetchTradingState).not.toHaveBeenCalled();
+    expect(store.saveState).not.toHaveBeenCalled();
+  });
+
+  test("a read that was under way when the order ended is followed by one more", async () => {
+    const first = deferred<BrokerTradingState>();
+    const fetchTradingState = vi
+      .fn<() => Promise<BrokerTradingState>>()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementation(async () => tradingState());
+    const { store, worker } = rig({ adapter: { fetchTradingState } });
+    store.watched.mockResolvedValue([watched]);
+
+    await worker.refreshStatesOnce(); // the first read is on its way ...
+    clock.t += 50;
+    store.queue.push(command()); // ... when an order finishes
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
+    expect(fetchTradingState).toHaveBeenCalledTimes(1);
+
+    first.resolve(tradingState()); // the old read ends: it may not show the order, so another one follows at once
+    await worker.idle();
+
+    expect(fetchTradingState).toHaveBeenCalledTimes(2);
+    expect(store.saveState).toHaveBeenCalledTimes(2);
+  });
+
+  test("in the seconds after an order the picture is renewed faster, then the usual pace returns", async () => {
+    const { store, worker } = rig();
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    clock.t += 100;
+    store.queue.push(command());
+    await worker.pollCommandsOnce();
+    await worker.idle();
+    expect(store.saveState).toHaveBeenCalledTimes(2);
+
+    clock.t += 300; // 400 ms after the first read: the next one is due at 450 ms
+    expect(await worker.refreshStatesOnce()).toBe(0);
+    clock.t += 100; // 500 ms: the hot pace (350 ms) is due - the usual one would wait until 1.1 s
+    expect(await worker.refreshStatesOnce()).toBe(1);
+    await worker.idle();
+
+    clock.t += 6_000; // long after the hot window
+    expect(await worker.refreshStatesOnce()).toBe(1);
+    await worker.idle();
+    clock.t += 400;
+    expect(await worker.refreshStatesOnce()).toBe(0); // back to once a second
+    clock.t += 700;
+    expect(await worker.refreshStatesOnce()).toBe(1);
+    await worker.idle();
+  });
+});
+
+describe("a modify reads the levels from the picture of a moment ago", () => {
+  const watched: WatchedAccount = { accountId: ACCOUNT, userId: USER, symbols: [] };
+  const modify = (id = "cccccccc-0000-4000-8000-000000000001") =>
+    command({ id, kind: "MODIFY", payload: { ticket: "5001", takeProfit: 2420 } });
+
+  test("no read at the broker is needed in front of the change", async () => {
+    const { store, adapter, worker } = rig();
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    clock.t += 200;
+    store.queue.push(modify());
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(adapter.modifyTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ brokerPositionId: "5001", stopLoss: 2380, takeProfit: 2420 }),
+    );
+    const answer = store.complete.mock.calls[0][1];
+    expect(answer.timing?.readMs).toBeUndefined();
+    expect(answer.detail).toMatchObject({ stopLoss: 2380, takeProfit: 2420 });
+  });
+
+  test("a picture that is more than a moment old is not trusted", async () => {
+    const { store, worker } = rig();
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    clock.t += 3_000;
+    store.queue.push(modify());
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(store.complete.mock.calls[0][1].timing?.readMs).toEqual(expect.any(Number));
+  });
+
+  test("an account nobody has a picture of is read first", async () => {
+    const { store, adapter, worker } = rig();
+    store.queue.push(modify());
+
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(adapter.fetchTradingState).toHaveBeenCalledTimes(1);
+    expect(store.complete.mock.calls[0][1].timing?.readMs).toEqual(expect.any(Number));
+  });
+
+  test("the picture from before an order is dropped when that order ends", async () => {
+    const afterOrder = deferred<BrokerTradingState>();
+    const fetchTradingState = vi
+      .fn<() => Promise<BrokerTradingState>>()
+      .mockImplementationOnce(async () => tradingState()) // the picture before the order
+      .mockImplementationOnce(() => afterOrder.promise) // the read right after the order, still on its way
+      .mockImplementation(async () => tradingState()); // what the modify reads itself
+    const { store, worker } = rig({ adapter: { fetchTradingState } });
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    clock.t += 100;
+    store.queue.push(command());
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
+
+    clock.t += 50;
+    store.queue.push(modify(SECOND_ID));
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(2));
+
+    expect(store.complete.mock.calls[1][1].timing?.readMs).toEqual(expect.any(Number));
+    expect(fetchTradingState).toHaveBeenCalledTimes(3);
+
+    afterOrder.resolve(tradingState());
+    await worker.idle();
+  });
+
+  test("a picture whose read began before the last order ended is not trusted either", async () => {
+    const first = deferred<BrokerTradingState>();
+    const second = deferred<BrokerTradingState>();
+    const fetchTradingState = vi
+      .fn<() => Promise<BrokerTradingState>>()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+      .mockImplementation(async () => tradingState());
+    const { store, worker } = rig({ adapter: { fetchTradingState } });
+    store.watched.mockResolvedValue([watched]);
+
+    await worker.refreshStatesOnce(); // read 1 begins and hangs
+    await vi.waitFor(() => expect(fetchTradingState).toHaveBeenCalledTimes(1));
+    clock.t += 50;
+    store.queue.push(command()); // an order ends while it is in flight
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
+
+    clock.t += 10;
+    first.resolve(tradingState()); // read 1 ends - it began before the order ended
+    await vi.waitFor(() => expect(fetchTradingState).toHaveBeenCalledTimes(2)); // and read 2 begins at once
+
+    store.queue.push(modify(SECOND_ID));
+    await worker.pollCommandsOnce();
+    await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(2));
+
+    expect(store.complete.mock.calls[1][1].timing?.readMs).toEqual(expect.any(Number));
+    expect(fetchTradingState).toHaveBeenCalledTimes(3);
+
+    second.resolve(tradingState());
+    await worker.idle();
+  });
+});
+
+describe("the owner of a watched account", () => {
+  const watched: WatchedAccount = { accountId: ACCOUNT, userId: USER, symbols: [] };
+
+  test("is looked up before the first click, so the click does not pay for it", async () => {
+    const { store, adapter, worker } = rig();
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+    expect(store.owner).toHaveBeenCalledTimes(1);
+
+    store.queue.push(command({ kind: "CLOSE", payload: { ticket: "5001" } }));
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(adapter.closeTrade).toHaveBeenCalledTimes(1);
+    expect(store.owner).toHaveBeenCalledTimes(1);
+  });
+
+  test("is not looked up again on every tick", async () => {
+    const { store, worker } = rig();
+    store.watched.mockResolvedValue([watched]);
+
+    for (let tick = 0; tick < 4; tick += 1) {
+      await worker.refreshStatesOnce();
+      await worker.idle();
+      clock.t += 1_100;
+    }
+
+    expect(store.owner).toHaveBeenCalledTimes(1);
+  });
+
+  test("a lookup that fails is silent, is not hammered, and is tried again later", async () => {
+    const { store, worker, warn } = rig();
+    store.owner.mockRejectedValue(new Error("database is down"));
+    store.watched.mockResolvedValue([watched]);
+
+    await worker.refreshStatesOnce();
+    await worker.idle();
+    clock.t += 1_100;
+    await worker.refreshStatesOnce();
+    await worker.idle();
+    expect(store.owner).toHaveBeenCalledTimes(1);
+
+    clock.t += 31_000;
+    await worker.refreshStatesOnce();
+    await worker.idle();
+    expect(store.owner).toHaveBeenCalledTimes(2);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("an account that is not connected to the broker service is not remembered, and a click on it still says so", async () => {
+    const { store, adapter, worker } = rig();
+    store.owner.mockResolvedValue({ userId: USER, providerAccountId: null });
+    store.watched.mockResolvedValue([watched]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    store.queue.push(command());
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(adapter.openTrade).not.toHaveBeenCalled();
+    expect(store.fail.mock.calls[0][1]).toMatchObject({ code: "ACCOUNT_NOT_CONNECTED", statusCode: 409 });
+    expect(store.owner).toHaveBeenCalledTimes(2);
+  });
+
+  test("what is remembered is the real owner: the watch row cannot vouch for somebody else's click", async () => {
+    const { store, adapter, worker } = rig();
+    store.watched.mockResolvedValue([{ ...watched, userId: "99999999-9999-4999-8999-999999999999" }]);
+    await worker.refreshStatesOnce();
+    await worker.idle();
+
+    store.queue.push(command({ userId: "99999999-9999-4999-8999-999999999999" }));
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(adapter.openTrade).not.toHaveBeenCalled();
+    expect(store.fail.mock.calls[0][1]).toMatchObject({ code: "ACCOUNT_NOT_FOUND", statusCode: 404 });
+  });
+});
+
+describe("the time of a command", () => {
+  test("the stored answer and the log line say where it went", async () => {
+    const { store, worker, log } = rig({
+      adapter: {
+        openTrade: vi.fn(async (request: { stages?: ExecutionStages }) => {
+          clock.t += 340;
+          if (request.stages) Object.assign(request.stages, { sessionMs: 12, sendMs: 310, attempts: 2 });
+          return { ok: true, brokerPositionId: "9001" };
+        }),
+      },
+    });
+    store.queue.push(command());
+
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(store.complete.mock.calls[0][1].timing).toEqual({ queueMs: 120, runMs: 340, sessionMs: 12, sendMs: 310, attempts: 2 });
+    expect(log).toHaveBeenCalledWith("[trade-gateway] OPEN aaaaaaaa done in 340ms (queue 120ms, session 12ms, send 310ms, 2 attempts)");
+  });
+
+  test("a failed order's log line carries the timing too", async () => {
+    const { store, worker, log } = rig({
+      adapter: {
+        openTrade: vi.fn(async (request: { stages?: ExecutionStages }) => {
+          if (request.stages) Object.assign(request.stages, { sessionMs: 0, sendMs: 95, attempts: 1 });
+          throw new BrokerExecutionError("BROKER_PROVIDER_ERROR", "Not enough money.", 502);
+        }),
+      },
+    });
+    store.queue.push(command());
+
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(store.fail).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/failed in \d+ms \(queue 120ms, session 0ms, send 95ms\): BROKER_PROVIDER_ERROR/));
+  });
+
+  test("a modify that had to read says how long the read took", async () => {
+    const { store, worker, log } = rig();
+    store.queue.push(command({ kind: "MODIFY", payload: { ticket: "5001", takeProfit: 2420 } }));
+
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(store.complete.mock.calls[0][1].timing?.readMs).toEqual(expect.any(Number));
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/MODIFY aaaaaaaa done in \d+ms \(queue 120ms, read \d+ms/));
+  });
+
+  test("a read of the account is not written to the log", async () => {
+    const { store, worker, log } = rig();
+    store.queue.push(command({ kind: "STATE", payload: { symbols: [] } }));
+
+    await worker.pollCommandsOnce();
+    await worker.idle();
+
+    expect(store.complete).toHaveBeenCalledTimes(1);
+    expect(log).not.toHaveBeenCalled();
   });
 });
 

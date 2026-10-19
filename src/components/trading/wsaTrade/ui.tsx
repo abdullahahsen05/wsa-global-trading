@@ -9,6 +9,9 @@ export const FIELD_CLASS =
 export const LABEL_CLASS = "mb-1 block text-[10px] font-semibold uppercase tracking-wide text-muted";
 export const CHIP_CLASS =
   "rounded-[4px] border border-line bg-background px-2 py-1 text-[11px] font-semibold text-muted transition hover:border-line-strong hover:text-foreground disabled:opacity-50";
+/** A chip whose click acts at once on several orders: it turns red under the pointer. */
+export const DANGER_CHIP_CLASS =
+  "rounded-[4px] border border-line bg-background px-2 py-1 text-[11px] font-semibold text-muted transition hover:border-danger hover:text-danger disabled:opacity-50";
 export const BANNER_CLASS = "flex gap-2 rounded-[4px] border border-line bg-background px-3 py-2 text-xs";
 
 export type Tone = "gain" | "loss" | "flat";

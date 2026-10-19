@@ -127,6 +127,28 @@ export interface CommandDetail {
   price?: number | null;
   /** lots the broker executed / closed, when it said */
   volume?: number;
+  /** the price the broker filled a market order at, when it said */
+  fillPrice?: number;
+}
+
+/**
+ * Where the time of one command went, measured on the AWS side (milliseconds). Everything but
+ * `queueMs` and `runMs` is optional: an older worker does not report it, and a step that was not
+ * needed (no read in front of a close) is simply absent.
+ */
+export interface CommandTiming {
+  /** the command waited for the worker: worker clock when it took the command minus the time it was written */
+  queueMs: number;
+  /** the worker's work on it, from taking it up to having the broker's answer (writing the answer is not in it) */
+  runMs: number;
+  /** reading the account before the change (a modify or a delete needs the current levels / kind) */
+  readMs?: number;
+  /** getting a ready broker session (0 = it was already warm) */
+  sessionMs?: number;
+  /** the order request(s) to the broker bridge */
+  sendMs?: number;
+  /** how often the order was sent (more than once after a requote) */
+  attempts?: number;
 }
 
 export interface TradeCommandOutcome {
@@ -143,8 +165,8 @@ export interface TradeCommandOutcome {
   state?: GatewayTradingState;
   /** SYMBOLS */
   symbols?: BrokerSymbolInfo[];
-  /** how long the command waited for the worker and how long the worker needed, in milliseconds */
-  timing?: { queueMs: number; runMs: number };
+  /** how long the command waited for the worker and where the worker's time went, in milliseconds */
+  timing?: CommandTiming;
 }
 
 /** The error half of an answer, as stored in the row. */

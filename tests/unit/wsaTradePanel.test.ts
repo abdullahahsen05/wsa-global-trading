@@ -4,6 +4,7 @@ import { act, createElement, useState, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { WsaTradePanel } from "@/components/trading/WsaTradePanel";
 import { defaultWsaTrade, type WsaTradePatch, type WsaTradeWorkspace } from "@/lib/terminal/workspace";
+import { OVERLAY_TTL_MS } from "@/lib/trade/stateOverlay";
 import { click, json, keyDown, mount, setValue, settle, text, unmountAll } from "./helpers/reactDom";
 
 const A1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
@@ -284,7 +285,24 @@ const alerts = (container: ParentNode) =>
     .map((item) => text(item))
     .join(" | ");
 
-const confirmBar = (container: ParentNode) => container.querySelector("[aria-label='Confirm order']");
+/** A button is the command: nothing on screen asks the person to confirm, keep or cancel an order. */
+function expectNoConfirmation(container: ParentNode) {
+  expect(container.querySelector("[aria-label='Confirm order']")).toBeNull();
+  const content = text(container);
+  expect(content).not.toMatch(/confirm/i);
+  expect(content).not.toContain("Keep it");
+  expect(content).not.toMatch(/Yes, (close|delete)/);
+  expect(content).not.toMatch(/(Close|Delete) \d+ [a-z ]*\?/);
+}
+
+/** The result line of the last command (the green status box), found by its sentence. */
+function resultNotice(container: ParentNode, sentence: string): HTMLElement {
+  const found = Array.from(container.querySelectorAll<HTMLElement>("[role='status']")).find((item) =>
+    (item.textContent ?? "").includes(sentence),
+  );
+  if (!found) throw new Error(`no result line: ${sentence}`);
+  return found;
+}
 
 const symbolBox = (container: ParentNode) => field(container, "Symbol");
 const options = (container: ParentNode) => Array.from(container.querySelectorAll<HTMLElement>("[role='option']"));
@@ -296,10 +314,9 @@ function blur(element: Element) {
   });
 }
 
+/** One click on Buy: that is the whole order. */
 async function buyAtMarket(view: PanelView) {
   click(sureButton(view.container, "Buy XAUUSD at market"));
-  await settle();
-  click(button(view.container, "Confirm buy"));
   await settle();
 }
 
@@ -687,7 +704,6 @@ describe("WsaTradePanel - the order ticket", () => {
     await settle();
 
     expect(alerts(view.container)).toContain(message);
-    expect(confirmBar(view.container)).toBeNull();
     expect(orders()).toHaveLength(0);
   });
 
@@ -707,40 +723,33 @@ describe("WsaTradePanel - the order ticket", () => {
     expect(orders()).toHaveLength(0);
   });
 
-  test("asks for a confirmation that shows the whole order, and cancelling sends nothing", async () => {
+  test("Buy is the command: one click sends the order and there is nothing to confirm", async () => {
     const view = await mountPanel();
     setValue(field(view.container, "Stop loss (price)"), "2290");
     setValue(field(view.container, "Take profit (price)"), "2320");
 
     click(sureButton(view.container, "Buy XAUUSD at market"));
+
+    // the request is on its way before anything else could be asked
+    expect(orders()).toHaveLength(1);
+    expectNoConfirmation(view.container);
     await settle();
 
-    const confirmation = confirmBar(view.container) as Element;
-    expect(confirmation).not.toBeNull();
-    expect(text(confirmation)).toContain("Buy 0.01 XAUUSD · at market · SL 2290 · TP 2320 · Alpha");
-    // entry 2301.4: 11.4 at risk, 18.6 to gain
-    expect(text(confirmation)).toContain("Risk : reward 1 : 1.6");
-    expect(orders()).toHaveLength(0);
-
-    click(button(confirmation, "Cancel"));
-    await settle();
-
-    expect(confirmBar(view.container)).toBeNull();
-    expect(orders()).toHaveLength(0);
+    expect(orders()).toHaveLength(1);
+    expect(orders()[0].body).toMatchObject({ side: "BUY", stopLoss: 2290, takeProfit: 2320 });
+    expectNoConfirmation(view.container);
   });
 
-  test("sends the confirmed order once, with a request id and the order type, and reads the account again", async () => {
+  test("sends the order once, with a request id and the order type, and reads the account again", async () => {
     installFetch({
       order: () => json({ ok: true, data: { ok: true, ticket: "9001", timing: { queueMs: 120, runMs: 63 } } }),
     });
     const view = await mountPanel();
     setValue(field(view.container, "Stop loss (price)"), "2290");
     setValue(field(view.container, "Take profit (price)"), "2320");
-    click(sureButton(view.container, "Buy XAUUSD at market"));
-    await settle();
     const before = stateCalls().length;
 
-    click(button(view.container, "Confirm buy"));
+    click(sureButton(view.container, "Buy XAUUSD at market"));
     await settle();
 
     expect(orders()).toHaveLength(1);
@@ -756,9 +765,10 @@ describe("WsaTradePanel - the order ticket", () => {
       takeProfit: 2320,
     });
     expect(orders()[0].body.clientRequestId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
-    // the person is told what went and how long the trading system needed
-    expect(text(view.container)).toContain("Buy 0.01 XAUUSD sent to the broker. 183 ms (queue 120 ms · broker 63 ms)");
-    expect(confirmBar(view.container)).toBeNull();
+    // the person is told what went, how long they waited in all (next to the sentence) and where the time went (under it)
+    const notice = resultNotice(view.container, "Buy 0.01 XAUUSD sent to the broker.");
+    expect(notice.querySelector("strong")?.textContent).toMatch(/^\d+ ms$/);
+    expect(notice.querySelectorAll("p")[1]?.textContent).toBe("183 ms (queue 120 ms · broker 63 ms)");
     expect(stateCalls().length).toBeGreaterThan(before);
     // the levels of a finished order do not stay in the boxes
     expect(field(view.container, "Stop loss (price)").value).toBe("");
@@ -770,9 +780,8 @@ describe("WsaTradePanel - the order ticket", () => {
 
     click(sureButton(view.container, "Sell XAUUSD at market"));
     await settle();
-    click(button(view.container, "Confirm sell"));
-    await settle();
 
+    expect(orders()).toHaveLength(1);
     expect(orders()[0].body).toMatchObject({ side: "SELL", stopLoss: null, takeProfit: null, orderKind: "MARKET" });
   });
 
@@ -853,9 +862,7 @@ describe("WsaTradePanel - the order ticket", () => {
 
       click(sureButton(view.container, "Buy XAUUSD limit"));
       await settle();
-      expect(text(confirmBar(view.container) as Element)).toContain("Buy 0.01 XAUUSD · limit at 2295 · SL 2285 · Alpha");
-      click(button(view.container, "Confirm buy"));
-      await settle();
+      expectNoConfirmation(view.container);
 
       expect(orders()).toHaveLength(1);
       expect(orders()[0].url).toBe("/api/terminal/trade/open");
@@ -881,9 +888,8 @@ describe("WsaTradePanel - the order ticket", () => {
 
       click(sureButton(view.container, "Sell XAUUSD stop"));
       await settle();
-      click(button(view.container, "Confirm sell"));
-      await settle();
 
+      expect(orders()).toHaveLength(1);
       expect(orders()[0].body).toMatchObject({ side: "SELL", orderKind: "STOP", price: 2290, stopLoss: 2300, takeProfit: 2270 });
       expect(text(view.container)).toContain("Sell stop 0.01 XAUUSD placed at 2290.");
     });
@@ -962,9 +968,8 @@ describe("WsaTradePanel - the order ticket", () => {
       setValue(field(view.container, "Volume (lots)"), "0.3");
       click(sureButton(view.container, "Buy XAUUSD at market"));
       await settle();
-      click(button(view.container, "Confirm buy"));
-      await settle();
 
+      expect(orders()).toHaveLength(1);
       expect(orders()[0].body.volume).toBe(0.3);
     });
   });
@@ -980,17 +985,14 @@ describe("WsaTradePanel - the order ticket", () => {
       click(sureButton(view.container, "Buy XAUUSD at market"));
       await settle();
       // a buy enters at the ask 2301.4: 200 points = 2.00 below, 400 points = 4.00 above
-      expect(text(confirmBar(view.container) as Element)).toContain("SL 2299.4 · TP 2305.4");
-      click(button(view.container, "Confirm buy"));
-      await settle();
+      expect(orders()).toHaveLength(1);
       expect(orders()[0].body).toMatchObject({ side: "BUY", stopLoss: 2299.4, takeProfit: 2305.4 });
 
       // the distances stay in the boxes for the next order; a sell enters at the bid 2301.1 and goes the other way
       expect(field(view.container, "Stop loss (points)").value).toBe("200");
       click(sureButton(view.container, "Sell XAUUSD at market"));
       await settle();
-      click(button(view.container, "Confirm sell"));
-      await settle();
+      expect(orders()).toHaveLength(2);
       expect(orders()[1].body).toMatchObject({ side: "SELL", stopLoss: 2303.1, takeProfit: 2297.1 });
     });
 
@@ -1024,16 +1026,17 @@ describe("WsaTradePanel - the order ticket", () => {
       expect(field(view.container, "Stop loss (price)").placeholder).toBe("default 150 pt");
       expect(field(view.container, "Take profit (price)").placeholder).toBe("default 300 pt");
 
+      // the entry is the ask 2301.4: 150 points = 1.50 below, 300 points = 3.00 above
       click(sureButton(view.container, "Buy XAUUSD at market"));
       await settle();
-      expect(text(confirmBar(view.container) as Element)).toContain("SL 2299.9 · TP 2304.4");
-      click(button(view.container, "Cancel"));
-      await settle();
+      expect(orders()).toHaveLength(1);
+      expect(orders()[0].body).toMatchObject({ stopLoss: 2299.9, takeProfit: 2304.4 });
 
       setValue(field(view.container, "Stop loss (price)"), "2290");
       click(sureButton(view.container, "Buy XAUUSD at market"));
       await settle();
-      expect(text(confirmBar(view.container) as Element)).toContain("SL 2290 · TP 2304.4");
+      expect(orders()).toHaveLength(2);
+      expect(orders()[1].body).toMatchObject({ stopLoss: 2290, takeProfit: 2304.4 });
     });
   });
 
@@ -1044,13 +1047,15 @@ describe("WsaTradePanel - the order ticket", () => {
       click(sureButton(view.container, "Buy XAUUSD at market"));
       await settle();
       expect(alerts(view.container)).toContain("Your rule: every new order needs a stop loss");
-      expect(confirmBar(view.container)).toBeNull();
+      expect(orders()).toHaveLength(0);
 
       setValue(field(view.container, "Stop loss (price)"), "2290");
       click(sureButton(view.container, "Buy XAUUSD at market"));
       await settle();
-      expect(confirmBar(view.container)).not.toBeNull();
-      expect(orders()).toHaveLength(0);
+      // the refusal is gone and the order, now with its stop loss, went out with that one click
+      expect(alerts(view.container)).not.toContain("Your rule");
+      expect(orders()).toHaveLength(1);
+      expect(orders()[0].body).toMatchObject({ stopLoss: 2290 });
     });
 
     test("a limit on the volume refuses a larger order", async () => {
@@ -1065,20 +1070,23 @@ describe("WsaTradePanel - the order ticket", () => {
       setValue(field(view.container, "Volume (lots)"), "0.05");
       click(sureButton(view.container, "Buy XAUUSD at market"));
       await settle();
-      expect(confirmBar(view.container)).not.toBeNull();
+      expect(alerts(view.container)).not.toContain("Your own limit");
+      expect(orders()).toHaveLength(1);
+      expect(orders()[0].body).toMatchObject({ volume: 0.05 });
     });
 
-    test("with one-click on, Buy and Sell send the order at once", async () => {
-      const view = await mountPanel({ initial: { confirm: false } });
-      expect(text(view.container)).toContain("One-click is on: Buy and Sell send the order at once.");
+    test("the ticket never asks the person to confirm anything", async () => {
+      const view = await mountPanel();
+      expect(text(view.container)).not.toContain("One-click is on");
+      expectNoConfirmation(view.container);
 
       click(sureButton(view.container, "Sell XAUUSD at market"));
       await settle();
 
-      expect(confirmBar(view.container)).toBeNull();
+      expectNoConfirmation(view.container);
       expect(orders()).toHaveLength(1);
       expect(orders()[0].body).toMatchObject({ side: "SELL", orderKind: "MARKET" });
-      expect(text(view.container)).toContain("Sell 0.01 XAUUSD sent to the broker.");
+      resultNotice(view.container, "Sell 0.01 XAUUSD sent to the broker.");
     });
   });
 });
@@ -1100,23 +1108,24 @@ describe("WsaTradePanel - trade settings", () => {
 
   test("the rules in force are summarised while the settings are closed", async () => {
     const view = await mountPanel({
-      initial: { confirm: false, requireStopLoss: true, maxVolume: 2, stopLossPoints: 150, takeProfitPoints: 300 },
+      initial: { requireStopLoss: true, maxVolume: 2, stopLossPoints: 150, takeProfitPoints: 300 },
     });
 
     const summary = text(view.container.querySelector("button[aria-controls$='-settings']") as Element);
-    expect(summary).toContain("one-click · stop loss required · max 2 lots · SL 150 pt · TP 300 pt");
+    expect(summary).toContain("one click · stop loss required · max 2 lots · SL 150 pt · TP 300 pt");
   });
 
-  test("the switches and the entry mode are saved at once", async () => {
+  test("the switches and the entry mode are saved at once, and there is no switch to ask before sending", async () => {
     const changes: WsaTradePatch[] = [];
     const { view } = await openSettings({ onChange: (patch) => changes.push(patch) });
+    // Buy, Sell, Close and Delete are the command itself: nothing in the settings brings a confirmation back
+    expect(() => toggle(view.container, "Ask before an order is sent")).toThrow("switch not found");
+    expect(text(view.container.querySelector("[aria-label='Trade settings']") as Element)).not.toMatch(/confirm|ask before/i);
 
-    click(toggle(view.container, "Ask before an order is sent"));
     click(toggle(view.container, "Every new order needs a stop loss"));
     click(button(view.container, "Points"));
     await settle();
 
-    expect(changes).toContainEqual({ confirm: false });
     expect(changes).toContainEqual({ requireStopLoss: true });
     expect(changes).toContainEqual({ levelMode: "points" });
     expect(button(view.container, "Points").getAttribute("aria-pressed")).toBe("true");
@@ -1202,11 +1211,15 @@ describe("WsaTradePanel - when an order does not go through", () => {
     });
     const view = await mountPanel();
 
+    setValue(field(view.container, "Stop loss (price)"), "2290");
     await buyAtMarket(view);
 
     expect(alerts(view.container)).toContain("Invalid stops");
     expect(alerts(view.container)).not.toContain("check the positions below");
-    expect(confirmBar(view.container)).not.toBeNull();
+    // nothing to dismiss first: the ticket is as it was, ready for a change and another click
+    expectNoConfirmation(view.container);
+    expect(sureButton(view.container, "Buy XAUUSD at market").disabled).toBe(false);
+    expect(field(view.container, "Stop loss (price)").value).toBe("2290");
   });
 
   test("a broker that gave no clear answer asks the trader to check the positions first", async () => {
@@ -1256,21 +1269,92 @@ describe("WsaTradePanel - when an order does not go through", () => {
     expect(text(view.container)).toContain("This order had already been sent - nothing was sent twice.");
   });
 
-  test("a second click on Confirm while the first order travels sends nothing more", async () => {
+  test("a second click while the first order travels sends nothing more", async () => {
     let release: (value: Response) => void = () => undefined;
     installFetch({ order: () => new Promise<Response>((resolve) => (release = resolve)) });
     const view = await mountPanel();
-    click(sureButton(view.container, "Buy XAUUSD at market"));
-    await settle();
+    const buy = () => sureButton(view.container, "Buy XAUUSD at market");
 
-    click(button(view.container, "Confirm buy"));
-    click(button(view.container, "Confirm buy"));
+    click(buy());
+    click(buy());
+    click(sureButton(view.container, "Sell XAUUSD at market"));
     await settle();
+    // the buttons are switched off while the order travels, and nothing else was sent
     expect(orders()).toHaveLength(1);
+    expect(buy().disabled).toBe(true);
+    expect(sureButton(view.container, "Sell XAUUSD at market").disabled).toBe(true);
 
     release(json({ ok: true, data: { ok: true, ticket: "9001" } }));
     await settle();
     expect(orders()).toHaveLength(1);
+    expect(buy().disabled).toBe(false);
+  });
+
+  test("the same order sent again after an answer that never came keeps its request id, so it can never be placed twice", async () => {
+    let attempt = 0;
+    installFetch({
+      order: () => {
+        attempt += 1;
+        return attempt === 1
+          ? json({ ok: false, error: { code: "ORDER_UNCERTAIN", message: "The order may have reached the broker." } }, 504)
+          : json({ ok: true, data: { ok: true, ticket: "9001", repeated: true } });
+      },
+    });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+    await buyAtMarket(view);
+
+    expect(orders()).toHaveLength(2);
+    expect(orders()[1].body.clientRequestId).toBe(orders()[0].body.clientRequestId);
+    // the server had it already: the person is told so
+    expect(text(view.container)).toContain("This order had already been sent - nothing was sent twice.");
+  });
+
+  test("a clearly refused order, or a changed one, is a new order with a new request id", async () => {
+    let attempt = 0;
+    installFetch({
+      order: () => {
+        attempt += 1;
+        return attempt <= 2
+          ? json({ ok: false, error: { code: "PROVIDER_ERROR", message: "Invalid stops" } }, 502)
+          : json({ ok: true, data: { ok: true, ticket: "9001" } });
+      },
+    });
+    const view = await mountPanel();
+
+    // 1: refused with a clear reason -> nothing may exist at the broker, so the next try is a fresh order
+    await buyAtMarket(view);
+    await buyAtMarket(view);
+    expect(orders()[1].body.clientRequestId).not.toBe(orders()[0].body.clientRequestId);
+
+    // 2: another volume is another order
+    setValue(field(view.container, "Volume (lots)"), "0.02");
+    await buyAtMarket(view);
+    expect(orders()).toHaveLength(3);
+    expect(orders()[2].body.volume).toBe(0.02);
+    expect(orders()[2].body.clientRequestId).not.toBe(orders()[1].body.clientRequestId);
+  });
+
+  test("an order that is changed after an answer that never came is not sent under the old id", async () => {
+    let attempt = 0;
+    installFetch({
+      order: () => {
+        attempt += 1;
+        return attempt === 1
+          ? json({ ok: false, error: { code: "ORDER_UNCERTAIN", message: "The order may have reached the broker." } }, 504)
+          : json({ ok: true, data: { ok: true, ticket: "9001" } });
+      },
+    });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+    setValue(field(view.container, "Stop loss (price)"), "2290");
+    await buyAtMarket(view);
+
+    expect(orders()).toHaveLength(2);
+    expect(orders()[1].body.stopLoss).toBe(2290);
+    expect(orders()[1].body.clientRequestId).not.toBe(orders()[0].body.clientRequestId);
   });
 
   test("both the failure and the success are kept under Activity", async () => {
@@ -1287,8 +1371,7 @@ describe("WsaTradePanel - when an order does not go through", () => {
 
     await buyAtMarket(view);
     expect(alerts(view.container)).toContain("Market is closed");
-    click(button(view.container, "Confirm buy"));
-    await settle();
+    await buyAtMarket(view);
     click(bookTab(view.container, "Activity"));
     await settle();
 
@@ -1434,24 +1517,54 @@ describe("WsaTradePanel - stop loss and take profit of a position", () => {
 });
 
 describe("WsaTradePanel - closing a position", () => {
+  /** The part-close editor: only a number of lots needs the person's input, the rest is one click. */
   async function openCloseEditor(view: PanelView) {
-    click(sureButton(view.container, "Close XAUUSD 9001"));
+    click(sureButton(view.container, "Close part of XAUUSD 9001"));
     await settle();
   }
 
-  test("closes the whole position by default, after one confirmation", async () => {
+  test("Close shuts the whole position with that one click - there is nothing to confirm", async () => {
     const view = await mountPanel();
-    await openCloseEditor(view);
 
-    expect(field(view.container, "Lots to close").value).toBe("0.1");
-    expect(orders()).toHaveLength(0);
-    click(button(view.container, "Close position"));
+    click(sureButton(view.container, "Close XAUUSD 9001"));
+    // the request is on its way before anything else could be asked
+    expect(orders()).toHaveLength(1);
     await settle();
 
     expect(orders()).toHaveLength(1);
     expect(orders()[0].url).toBe("/api/terminal/trade/close");
     expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9001" });
-    expect(text(view.container)).toContain("XAUUSD position closed.");
+    expect(view.container.querySelector("#lots-9001")).toBeNull();
+    expectNoConfirmation(view.container);
+    resultNotice(view.container, "XAUUSD position closed.");
+  });
+
+  test("the closed position leaves the list at once, before the next picture of the account arrives", async () => {
+    installFetch({ state: stateWith([POSITION, SMALL_WIN]) });
+    const view = await mountPanel();
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (2)");
+
+    click(sureButton(view.container, "Close XAUUSD 9001"));
+    await settle();
+
+    // the polled picture still lists both: the answer of the trading system is laid over it
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+    expect(view.container.querySelector("[aria-label='Position XAUUSD 9001']")).toBeNull();
+    expect(view.container.querySelector("[aria-label='Position XAUUSD 9003']")).not.toBeNull();
+  });
+
+  test("a close that fails keeps the position on the list, shows why, and Close can be pressed again", async () => {
+    installFetch({
+      order: () => json({ ok: false, error: { code: "POSITION_NOT_FOUND", message: "This position is no longer open on the account." } }, 404),
+    });
+    const view = await mountPanel();
+
+    click(sureButton(view.container, "Close XAUUSD 9001"));
+    await settle();
+
+    expect(alerts(view.container)).toContain("This position is no longer open on the account.");
+    expect(view.container.querySelector("[aria-label='Position XAUUSD 9001']")).not.toBeNull();
+    expect(sureButton(view.container, "Close XAUUSD 9001").disabled).toBe(false);
   });
 
   test("fewer lots close only that part, and the button says so", async () => {
@@ -1464,6 +1577,23 @@ describe("WsaTradePanel - closing a position", () => {
 
     expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9001", volume: 0.04 });
     expect(text(view.container)).toContain("0.04 lots of XAUUSD closed.");
+    // the part that is left is shown at once
+    expect(view.container.querySelector("[aria-label='Position XAUUSD 9001']")?.textContent).toContain("0.06 lots");
+  });
+
+  test("the part-close editor closes the whole position when all the lots are asked for", async () => {
+    const view = await mountPanel();
+    await openCloseEditor(view);
+
+    expect(field(view.container, "Lots to close").value).toBe("0.05");
+    click(sureButton(view.container, "Close all of XAUUSD 9001"));
+    expect(field(view.container, "Lots to close").value).toBe("0.1");
+    click(button(view.container, "Close position"));
+    await settle();
+
+    expect(orders()).toHaveLength(1);
+    expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9001" });
+    expect(text(view.container)).toContain("XAUUSD position closed.");
   });
 
   test("Partial starts with half of the position", async () => {
@@ -1516,40 +1646,54 @@ describe("WsaTradePanel - closing a position", () => {
     expect(orders()).toHaveLength(0);
   });
 
-  test("a close that fails keeps the editor and shows why", async () => {
+  test("a part-close that fails keeps the editor and shows why", async () => {
     installFetch({
       order: () => json({ ok: false, error: { code: "POSITION_NOT_FOUND", message: "This position is no longer open on the account." } }, 404),
     });
     const view = await mountPanel();
     await openCloseEditor(view);
 
-    click(button(view.container, "Close position"));
+    click(button(view.container, "Close 0.05 lots"));
     await settle();
 
     expect(alerts(view.container)).toContain("This position is no longer open on the account.");
     expect(view.container.querySelector("#lots-9001")).not.toBeNull();
   });
 
-  test("with one-click on, Close shuts the whole position at once", async () => {
-    const view = await mountPanel({ initial: { confirm: false } });
+  test("a part-close that went through closes the editor", async () => {
+    const view = await mountPanel();
+    await openCloseEditor(view);
+    expect(view.container.querySelector("#lots-9001")).not.toBeNull();
 
-    click(sureButton(view.container, "Close XAUUSD 9001"));
+    click(button(view.container, "Close 0.05 lots"));
     await settle();
 
     expect(view.container.querySelector("#lots-9001")).toBeNull();
-    expect(orders()).toHaveLength(1);
-    expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9001" });
-    expect(text(view.container)).toContain("XAUUSD position closed.");
+    expect(text(view.container)).toContain("0.05 lots of XAUUSD closed.");
   });
 
-  test("a close is never blocked by the person's own volume or stop loss rules", async () => {
+  test("a close is never blocked by the person's own volume or stop loss rules, in either way", async () => {
     const view = await mountPanel({ initial: { requireStopLoss: true, maxVolume: 0.01 } });
 
-    await openCloseEditor(view);
-    click(button(view.container, "Close position"));
+    // the whole position: one click
+    click(sureButton(view.container, "Close XAUUSD 9001"));
+    await settle();
+    expect(orders()).toHaveLength(1);
+    expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9001" });
+  });
+
+  test("a part-close is not blocked by those rules either", async () => {
+    installFetch({ state: stateWith([POSITION, SMALL_WIN]) });
+    const view = await mountPanel({ initial: { requireStopLoss: true, maxVolume: 0.01 } });
+
+    click(sureButton(view.container, "Close part of XAUUSD 9003"));
+    await settle();
+    // half of 0.05 lots, rounded down to a hundredth
+    click(button(view.container, "Close 0.02 lots"));
     await settle();
 
     expect(orders()).toHaveLength(1);
+    expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9003", volume: 0.02 });
   });
 });
 
@@ -1642,37 +1786,45 @@ describe("WsaTradePanel - pending orders", () => {
     expect(orders()).toHaveLength(0);
   });
 
-  test("a pending order is deleted after one question, and 'Keep it' sends nothing", async () => {
+  test("Delete removes the pending order with that one click - there is nothing to confirm", async () => {
     const view = await openPending();
 
     click(sureButton(view.container, "Delete pending order EURUSD.m 9101"));
-    await settle();
-    expect(text(view.container)).toContain("Delete this order?");
-    click(button(view.container, "Keep it"));
-    await settle();
-    expect(text(view.container)).not.toContain("Delete this order?");
-    expect(orders()).toHaveLength(0);
-
-    click(sureButton(view.container, "Delete pending order EURUSD.m 9101"));
-    await settle();
-    click(button(view.container, "Delete order"));
+    // the request is on its way before anything else could be asked
+    expect(orders()).toHaveLength(1);
     await settle();
 
     expect(orders()).toHaveLength(1);
     expect(orders()[0].url).toBe("/api/terminal/trade/cancel");
     expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9101" });
-    expect(text(view.container)).toContain("Pending order EURUSD.m 9101 deleted.");
+    expectNoConfirmation(view.container);
+    resultNotice(view.container, "Pending order EURUSD.m 9101 deleted.");
   });
 
-  test("with one-click on, Delete removes the order at once", async () => {
-    const view = await openPending({}, { initial: { confirm: false } });
+  test("the deleted order leaves the list at once and the other one stays", async () => {
+    const view = await openPending();
+    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (2)");
 
     click(sureButton(view.container, "Delete pending order XAUUSD 9102"));
     await settle();
 
-    expect(orders()).toHaveLength(1);
-    expect(orders()[0].url).toBe("/api/terminal/trade/cancel");
-    expect(orders()[0].body).toEqual({ accountId: A1, ticket: "9102" });
+    // the polled picture still lists both: the answer of the trading system is laid over it
+    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (1)");
+    expect(view.container.querySelector("[aria-label='Pending order XAUUSD 9102']")).toBeNull();
+    expect(view.container.querySelector("[aria-label='Pending order EURUSD.m 9101']")).not.toBeNull();
+  });
+
+  test("a delete the broker refuses shows why and leaves the order on the list", async () => {
+    const view = await openPending({
+      order: () => json({ ok: false, error: { code: "PROVIDER_ERROR", message: "Order is locked" } }, 502),
+    });
+
+    click(sureButton(view.container, "Delete pending order EURUSD.m 9101"));
+    await settle();
+
+    expect(alerts(view.container)).toContain("Order is locked");
+    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (2)");
+    expect(sureButton(view.container, "Delete pending order EURUSD.m 9101").disabled).toBe(false);
   });
 
   test("the broker's refusal to change an order is shown and the editor stays", async () => {
@@ -1706,82 +1858,92 @@ describe("WsaTradePanel - closing several at once", () => {
     return mountPanel();
   }
 
-  test("each choice says how many positions it covers before anything happens, and No sends nothing", async () => {
+  test("each choice says how many positions it covers - without a click - and nothing is sent by looking", async () => {
     const view = await mountMany();
 
-    click(button(view.container, "Winners"));
-    await settle();
-    expect(text(view.container)).toContain("Close 2 winning positions?");
-    click(button(view.container, "No"));
-    await settle();
+    // the number is on the chip itself and in its name for screen readers
+    for (const [label, count] of [
+      ["Close all", 3],
+      ["Close winners", 2],
+      ["Close losers", 1],
+      ["Close buys", 1],
+      ["Close sells", 2],
+      ["Close this symbol", 2],
+    ] as const) {
+      const chip = sureButton(view.container, `${label} (${count})`);
+      expect(chip.disabled).toBe(false);
+      expect(chip.textContent ?? "").toMatch(new RegExp(`${count}$`));
+    }
     expect(orders()).toHaveLength(0);
-
-    click(button(view.container, "Losers"));
-    await settle();
-    expect(text(view.container)).toContain("Close 1 losing position?");
-    click(button(view.container, "No"));
-
-    click(button(view.container, "All"));
-    await settle();
-    expect(text(view.container)).toContain("Close 3 positions?");
-    click(button(view.container, "No"));
-
-    click(button(view.container, "This symbol"));
-    await settle();
-    expect(text(view.container)).toContain("Close 2 XAUUSD positions?");
-    expect(orders()).toHaveLength(0);
+    expectNoConfirmation(view.container);
   });
 
-  test("winners are closed with one command and the result is reported", async () => {
+  test("winners are closed with that one click and the result is reported", async () => {
     const view = await mountMany();
 
-    click(button(view.container, "Winners"));
-    await settle();
-    click(button(view.container, "Yes, close"));
+    click(sureButton(view.container, "Close winners (2)"));
+    // the request is on its way before anything else could be asked
+    expect(orders()).toHaveLength(1);
     await settle();
 
     expect(orders()).toHaveLength(1);
     expect(orders()[0].url).toBe("/api/terminal/trade/close-bulk");
     expect(orders()[0].body).toMatchObject({ accountId: A1, scope: "PROFIT", symbol: null });
     expect(orders()[0].body.clientRequestId).toMatch(/^[A-Za-z0-9_-]{8,64}$/);
-    expect(text(view.container)).toContain("2 positions closed.");
-    // the question is gone
-    expect(text(view.container)).not.toContain("Close 2 winning positions?");
+    resultNotice(view.container, "2 positions closed.");
+    expectNoConfirmation(view.container);
+    // both winners are off the list at once; the loser stays
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+    expect(view.container.querySelector("[aria-label='Position EURUSD.m 9002']")).not.toBeNull();
   });
 
   test("'This symbol' carries the symbol of the ticket", async () => {
     const view = await mountMany();
 
-    click(button(view.container, "This symbol"));
-    await settle();
-    click(button(view.container, "Yes, close"));
+    click(sureButton(view.container, "Close this symbol (2)"));
     await settle();
 
+    expect(orders()).toHaveLength(1);
     expect(orders()[0].body).toMatchObject({ scope: "SYMBOL", symbol: "XAUUSD" });
+  });
+
+  test("every bulk command gets its own request id", async () => {
+    const view = await mountMany();
+
+    click(sureButton(view.container, "Close losers (1)"));
+    await settle();
+    click(sureButton(view.container, "Close this symbol (2)"));
+    await settle();
+
+    expect(orders()).toHaveLength(2);
+    expect(orders()[0].body.clientRequestId).not.toBe(orders()[1].body.clientRequestId);
   });
 
   test("a choice that covers nothing is switched off", async () => {
     installFetch({ state: stateWith([POSITION, SMALL_WIN]) });
     const view = await mountPanel();
 
-    expect(button(view.container, "Losers").disabled).toBe(true);
-    expect(button(view.container, "Winners").disabled).toBe(false);
+    expect(sureButton(view.container, "Close losers (0)").disabled).toBe(true);
+    expect(sureButton(view.container, "Close winners (2)").disabled).toBe(false);
+    click(sureButton(view.container, "Close losers (0)"));
+    await settle();
+    expect(orders()).toHaveLength(0);
   });
 
-  test("pending orders are deleted together from their own tab", async () => {
+  test("pending orders are deleted together from their own tab with one click", async () => {
     const view = await mountMany();
     click(bookTab(view.container, "Pending"));
     await settle();
 
-    click(button(view.container, "Delete all pending orders"));
-    await settle();
-    expect(text(view.container)).toContain("Delete 2 pending orders?");
-    click(button(view.container, "Yes, delete"));
+    click(sureButton(view.container, "Delete all pending orders (2)"));
     await settle();
 
     expect(orders()).toHaveLength(1);
     expect(orders()[0].body).toMatchObject({ accountId: A1, scope: "PENDING", symbol: null });
-    expect(text(view.container)).toContain("1 pending order deleted.");
+    resultNotice(view.container, "1 pending order deleted.");
+    expectNoConfirmation(view.container);
+    // the mocked answer says one was deleted but names no failure: both leave the list at once
+    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (0)");
   });
 
   test("positions that could not be closed are named, and the rest is still reported", async () => {
@@ -1798,27 +1960,51 @@ describe("WsaTradePanel - closing several at once", () => {
       }),
     );
 
-    click(button(view.container, "All"));
-    await settle();
-    click(button(view.container, "Yes, close"));
+    click(sureButton(view.container, "Close all (3)"));
     await settle();
 
     expect(text(view.container)).toContain("2 positions closed.");
     expect(alerts(view.container)).toContain("1 could not be handled - EURUSD.m 9002: Market is closed.");
+    // the one that could not be closed is still on the list; the two that were closed are gone
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+    expect(view.container.querySelector("[aria-label='Position EURUSD.m 9002']")).not.toBeNull();
+    expect(view.container.querySelector("[aria-label='Position XAUUSD 9001']")).toBeNull();
   });
 
-  test("a question that is open is dropped when another list is opened", async () => {
-    const view = await mountMany();
+  test("the choices are switched off while a command travels, so nothing is sent twice", async () => {
+    let release: (value: Response) => void = () => undefined;
+    const view = await mountMany(() => new Promise<Response>((resolve) => (release = resolve)));
 
-    click(button(view.container, "Winners"));
-    await settle();
-    click(bookTab(view.container, "Pending"));
-    await settle();
-    click(bookTab(view.container, "Positions"));
+    click(sureButton(view.container, "Close winners (2)"));
+    click(sureButton(view.container, "Close winners (2)"));
+    click(sureButton(view.container, "Close all (3)"));
     await settle();
 
-    expect(text(view.container)).not.toContain("Close 2 winning positions?");
-    expect(orders()).toHaveLength(0);
+    expect(orders()).toHaveLength(1);
+    expect(sureButton(view.container, "Close all (3)").disabled).toBe(true);
+
+    release(json({ ok: true, data: { ok: true, ticket: null, closed: 2 } }));
+    await settle();
+    expect(orders()).toHaveLength(1);
+  });
+
+  test("a bulk command whose answer never came keeps its request id when it is sent again", async () => {
+    let attempt = 0;
+    const view = await mountMany(() => {
+      attempt += 1;
+      return attempt === 1
+        ? json({ ok: false, error: { code: "ORDER_UNCERTAIN", message: "The order may have reached the broker." } }, 504)
+        : json({ ok: true, data: { ok: true, ticket: null, closed: 2, repeated: true } });
+    });
+
+    click(sureButton(view.container, "Close winners (2)"));
+    await settle();
+    expect(alerts(view.container)).toContain("check the positions below before sending it again");
+    click(sureButton(view.container, "Close winners (2)"));
+    await settle();
+
+    expect(orders()).toHaveLength(2);
+    expect(orders()[1].body.clientRequestId).toBe(orders()[0].body.clientRequestId);
   });
 });
 
@@ -1955,17 +2141,484 @@ describe("WsaTradePanel - more than one account", () => {
     expect(choices).toContainEqual(["Beta · MT5 · IC Markets (not connected)", true]);
   });
 
-  test("changing the account drops an order that was waiting for its confirmation", async () => {
+  test("after the account is changed the next order is for the new account, and nothing is left over from the old one", async () => {
     installFetch({ accounts: accountsResponse([tradeAccount(A1, "Alpha"), tradeAccount(A2, "Beta")]) });
     const view = await mountPanel();
-    click(sureButton(view.container, "Buy XAUUSD at market"));
-    await settle();
-    expect(confirmBar(view.container)).not.toBeNull();
+    await buyAtMarket(view);
+    expect(orders()).toHaveLength(1);
+    expect(orders()[0].body.accountId).toBe(A1);
+    resultNotice(view.container, "Buy 0.01 XAUUSD sent to the broker.");
 
     setValue(view.container.querySelector("select"), A2);
     await settle();
 
-    expect(confirmBar(view.container)).toBeNull();
-    expect(orders()).toHaveLength(0);
+    // the result line of the old account is gone; no order was sent by changing the account
+    expect(() => resultNotice(view.container, "Buy 0.01 XAUUSD sent to the broker.")).toThrow("no result line");
+    expect(orders()).toHaveLength(1);
+
+    await buyAtMarket(view);
+    expect(orders()).toHaveLength(2);
+    expect(orders()[1].body.accountId).toBe(A2);
+  });
+
+  test("what an order changed on one account is never laid over another account", async () => {
+    const mine = { ...POSITION, ticket: "9500" };
+    installFetch({
+      accounts: accountsResponse([tradeAccount(A1, "Alpha"), tradeAccount(A2, "Beta")]),
+      state: (accountId, symbol) =>
+        json({ ok: true, data: stateFor(accountId, { quote: quoteFor(symbol), positions: accountId === A1 ? [POSITION] : [LOSER] }) }),
+      order: () =>
+        json({ ok: true, data: { ok: true, ticket: "9500", detail: { fillPrice: 2301.4, volume: 0.01 } } }),
+    });
+    const view = await mountPanel();
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+
+    await buyAtMarket(view);
+    // the position that was just bought shows at once on the account it was bought on ...
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (2)");
+    expect(view.container.querySelector(`[aria-label='Position XAUUSD ${mine.ticket}']`)).not.toBeNull();
+
+    // ... and not on the other account
+    setValue(view.container.querySelector("select"), A2);
+    await settle();
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+    expect(view.container.querySelector(`[aria-label='Position XAUUSD ${mine.ticket}']`)).toBeNull();
+    expect(view.container.querySelector("[aria-label='Position EURUSD.m 9002']")).not.toBeNull();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// How long it took
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("WsaTradePanel - how long it took", () => {
+  /** Every part of the report: the trading system's own times and the web server's. The server is slow enough that the browser's own total cannot exceed it. */
+  const FULL_TIMING = { queueMs: 120, runMs: 330, sessionMs: 12, sendMs: 310, serverMs: 9000, waitMs: 8500 };
+
+  test("the whole wait stands next to the result and the parts of it are listed under it", async () => {
+    installFetch({ order: () => json({ ok: true, data: { ok: true, ticket: "9001", timing: FULL_TIMING } }) });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+
+    const notice = resultNotice(view.container, "Buy 0.01 XAUUSD sent to the broker.");
+    // the browser measured the whole wait itself
+    expect(notice.querySelector("strong")?.textContent).toMatch(/^\d+ ms$/);
+    // network = total - server; server = server - wait; relay = wait - queue - broker
+    expect(notice.querySelectorAll("p")[1]?.textContent).toMatch(
+      /^\d+ ms in total: network 0 ms · server 500 ms · queue 120 ms · broker 330 ms \(session 12 ms · send 310 ms\) · relay 8\.05 s$/,
+    );
+  });
+
+  test("an older server that reports only the trading system's time still gets a line", async () => {
+    installFetch({ order: () => json({ ok: true, data: { ok: true, ticket: "9001", timing: { queueMs: 120, runMs: 63 } } }) });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+
+    const notice = resultNotice(view.container, "Buy 0.01 XAUUSD sent to the broker.");
+    expect(notice.querySelectorAll("p")[1]?.textContent).toBe("183 ms (queue 120 ms · broker 63 ms)");
+  });
+
+  test("an answer without any timing shows the result and no time line", async () => {
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+
+    const notice = resultNotice(view.container, "Buy 0.01 XAUUSD sent to the broker.");
+    expect(notice.querySelector("strong")).toBeNull();
+    expect(notice.querySelectorAll("p")).toHaveLength(1);
+  });
+
+  test("the time is kept in the Activity list next to what was sent", async () => {
+    installFetch({ order: () => json({ ok: true, data: { ok: true, ticket: "9001", timing: FULL_TIMING } }) });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+    click(bookTab(view.container, "Activity"));
+    await settle();
+
+    const entry = view.container.querySelector("ol[aria-label='Activity'] li") as Element;
+    expect(entry.textContent).toContain("Buy 0.01 XAUUSD sent to the broker.");
+    expect(entry.querySelector("strong")?.textContent).toMatch(/^\d+ ms$/);
+    expect(entry.textContent).toContain("queue 120 ms · broker 330 ms (session 12 ms · send 310 ms)");
+  });
+
+  test("an order the server had already handled reports no time, because nothing was sent", async () => {
+    installFetch({
+      order: () => json({ ok: true, data: { ok: true, ticket: "9001", repeated: true, timing: FULL_TIMING } }),
+    });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+
+    const notice = resultNotice(view.container, "This order had already been sent - nothing was sent twice.");
+    expect(notice.querySelector("strong")).toBeNull();
+    expect(notice.querySelectorAll("p")).toHaveLength(1);
+  });
+
+  test("a failed command shows its reason and no result line", async () => {
+    installFetch({
+      order: () => json({ ok: false, error: { code: "PROVIDER_ERROR", message: "Market is closed" } }, 502),
+    });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+
+    expect(alerts(view.container)).toContain("Market is closed");
+    expect(() => resultNotice(view.container, "sent to the broker")).toThrow("no result line");
+  });
+
+  test("the result of the last command is cleared as soon as the next one starts", async () => {
+    let release: (value: Response) => void = () => undefined;
+    let attempt = 0;
+    installFetch({
+      order: () => {
+        attempt += 1;
+        return attempt === 1
+          ? json({ ok: true, data: { ok: true, ticket: "9001", timing: FULL_TIMING } })
+          : new Promise<Response>((resolve) => (release = resolve));
+      },
+    });
+    const view = await mountPanel();
+    await buyAtMarket(view);
+    resultNotice(view.container, "Buy 0.01 XAUUSD sent to the broker.");
+
+    click(sureButton(view.container, "Sell XAUUSD at market"));
+    await settle();
+
+    // the old line must not be mistaken for the answer to the order that is still travelling
+    expect(() => resultNotice(view.container, "sent to the broker")).toThrow("no result line");
+
+    release(json({ ok: true, data: { ok: true, ticket: "9002", timing: { queueMs: 1, runMs: 2 } } }));
+    await settle();
+    resultNotice(view.container, "Sell 0.01 XAUUSD sent to the broker.");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// What the lists show at once
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("WsaTradePanel - what the lists show at once", () => {
+  const BOUGHT = { ok: true, ticket: "9500", detail: { fillPrice: 2301.4, volume: 0.01 } };
+
+  test("a bought position is listed the moment the trading system confirms it, before the next picture", async () => {
+    installFetch({ order: () => json({ ok: true, data: BOUGHT }) });
+    const view = await mountPanel();
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+
+    await buyAtMarket(view);
+
+    // the polled picture still has one position: the new one comes from the answer
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (2)");
+    const card = view.container.querySelector("[aria-label='Position XAUUSD 9500']") as Element;
+    expect(card).not.toBeNull();
+    expect(text(card)).toContain("0.01 lots");
+    expect(text(card)).toContain("Open 2301.4");
+    // and it can be closed straight away
+    expect(sureButton(view.container, "Close XAUUSD 9500").disabled).toBe(false);
+  });
+
+  test("the position that was just bought is not listed twice when the real picture has it too", async () => {
+    installFetch({
+      state: stateWith([POSITION, { ...POSITION, ticket: "9500", volume: 0.01, openPrice: 2301.4, profit: -0.3 }]),
+      order: () => json({ ok: true, data: BOUGHT }),
+    });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (2)");
+    expect(view.container.querySelectorAll("[aria-label='Position XAUUSD 9500']")).toHaveLength(1);
+  });
+
+  test("a refused order lists nothing", async () => {
+    installFetch({ order: () => json({ ok: false, error: { code: "PROVIDER_ERROR", message: "Invalid stops" } }, 502) });
+    const view = await mountPanel();
+
+    await buyAtMarket(view);
+
+    expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+    expect(view.container.querySelector("[aria-label='Position XAUUSD 9500']")).toBeNull();
+  });
+
+  test("a limit order that was placed is listed under Pending at once", async () => {
+    installFetch({ order: () => json({ ok: true, data: { ok: true, ticket: "9600" } }) });
+    const view = await mountPanel({ initial: { orderKind: "LIMIT" } });
+    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (0)");
+    setValue(field(view.container, "Price (entry)"), "2295");
+
+    click(sureButton(view.container, "Buy XAUUSD limit"));
+    await settle();
+
+    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (1)");
+    click(bookTab(view.container, "Pending"));
+    await settle();
+    const card = view.container.querySelector("[aria-label='Pending order XAUUSD 9600']") as Element;
+    expect(card).not.toBeNull();
+    expect(text(card)).toContain("Buy limit");
+    expect(text(card)).toContain("At 2295");
+  });
+
+  test("new stop loss and take profit are shown at once", async () => {
+    const view = await mountPanel();
+    click(sureButton(view.container, "Change stop loss and take profit of XAUUSD 9001"));
+    await settle();
+    setValue(field(view.container, "Take profit"), "2320");
+    setValue(field(view.container, "Stop loss"), "2295");
+
+    click(button(view.container, "Save levels"));
+    await settle();
+
+    const card = view.container.querySelector("[aria-label='Position XAUUSD 9001']") as Element;
+    // the polled picture still says SL 2290 / TP none
+    expect(text(card)).toContain("SL 2295 · TP 2320");
+  });
+
+  test("break-even moves the stop loss on the list at once", async () => {
+    const view = await mountPanel();
+
+    click(sureButton(view.container, "Move the stop loss of XAUUSD 9001 to break-even"));
+    await settle();
+
+    expect(text(view.container.querySelector("[aria-label='Position XAUUSD 9001']") as Element)).toContain("SL 2300.5");
+    // the stop loss is at the entry now: break-even is no longer offered
+    expect(sureButton(view.container, "Move the stop loss of XAUUSD 9001 to break-even").disabled).toBe(true);
+  });
+
+  test("the changed price of a pending order is shown at once", async () => {
+    installFetch({ state: stateWith([POSITION], [PENDING_LIMIT]) });
+    const view = await mountPanel();
+    click(bookTab(view.container, "Pending"));
+    await settle();
+    click(sureButton(view.container, "Change price and levels of EURUSD.m 9101"));
+    await settle();
+    setValue(field(view.container, "Price"), "1.079");
+
+    click(button(view.container, "Save order"));
+    await settle();
+
+    expect(text(view.container.querySelector("[aria-label='Pending order EURUSD.m 9101']") as Element)).toContain("At 1.079");
+  });
+
+  test("the changes fade out after a few seconds, when the real picture has long caught up", async () => {
+    // hold back the timers of the changes (and only those) so the end of their life can be reached at once
+    const realSetTimeout = globalThis.setTimeout;
+    const held: Array<() => void> = [];
+    const spy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if (delay === OVERLAY_TTL_MS && typeof handler === "function") {
+        held.push(() => handler(...args));
+        return 0 as unknown as ReturnType<typeof setTimeout>;
+      }
+      return realSetTimeout(handler, delay, ...args);
+    }) as typeof setTimeout);
+    try {
+      const view = await mountPanel();
+
+      click(sureButton(view.container, "Close XAUUSD 9001"));
+      await settle();
+      expect(bookTab(view.container, "Positions").textContent).toContain("Positions (0)");
+      expect(held).toHaveLength(1);
+
+      act(() => {
+        for (const expire of held) expire();
+      });
+      await settle();
+
+      // the polled picture is the truth again (here it still lists the position)
+      expect(bookTab(view.container, "Positions").textContent).toContain("Positions (1)");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The order routes are kept warm
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("WsaTradePanel - routes kept warm", () => {
+  const warmCalls = () => calls.filter((call) => call.method === "GET" && /\/api\/terminal\/trade\/(open|modify|close|cancel|close-bulk)$/.test(call.url));
+
+  test("the five order routes are woken up once when the panel opens", async () => {
+    await mountPanel();
+
+    expect(warmCalls().map((call) => call.url.split("/").pop()).sort()).toEqual(["cancel", "close", "close-bulk", "modify", "open"]);
+  });
+
+  test("a hidden panel does not wake anything", async () => {
+    await mountPanel({ active: false });
+
+    expect(warmCalls()).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The size of the panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("WsaTradePanel - panel size", () => {
+  /** A ResizeObserver the test can drive: `fire(width, height)` tells every watching panel how much room it has. */
+  function stubResizeObserver() {
+    const watching: Array<{ callback: ResizeObserverCallback; nodes: Element[] }> = [];
+    class FakeResizeObserver {
+      private readonly entry: { callback: ResizeObserverCallback; nodes: Element[] };
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, nodes: [] };
+        watching.push(this.entry);
+      }
+      observe(node: Element) {
+        this.entry.nodes.push(node);
+      }
+      unobserve() {}
+      disconnect() {
+        this.entry.nodes = [];
+      }
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+    return {
+      fire(width: number, height: number) {
+        act(() => {
+          for (const entry of watching) {
+            if (entry.nodes.length === 0) continue;
+            entry.callback([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
+          }
+        });
+      },
+    };
+  }
+
+  const section = (container: ParentNode) => container.querySelector("section[aria-label='WSA Trade']") as HTMLElement;
+  /** everything under the title bar: it is the part that is zoomed */
+  const zoomed = (container: ParentNode) => section(container).children[1] as HTMLElement;
+  const sizeGroup = (container: ParentNode) => container.querySelector("[role='group'][aria-label='Panel size']") as HTMLElement;
+  const smaller = (container: ParentNode) => sureButton(container, "Make the panel smaller");
+  const larger = (container: ParentNode) => sureButton(container, "Make the panel larger");
+  const sizeLabel = (container: ParentNode) => (sizeGroup(container).querySelectorAll("button")[1] as HTMLButtonElement).textContent;
+  /** ticket and lists side by side, or one under the other */
+  const sideBySide = (container: ParentNode) =>
+    Array.from(container.querySelectorAll("div")).some((item) => item.className.includes("grid-cols-[minmax(340px,420px)_minmax(0,1fr)]"));
+
+  test("with no room measured and no size chosen the panel is at 100%, fitted automatically", async () => {
+    const view = await mountPanel();
+
+    expect(sizeLabel(view.container)).toBe("Auto 100%");
+    expect(sureButton(view.container, "Panel size: fits automatically (100%)")).not.toBeNull();
+    expect(zoomed(view.container).style.zoom).toBeFalsy();
+    expect(sideBySide(view.container)).toBe(false);
+  });
+
+  test("the zoom buttons make the panel smaller and larger in steps and the choice is saved", async () => {
+    const changes: WsaTradePatch[] = [];
+    const view = await mountPanel({ onChange: (patch) => changes.push(patch) });
+
+    click(smaller(view.container));
+    await settle();
+    expect(changes).toContainEqual({ zoom: 0.9 });
+    expect(sizeLabel(view.container)).toBe("90%");
+    expect(zoomed(view.container).style.zoom).toBe("0.9");
+
+    click(larger(view.container));
+    click(larger(view.container));
+    await settle();
+    expect(changes).toContainEqual({ zoom: 1 });
+    expect(changes).toContainEqual({ zoom: 1.1 });
+    expect(sizeLabel(view.container)).toBe("110%");
+    expect(zoomed(view.container).style.zoom).toBe("1.1");
+  });
+
+  test("a click on the size goes back to fitting the room automatically", async () => {
+    const changes: WsaTradePatch[] = [];
+    const view = await mountPanel({ initial: { zoom: 1.2 }, onChange: (patch) => changes.push(patch) });
+    expect(sizeLabel(view.container)).toBe("120%");
+
+    click(sureButton(view.container, "Panel size 120% - click to fit automatically"));
+    await settle();
+
+    expect(changes).toContainEqual({ zoom: null });
+    expect(sizeLabel(view.container)).toBe("Auto 100%");
+  });
+
+  test("the limits are 60% and 160%", async () => {
+    const lowest = await mountPanel({ initial: { zoom: 0.6 } });
+    expect(smaller(lowest.container).disabled).toBe(true);
+    expect(larger(lowest.container).disabled).toBe(false);
+    unmountAll();
+
+    const highest = await mountPanel({ initial: { zoom: 1.6 } });
+    expect(larger(highest.container).disabled).toBe(true);
+    expect(smaller(highest.container).disabled).toBe(false);
+  });
+
+  test("the title bar with the size buttons is not zoomed, so they stay in reach", async () => {
+    const view = await mountPanel({ initial: { zoom: 0.7 } });
+
+    expect(section(view.container).children[0].contains(sizeGroup(view.container))).toBe(true);
+    expect(zoomed(view.container).contains(sizeGroup(view.container))).toBe(false);
+    expect(zoomed(view.container).style.zoom).toBe("0.7");
+    // the ticket is inside the zoomed part: Buy and Sell are reached by the zoom
+    expect(zoomed(view.container).contains(sureButton(view.container, "Buy XAUUSD at market"))).toBe(true);
+  });
+
+  test("a narrow or low pane makes the panel smaller by itself, never below 80%", async () => {
+    const room = stubResizeObserver();
+    const view = await mountPanel();
+
+    room.fire(342, 900);
+    expect(sizeLabel(view.container)).toBe("Auto 90%");
+
+    room.fire(300, 500);
+    expect(sizeLabel(view.container)).toBe("Auto 80%");
+    expect(zoomed(view.container).style.zoom).toBe("0.8");
+
+    room.fire(1000, 900);
+    expect(sizeLabel(view.container)).toBe("Auto 100%");
+    expect(zoomed(view.container).style.zoom).toBeFalsy();
+  });
+
+  test("a size the person chose is not changed by the room", async () => {
+    const room = stubResizeObserver();
+    const view = await mountPanel({ initial: { zoom: 1.3 } });
+
+    room.fire(300, 500);
+
+    expect(sizeLabel(view.container)).toBe("130%");
+    expect(zoomed(view.container).style.zoom).toBe("1.3");
+  });
+
+  test("ticket and lists stand side by side when the room allows it and one under the other when it does not", async () => {
+    const room = stubResizeObserver();
+    const view = await mountPanel();
+
+    room.fire(900, 800);
+    expect(sideBySide(view.container)).toBe(true);
+
+    room.fire(500, 800);
+    expect(sideBySide(view.container)).toBe(false);
+  });
+
+  test("the room is counted at the zoom in force: a smaller panel fits more across the same width", async () => {
+    const room = stubResizeObserver();
+    const small = await mountPanel({ initial: { zoom: 0.8 } });
+    room.fire(600, 800);
+    // 600 / 0.8 = 750 >= 720
+    expect(sideBySide(small.container)).toBe(true);
+    unmountAll();
+
+    const large = await mountPanel({ initial: { zoom: 1.6 } });
+    room.fire(900, 800);
+    // 900 / 1.6 = 562 < 720
+    expect(sideBySide(large.container)).toBe(false);
+  });
+
+  test("the ticket, the lists and the buttons all work at any zoom", async () => {
+    const view = await mountPanel({ initial: { zoom: 0.6 } });
+
+    await buyAtMarket(view);
+    click(sureButton(view.container, "Close XAUUSD 9001"));
+    await settle();
+
+    expect(orders().map((call) => call.url)).toEqual(["/api/terminal/trade/open", "/api/terminal/trade/close"]);
   });
 });

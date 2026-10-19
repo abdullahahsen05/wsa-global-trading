@@ -16,6 +16,7 @@ import {
   type BrokerTradingState,
   type CancelOrderRequest,
   type CloseTradeRequest,
+  type ExecutionStages,
   type ModifyTradeRequest,
   type OpenTradeRequest,
   type OrderKind,
@@ -368,6 +369,25 @@ const WARM_SESSION_TTL_MS = Math.max(
   Number.parseInt(process.env.API2TRADE_WARM_SESSION_TTL_MS ?? "300000", 10) || 300_000,
 );
 const warmedSessions = new Map<string, { providerAccountId: string; expiresAt: number }>();
+/** Sessions that are being checked / reconnected right now, so concurrent callers wait for the same preparation. */
+const sessionsBeingPrepared = new Map<string, Promise<string>>();
+
+/**
+ * A session that has just answered a request is alive, so its "warm" window starts again.
+ * Without this the window ran out five minutes after the status check even though the account
+ * was being used all the time, and the next order paid for a database read and a status check
+ * in front of it. A session that did die is still caught: the next call fails with a
+ * recoverable error and `withSessionRetry` reconnects.
+ */
+function rememberWarmSession(accountId: string, providerAccountId: string): void {
+  warmedSessions.set(accountId, { providerAccountId, expiresAt: Date.now() + WARM_SESSION_TTL_MS });
+}
+
+/** Adds a measured time to the stages object the caller handed over (nothing when it did not). */
+function addStage(stages: ExecutionStages | undefined, key: "sessionMs" | "sendMs", startedAt: number): void {
+  if (!stages) return;
+  stages[key] = (stages[key] ?? 0) + Math.max(0, Date.now() - startedAt);
+}
 const SYMBOL_SPEC_TTL_MS = Math.max(
   60_000,
   Number.parseInt(process.env.API2TRADE_SYMBOL_SPEC_CACHE_MS ?? "900000", 10) || 900_000,
@@ -592,30 +612,58 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     if (warmed?.providerAccountId === providerAccountId && warmed.expiresAt > Date.now()) {
       return providerAccountId;
     }
-    const readyProviderAccountId = await this.ensureApi2TradeSession(accountId, providerAccountId);
-    warmedSessions.set(accountId, {
-      providerAccountId: readyProviderAccountId,
-      expiresAt: Date.now() + WARM_SESSION_TTL_MS,
-    });
-    return readyProviderAccountId;
+    // A session that is not warm is prepared ONCE, however many calls need it at the same moment (an
+    // order and the refresh of the panel, say): two status checks - and, for an account the bridge
+    // dropped, two reconnects that could invalidate each other - would only be slower.
+    const preparing = sessionsBeingPrepared.get(accountId);
+    if (preparing) return preparing;
+    const task = this.ensureApi2TradeSession(accountId, providerAccountId)
+      .then((readyProviderAccountId) => {
+        rememberWarmSession(accountId, readyProviderAccountId);
+        return readyProviderAccountId;
+      })
+      .finally(() => {
+        sessionsBeingPrepared.delete(accountId);
+      });
+    sessionsBeingPrepared.set(accountId, task);
+    return task;
   }
 
+  /**
+   * Runs `operation` on a ready session. When `stages` is given it is filled in: `sessionMs` is
+   * what getting (or recovering) the session cost - 0 when it was warm - and `sendMs` what the
+   * operation itself took, so a slow order can be traced to the bridge or to the way to it.
+   */
   private async withSessionRetry<T>(
     accountId: string,
     operation: (providerAccountId: string) => Promise<T>,
+    stages?: ExecutionStages,
   ): Promise<T> {
+    const sessionStartedAt = Date.now();
     let providerAccountId = await this.resolveReadyProviderAccountId(accountId);
+    addStage(stages, "sessionMs", sessionStartedAt);
+
+    const sendStartedAt = Date.now();
     try {
-      return await operation(providerAccountId);
+      const value = await operation(providerAccountId);
+      addStage(stages, "sendMs", sendStartedAt);
+      rememberWarmSession(accountId, providerAccountId);
+      return value;
     } catch (error) {
+      addStage(stages, "sendMs", sendStartedAt);
       if (!isRecoverableApi2TradeSessionError(error)) throw error;
       warmedSessions.delete(accountId);
+      const recoveryStartedAt = Date.now();
       providerAccountId = await this.ensureApi2TradeSession(accountId, providerAccountId);
-      warmedSessions.set(accountId, {
-        providerAccountId,
-        expiresAt: Date.now() + WARM_SESSION_TTL_MS,
-      });
-      return operation(providerAccountId);
+      rememberWarmSession(accountId, providerAccountId);
+      addStage(stages, "sessionMs", recoveryStartedAt);
+
+      const secondSendStartedAt = Date.now();
+      try {
+        return await operation(providerAccountId);
+      } finally {
+        addStage(stages, "sendMs", secondSendStartedAt);
+      }
     }
   }
 
@@ -635,10 +683,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     await Promise.all(rows.map(async (row) => {
       try {
         const readyProviderAccountId = await this.ensureApi2TradeSession(row.id, row.provider_account_id);
-        warmedSessions.set(row.id, {
-          providerAccountId: readyProviderAccountId,
-          expiresAt: Date.now() + WARM_SESSION_TTL_MS,
-        });
+        rememberWarmSession(row.id, readyProviderAccountId);
       } catch {
         // The live execution path will surface the provider error for the
         // specific account. Warmup is only an optimization, never a fake pass.
@@ -981,10 +1026,12 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
   private async executeOrder(
     accountId: string,
     call: (providerAccountId: string) => Promise<unknown>,
+    stages?: ExecutionStages,
   ): Promise<BrokerExecutionResult> {
     for (let attempt = 0; ; attempt += 1) {
+      if (stages) stages.attempts = attempt + 1;
       try {
-        const raw = await this.withSessionRetry(accountId, call).catch(asExecutionError);
+        const raw = await this.withSessionRetry(accountId, call, stages).catch(asExecutionError);
         return interpretExecution(raw);
       } catch (error) {
         const again = error instanceof BrokerExecutionError && error.retryable && attempt < REPEAT_PAUSES_MS.length;
@@ -1001,18 +1048,21 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     if (kind !== "MARKET" && !(typeof req.price === "number" && req.price > 0)) {
       throw new BrokerExecutionError(BROKER_EXEC_ERROR.INVALID_REQUEST, "A pending order needs the price it waits for.", 400);
     }
-    const result = await this.executeOrder(req.accountId, (providerAccountId) =>
-      client.orderSend({
-        accountId: providerAccountId,
-        symbol: req.symbol,
-        operation: operationFor(req.side, kind),
-        volume: req.volume,
-        price: kind === "MARKET" ? undefined : req.price,
-        stopLoss: req.stopLoss,
-        takeProfit: req.takeProfit,
-        comment: req.comment,
-        slippage: kind === "MARKET" ? req.slippage : undefined,
-      }),
+    const result = await this.executeOrder(
+      req.accountId,
+      (providerAccountId) =>
+        client.orderSend({
+          accountId: providerAccountId,
+          symbol: req.symbol,
+          operation: operationFor(req.side, kind),
+          volume: req.volume,
+          price: kind === "MARKET" ? undefined : req.price,
+          stopLoss: req.stopLoss,
+          takeProfit: req.takeProfit,
+          comment: req.comment,
+          slippage: kind === "MARKET" ? req.slippage : undefined,
+        }),
+      req.stages,
     );
     return { ...result, executedVolume: result.executedVolume ?? req.volume };
   }
@@ -1020,27 +1070,33 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
   async closeTrade(req: CloseTradeRequest): Promise<BrokerExecutionResult> {
     const client = this.assertConfigured();
     this.assertExecutionAvailable();
-    return this.executeOrder(req.accountId, (providerAccountId) =>
-      client.orderClose({
-        accountId: providerAccountId,
-        ticket: req.brokerPositionId,
-        lots: req.volume,
-        comment: req.comment,
-      }),
+    return this.executeOrder(
+      req.accountId,
+      (providerAccountId) =>
+        client.orderClose({
+          accountId: providerAccountId,
+          ticket: req.brokerPositionId,
+          lots: req.volume,
+          comment: req.comment,
+        }),
+      req.stages,
     );
   }
 
   async modifyTrade(req: ModifyTradeRequest): Promise<BrokerExecutionResult> {
     const client = this.assertConfigured();
     this.assertExecutionAvailable();
-    return this.executeOrder(req.accountId, (providerAccountId) =>
-      client.orderModify({
-        accountId: providerAccountId,
-        ticket: req.brokerPositionId,
-        price: req.price,
-        stopLoss: req.stopLoss,
-        takeProfit: req.takeProfit,
-      }),
+    return this.executeOrder(
+      req.accountId,
+      (providerAccountId) =>
+        client.orderModify({
+          accountId: providerAccountId,
+          ticket: req.brokerPositionId,
+          price: req.price,
+          stopLoss: req.stopLoss,
+          takeProfit: req.takeProfit,
+        }),
+      req.stages,
     );
   }
 
@@ -1048,8 +1104,10 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
   async cancelOrder(req: CancelOrderRequest): Promise<BrokerExecutionResult> {
     const client = this.assertConfigured();
     this.assertExecutionAvailable();
-    return this.executeOrder(req.accountId, (providerAccountId) =>
-      client.orderCancel({ accountId: providerAccountId, ticket: req.brokerOrderId }),
+    return this.executeOrder(
+      req.accountId,
+      (providerAccountId) => client.orderCancel({ accountId: providerAccountId, ticket: req.brokerOrderId }),
+      req.stages,
     );
   }
 

@@ -312,7 +312,7 @@ export function buildOrderPlan(input: TicketInput): OrderPlanResult {
   };
 }
 
-/** One line for the confirmation bar: "Buy 0.10 XAUUSD at market · SL 2290 · TP 2320". */
+/** One line that says an order in words: "Buy 0.1 XAUUSD · at market · SL 2290 · TP 2320". The panel no longer asks before it sends; this is for messages and logs. */
 export function describePlan(plan: OrderPlan): string {
   const parts = [`${plan.side === "BUY" ? "Buy" : "Sell"} ${formatPrice(plan.volume)} ${plan.symbol}`];
   parts.push(plan.kind === "MARKET" ? "at market" : `${plan.kind.toLowerCase()} at ${formatPrice(plan.price)}`);
@@ -362,7 +362,7 @@ export function breakEvenLevel(position: Pick<WebTradePosition, "side" | "openPr
 
 /**
  * What a bulk command with this scope would touch. It mirrors the trading system's own rule
- * (`bulkTargets` on the AWS side), so the number the person confirms is the number that is closed.
+ * (`bulkTargets` on the AWS side), so the number on the chip is the number that is closed.
  */
 export function bulkPreview(
   scope: WebTradeBulkScope,
@@ -400,7 +400,7 @@ export const BULK_SCOPE_LABELS: Record<WebTradeBulkScope, string> = {
   PENDING: "all pending orders",
 };
 
-/** "Close 3 winning positions?" / "Delete 2 pending orders?" - the question of the second click. */
+/** The count of a bulk command in words: "Close 3 winning positions?" / "Delete 2 pending orders?". The panel sends on the first click and no longer asks; kept for wording and tests. */
 export function bulkQuestion(scope: WebTradeBulkScope, symbol: string | null, count: number): string {
   const noun = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
   if (scope === "PENDING") return `Delete ${noun(count, "pending order")}${symbol ? ` of ${symbol}` : ""}?`;

@@ -5,7 +5,7 @@ import { createBrokerAdapter } from "@/lib/broker/provider";
 import { resetGatewayState } from "@/lib/gateway/gatewayDb";
 import { resetGatewayAvailability } from "@/lib/gateway/gatewayQueue";
 import { writeAuditLog } from "@/lib/services/auditService";
-import { getPlatformSubscriptionAccess } from "@/lib/services/billingService";
+import { getPlatformSubscriptionAccess, hasActivePlatformProductSubscription } from "@/lib/services/billingService";
 import { getRiskEnforcementState } from "@/lib/services/riskService";
 import { GET as listAccounts } from "@/app/api/terminal/trade/accounts/route";
 import { GET as readState } from "@/app/api/terminal/trade/state/route";
@@ -15,6 +15,12 @@ import { POST as modifyPosition } from "@/app/api/terminal/trade/modify/route";
 import { POST as closePosition } from "@/app/api/terminal/trade/close/route";
 import { POST as cancelOrder } from "@/app/api/terminal/trade/cancel/route";
 import { POST as closeBulk } from "@/app/api/terminal/trade/close-bulk/route";
+import { GET as warmOpen } from "@/app/api/terminal/trade/open/route";
+import { GET as warmModify } from "@/app/api/terminal/trade/modify/route";
+import { GET as warmClose } from "@/app/api/terminal/trade/close/route";
+import { GET as warmCancel } from "@/app/api/terminal/trade/cancel/route";
+import { GET as warmCloseBulk } from "@/app/api/terminal/trade/close-bulk/route";
+import { resetWebTradeCaches } from "@/lib/services/webTradeService";
 import { WEB_TRADE_COMMENT } from "@/lib/trade/webTrade";
 import { sharedDb as db } from "./helpers/memoryDb";
 import {
@@ -61,7 +67,10 @@ vi.mock("@/lib/auth/session", () => {
 });
 
 vi.mock("@/lib/services/auditService", () => ({ writeAuditLog: vi.fn(async () => undefined) }));
-vi.mock("@/lib/services/billingService", () => ({ getPlatformSubscriptionAccess: vi.fn() }));
+vi.mock("@/lib/services/billingService", () => ({
+  getPlatformSubscriptionAccess: vi.fn(),
+  hasActivePlatformProductSubscription: vi.fn(),
+}));
 vi.mock("@/lib/services/riskService", () => ({ getRiskEnforcementState: vi.fn() }));
 vi.mock("@/lib/broker/provider", () => ({ createBrokerAdapter: vi.fn() }));
 
@@ -105,8 +114,12 @@ beforeEach(() => {
   db.errors.gateway_heartbeat = { code: "42P01", message: 'relation "gateway_heartbeat" does not exist' };
   seedAccounts();
   vi.mocked(writeAuditLog).mockClear();
+  resetWebTradeCaches();
   vi.mocked(getPlatformSubscriptionAccess).mockReset();
   vi.mocked(getPlatformSubscriptionAccess).mockResolvedValue({ status: "ACTIVE" } as never);
+  // the quick one-query check does not say yes unless a test makes it: the full billing picture decides
+  vi.mocked(hasActivePlatformProductSubscription).mockReset();
+  vi.mocked(hasActivePlatformProductSubscription).mockResolvedValue(false);
   vi.mocked(getRiskEnforcementState).mockReset();
   vi.mocked(getRiskEnforcementState).mockResolvedValue(null);
   signIn();
@@ -205,6 +218,7 @@ describe("GET /api/terminal/trade/accounts", () => {
     expect(switchedOff.route).toBe("none");
 
     useAdapter();
+    resetWebTradeCaches();
     vi.mocked(getPlatformSubscriptionAccess).mockResolvedValue({ status: "NONE" } as never);
     const unpaid = (await readJson(await listAccounts())).data.gate;
     expect(unpaid.canOpen).toBe(false);
@@ -529,7 +543,7 @@ describe("POST /api/terminal/trade/open", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(body).toEqual({ ok: true, data: { ok: true, ticket: "9001" } });
+    expect(body).toMatchObject({ ok: true, data: { ok: true, ticket: "9001", detail: { symbol: "EURUSD.m" } } });
     expect(adapter.openTrade).toHaveBeenCalledWith({
       accountId: ACCOUNT,
       symbol: "EURUSD.m",
@@ -540,6 +554,7 @@ describe("POST /api/terminal/trade/open", () => {
       stopLoss: 1.12,
       takeProfit: 1.08,
       comment: WEB_TRADE_COMMENT,
+      stages: expect.any(Object),
     });
     expect(writeAuditLog).toHaveBeenCalledTimes(1);
     expect(auditCall()).toMatchObject({
@@ -574,7 +589,7 @@ describe("POST /api/terminal/trade/open", () => {
 
     const body = await readJson(await openOrder(post(openBody())));
 
-    expect(body.data).toEqual({ ok: true, ticket: "9001", note: "Only part of the volume was executed." });
+    expect(body.data).toMatchObject({ ok: true, ticket: "9001", note: "Only part of the volume was executed." });
   });
 
   test("the order comment can never be mistaken for a copy-engine order", () => {
@@ -594,8 +609,9 @@ describe("POST /api/terminal/trade/open", () => {
     const first = await readJson(await openOrder(post(body)));
     const second = await readJson(await openOrder(post(body)));
 
-    expect(first.data).toEqual({ ok: true, ticket: "9001" });
-    expect(second.data).toEqual({ ok: true, ticket: "9001", repeated: true });
+    expect(first.data).toMatchObject({ ok: true, ticket: "9001" });
+    expect(first.data.repeated).toBeUndefined();
+    expect(second.data).toMatchObject({ ok: true, ticket: "9001", repeated: true });
     expect(adapter.openTrade).toHaveBeenCalledTimes(1);
     expect(writeAuditLog).toHaveBeenCalledTimes(1);
   });
@@ -703,12 +719,17 @@ describe("POST /api/terminal/trade/modify", () => {
     const response = await modify({ takeProfit: 2420 });
 
     expect(response.status).toBe(200);
-    expect((await readJson(response)).data).toEqual({ ok: true, ticket: "5001" });
+    expect((await readJson(response)).data).toMatchObject({
+      ok: true,
+      ticket: "5001",
+      detail: { symbol: "XAUUSD", stopLoss: 2380, takeProfit: 2420 },
+    });
     expect(adapter.modifyTrade).toHaveBeenCalledWith({
       accountId: ACCOUNT,
       brokerPositionId: "5001",
       stopLoss: 2380,
       takeProfit: 2420,
+      stages: expect.any(Object),
     });
     expect(auditCall()).toMatchObject({
       actorUserId: USER,
@@ -727,6 +748,7 @@ describe("POST /api/terminal/trade/modify", () => {
       brokerPositionId: "5001",
       stopLoss: 0,
       takeProfit: 2410,
+      stages: expect.any(Object),
     });
     expect(auditCall()).toMatchObject({ metadata: { stopLoss: null, takeProfit: 2410 } });
   });
@@ -767,13 +789,18 @@ describe("POST /api/terminal/trade/modify", () => {
     const response = await modify({ ticket: "6001", price: 1.075 });
 
     expect(response.status).toBe(200);
-    expect((await readJson(response)).data).toEqual({ ok: true, ticket: "6001" });
+    expect((await readJson(response)).data).toMatchObject({
+      ok: true,
+      ticket: "6001",
+      detail: { price: 1.075, stopLoss: 1.07, takeProfit: 1.1 },
+    });
     expect(adapter.modifyTrade).toHaveBeenCalledWith({
       accountId: ACCOUNT,
       brokerPositionId: "6001",
       price: 1.075,
       stopLoss: 1.07,
       takeProfit: 1.1,
+      stages: expect.any(Object),
     });
     expect(auditCall()).toMatchObject({ metadata: { ticket: "6001", symbol: "EURUSD.r", price: 1.075, stopLoss: 1.07, takeProfit: 1.1 } });
   });
@@ -811,6 +838,7 @@ describe("POST /api/terminal/trade/modify", () => {
     expect(switchedOff.status).toBe(503);
 
     useAdapter();
+    resetWebTradeCaches();
     vi.mocked(getPlatformSubscriptionAccess).mockResolvedValue({ status: "CANCELED" } as never);
     const unpaid = await modify({ takeProfit: 2420 });
     expect(unpaid.status).toBe(403);
@@ -860,12 +888,13 @@ describe("POST /api/terminal/trade/close", () => {
     const response = await close();
 
     expect(response.status).toBe(200);
-    expect((await readJson(response)).data).toEqual({ ok: true, ticket: "5001" });
+    expect((await readJson(response)).data).toMatchObject({ ok: true, ticket: "5001" });
     expect(adapter.closeTrade).toHaveBeenCalledWith({
       accountId: ACCOUNT,
       brokerPositionId: "5001",
       volume: null,
       comment: WEB_TRADE_COMMENT,
+      stages: expect.any(Object),
     });
     expect(adapter.fetchTradingState).not.toHaveBeenCalled();
     expect(auditCall()).toMatchObject({
@@ -954,8 +983,12 @@ describe("POST /api/terminal/trade/cancel", () => {
     const response = await cancel();
 
     expect(response.status).toBe(200);
-    expect((await readJson(response)).data).toEqual({ ok: true, ticket: "6001" });
-    expect(adapter.cancelOrder).toHaveBeenCalledWith({ accountId: ACCOUNT, brokerOrderId: "6001" });
+    expect((await readJson(response)).data).toMatchObject({ ok: true, ticket: "6001", detail: { symbol: "EURUSD.r" } });
+    expect(adapter.cancelOrder).toHaveBeenCalledWith({
+      accountId: ACCOUNT,
+      brokerOrderId: "6001",
+      stages: expect.any(Object),
+    });
     expect(auditCall()).toMatchObject({
       actorUserId: USER,
       action: "WEB_TRADE_ORDER_CANCELLED",
@@ -997,6 +1030,7 @@ describe("POST /api/terminal/trade/cancel", () => {
     expect((await cancel()).status).toBe(200);
     expect(getRiskEnforcementState).not.toHaveBeenCalled();
 
+    resetWebTradeCaches();
     vi.mocked(getPlatformSubscriptionAccess).mockResolvedValue({ status: "NONE" } as never);
     expect((await cancel()).status).toBe(403);
 
@@ -1126,5 +1160,73 @@ describe("POST /api/terminal/trade/close-bulk", () => {
     expect((await bulk({ scope: "LOSS" })).status).toBe(200);
     expect(getRiskEnforcementState).not.toHaveBeenCalled();
     expect((await closeBulk(post({ accountId: FOREIGN_ACCOUNT, scope: "ALL" }))).status).toBe(404);
+  });
+});
+
+
+describe("the platform subscription check on the order path", () => {
+  test("an active subscriber is settled by the one-query check: the full billing picture is not read", async () => {
+    vi.mocked(hasActivePlatformProductSubscription).mockResolvedValue(true);
+
+    const response = await openOrder(post(openBody()));
+
+    expect(response.status).toBe(200);
+    expect(hasActivePlatformProductSubscription).toHaveBeenCalledWith(USER);
+    expect(getPlatformSubscriptionAccess).not.toHaveBeenCalled();
+  });
+
+  test("a yes is remembered for a few seconds, so the next orders cost no billing query at all", async () => {
+    vi.mocked(hasActivePlatformProductSubscription).mockResolvedValue(true);
+
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect((await closePosition(post({ accountId: ACCOUNT, ticket: "5001" }))).status).toBe(200);
+
+    expect(hasActivePlatformProductSubscription).toHaveBeenCalledTimes(1);
+    expect(getPlatformSubscriptionAccess).not.toHaveBeenCalled();
+  });
+
+  test("a no is never remembered: the full picture decides every time (and still repairs old records)", async () => {
+    vi.mocked(getPlatformSubscriptionAccess).mockResolvedValue({ status: "NONE" } as never);
+
+    expect((await openOrder(post(openBody()))).status).toBe(403);
+    expect((await openOrder(post(openBody()))).status).toBe(403);
+
+    expect(getPlatformSubscriptionAccess).toHaveBeenCalledTimes(2);
+    expect(adapter.openTrade).not.toHaveBeenCalled();
+  });
+
+  test("a failing quick check never refuses a subscriber: the full picture is asked instead", async () => {
+    vi.mocked(hasActivePlatformProductSubscription).mockRejectedValue(new Error("database unavailable"));
+
+    const response = await openOrder(post(openBody()));
+
+    expect(response.status).toBe(200);
+    expect(getPlatformSubscriptionAccess).toHaveBeenCalledTimes(1);
+  });
+
+  test("an order of a user whose subscription is not the quick kind (manual approval) is still allowed by the full picture", async () => {
+    vi.mocked(hasActivePlatformProductSubscription).mockResolvedValue(false);
+    vi.mocked(getPlatformSubscriptionAccess).mockResolvedValue({ status: "ACTIVE" } as never);
+
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+  });
+});
+
+describe("waking the order routes up", () => {
+  test("a GET only wakes a route: no sign-in, no database, nothing sent to the broker", async () => {
+    vi.mocked(requireTrader).mockClear();
+    vi.mocked(requireTrader).mockRejectedValue(new AuthError("UNAUTHORIZED", "Not authenticated", 401));
+
+    for (const warm of [warmOpen, warmModify, warmClose, warmCancel, warmCloseBulk]) {
+      const response = warm();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+      expect(await readJson(response)).toEqual({ ok: true, data: { warm: true } });
+    }
+
+    expect(requireTrader).not.toHaveBeenCalled();
+    expect(db.calls).toHaveLength(0);
+    expect(adapter.openTrade).not.toHaveBeenCalled();
   });
 });

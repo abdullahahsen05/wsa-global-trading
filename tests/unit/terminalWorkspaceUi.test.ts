@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url": "https://app.wsa.test/terminal"}
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { TerminalWorkspace } from "@/components/trading/TerminalWorkspace";
 import { TradingAccountSelectionProvider } from "@/providers/TradingAccountSelectionProvider";
+import { splitColumns } from "@/lib/trade/panelLayout";
 import { defaultWatchlist, defaultWorkspace, defaultWsaTrade } from "@/lib/terminal/workspace";
 import type { MetaTraderTerminalAccount } from "@/lib/terminal/metatrader";
 import { click, control, json, keyDown, mount, setValue, settle, submit, text, unmountAll, wait } from "./helpers/reactDom";
@@ -290,7 +291,9 @@ describe("TerminalWorkspace - tabs", () => {
 
     // the chart gets the room, the order panel a column of its own
     const grid = tvPane(view.container)?.parentElement as HTMLElement;
-    expect(grid.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(380px,440px)]");
+    expect(grid.className).toContain("lg:grid-cols-[var(--split-columns)]");
+    expect(grid.style.getPropertyValue("--split-columns")).toBe(splitColumns(null));
+    expect(grid.style.getPropertyValue("--split-columns")).toContain("minmax(380px, 440px)");
     expect(grid.className).not.toContain("lg:grid-cols-2");
 
     const config = widgetConfig(view.container);
@@ -366,23 +369,25 @@ describe("TerminalWorkspace - tabs", () => {
     // the trade section is the split view already
     expect(selectedTab(view.container)).toEqual(["Split view"]);
     const grid = tvPane(view.container)?.parentElement as HTMLElement;
-    expect(grid.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(380px,440px)]");
+    expect(grid.className).toContain("lg:grid-cols-[var(--split-columns)]");
 
     click(control(view.container, "Stacked"));
     await settle();
     expect(grid.className).not.toContain("lg:grid-cols-");
     expect(grid.className).toContain("grid");
+    expect(grid.style.getPropertyValue("--split-columns")).toBe("");
     expect(control(view.container, "Stacked")?.getAttribute("aria-pressed")).toBe("true");
 
     click(control(view.container, "Side by side"));
     await settle();
-    expect(grid.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(380px,440px)]");
+    expect(grid.className).toContain("lg:grid-cols-[var(--split-columns)]");
 
     // the broker's web terminal needs the width: two equal halves
     click(control(view.container, "Chart + MetaTrader"));
     await settle();
     expect(grid.className).toContain("lg:grid-cols-2");
-    expect(grid.className).not.toContain("minmax(380px,440px)");
+    expect(grid.className).not.toContain("--split-columns");
+    expect(grid.style.getPropertyValue("--split-columns")).toBe("");
     expect(tvPane(view.container)?.hasAttribute("inert")).toBe(false);
     expect(mtPane(view.container)?.hasAttribute("inert")).toBe(false);
 
@@ -604,6 +609,195 @@ describe("TerminalWorkspace - chart and order panel on the same instrument", () 
   });
 });
 
+describe("TerminalWorkspace - the divider between the chart and the order panel", () => {
+  const separator = (container: ParentNode) => container.querySelector<HTMLElement>("[role='separator']");
+  const gridOf = (container: ParentNode) => tvPane(container)?.parentElement as HTMLElement;
+  const columns = (container: ParentNode) => gridOf(container).style.getPropertyValue("--split-columns");
+
+  /** jsdom has no layout: the grid is 1000 px wide and starts 100 px from the left edge. */
+  function giveGridARoom(container: ParentNode) {
+    gridOf(container).getBoundingClientRect = () =>
+      ({ left: 100, right: 1100, top: 0, bottom: 800, width: 1000, height: 800, x: 100, y: 0, toJSON: () => ({}) }) as DOMRect;
+  }
+
+  function pointer(element: Element | null, type: "pointerdown" | "pointermove" | "pointerup", clientX: number, button = 0) {
+    if (!element) throw new Error("pointer: element not found");
+    act(() => {
+      element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, button, clientX }));
+    });
+  }
+
+  const capture = vi.fn();
+  const release = vi.fn();
+  beforeEach(() => {
+    capture.mockClear();
+    release.mockClear();
+    Object.defineProperty(HTMLElement.prototype, "setPointerCapture", { value: capture, configurable: true, writable: true });
+    Object.defineProperty(HTMLElement.prototype, "releasePointerCapture", { value: release, configurable: true, writable: true });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(HTMLElement.prototype, "setPointerCapture");
+    Reflect.deleteProperty(HTMLElement.prototype, "releasePointerCapture");
+  });
+
+  async function mountSideBySide(workspace?: unknown) {
+    installFetch({ workspace, persisted: workspace !== undefined });
+    const view = mountWorkspace();
+    await settle();
+    await wait(30);
+    return view;
+  }
+
+  test("sits between the chart and the order panel, and says what it does", async () => {
+    const view = await mountSideBySide();
+    const handle = separator(view.container);
+
+    expect(handle).not.toBeNull();
+    expect(handle?.getAttribute("aria-label")).toBe("Resize the order panel");
+    expect(handle?.getAttribute("aria-orientation")).toBe("vertical");
+    expect(handle?.getAttribute("aria-valuemin")).toBe("20");
+    expect(handle?.getAttribute("aria-valuemax")).toBe("60");
+    expect(handle?.getAttribute("aria-valuetext")).toBe("The usual width");
+    expect(handle?.getAttribute("tabindex")).toBe("0");
+    // chart | divider | order panel
+    expect(handle?.previousElementSibling).toBe(tvPane(view.container));
+    expect(handle?.nextElementSibling).toBe(wtPane(view.container));
+  });
+
+  test("is only there when the chart and the order panel are side by side", async () => {
+    const view = await mountSideBySide();
+    expect(separator(view.container)).not.toBeNull();
+
+    click(control(view.container, "Stacked"));
+    await settle();
+    expect(separator(view.container)).toBeNull();
+
+    click(control(view.container, "Side by side"));
+    await settle();
+    expect(separator(view.container)).not.toBeNull();
+
+    // the MetaTrader web terminal keeps two equal halves
+    click(control(view.container, "Chart + MetaTrader"));
+    await settle();
+    expect(separator(view.container)).toBeNull();
+
+    click(tab(view.container, "TradingView"));
+    await settle();
+    expect(separator(view.container)).toBeNull();
+  });
+
+  test("a stored share is the width of the panel", async () => {
+    const view = await mountSideBySide({ ...defaultWorkspace(), wsatrade: { ...defaultWsaTrade(), panelShare: 0.4 } });
+
+    expect(columns(view.container)).toBe(splitColumns(0.4));
+    expect(columns(view.container)).toContain("clamp(320px, 40.0%, 1100px)");
+    expect(separator(view.container)?.getAttribute("aria-valuenow")).toBe("40");
+    expect(separator(view.container)?.getAttribute("aria-valuetext")).toBe("40 percent of the width");
+  });
+
+  test("dragging it moves the edge at once and saves the new share once, when it is let go", async () => {
+    const view = await mountSideBySide();
+    giveGridARoom(view.container);
+    const handle = separator(view.container);
+
+    pointer(handle, "pointerdown", 800);
+    expect(capture).toHaveBeenCalledTimes(1);
+    pointer(handle, "pointermove", 700); // (100 + 1000 - 700 - 8) / 1000
+    expect(columns(view.container)).toBe(splitColumns(0.392));
+    pointer(handle, "pointermove", 600);
+    expect(columns(view.container)).toBe(splitColumns(0.492));
+    expect(patches()).toHaveLength(0); // nothing is sent while the divider is moving
+
+    pointer(handle, "pointerup", 650);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(columns(view.container)).toBe(splitColumns(0.442));
+
+    await wait(900);
+    expect(patches().map((call) => call.body)).toEqual([{ workspace: { wsatrade: { panelShare: 0.442 } } }]);
+    expect(separator(view.container)?.getAttribute("aria-valuenow")).toBe("44");
+  });
+
+  test("never makes the panel wider or narrower than its limits", async () => {
+    const view = await mountSideBySide();
+    giveGridARoom(view.container);
+    const handle = separator(view.container);
+
+    pointer(handle, "pointerdown", 800);
+    pointer(handle, "pointermove", 120); // far to the left: the panel would take everything
+    expect(columns(view.container)).toBe(splitColumns(0.6));
+    pointer(handle, "pointermove", 1090); // far to the right: the panel would vanish
+    expect(columns(view.container)).toBe(splitColumns(0.2));
+    pointer(handle, "pointerup", 1090);
+
+    await wait(900);
+    expect(patches().map((call) => call.body)).toEqual([{ workspace: { wsatrade: { panelShare: 0.2 } } }]);
+  });
+
+  test("a move without a press does nothing, and neither does another mouse button", async () => {
+    const view = await mountSideBySide();
+    giveGridARoom(view.container);
+    const handle = separator(view.container);
+
+    pointer(handle, "pointermove", 700);
+    expect(columns(view.container)).toBe(splitColumns(null));
+
+    pointer(handle, "pointerdown", 800, 2);
+    pointer(handle, "pointermove", 700);
+    pointer(handle, "pointerup", 700);
+    expect(capture).not.toHaveBeenCalled();
+    expect(columns(view.container)).toBe(splitColumns(null));
+
+    await wait(900);
+    expect(patches()).toHaveLength(0);
+  });
+
+  test("the arrow keys move it a little, the other way too", async () => {
+    const view = await mountSideBySide({ ...defaultWorkspace(), wsatrade: { ...defaultWsaTrade(), panelShare: 0.4 } });
+    const handle = separator(view.container);
+
+    keyDown(handle, "ArrowLeft"); // the divider moves left: the panel gets wider
+    expect(columns(view.container)).toBe(splitColumns(0.42));
+    keyDown(handle, "ArrowRight");
+    keyDown(handle, "ArrowRight");
+    expect(columns(view.container)).toBe(splitColumns(0.38));
+    keyDown(handle, "ArrowUp"); // not its keys
+    expect(columns(view.container)).toBe(splitColumns(0.38));
+
+    await wait(900);
+    expect(patches().map((call) => call.body)).toEqual([{ workspace: { wsatrade: { panelShare: 0.38 } } }]);
+  });
+
+  test("from the usual width the arrow keys start where the panel is", async () => {
+    const view = await mountSideBySide();
+
+    keyDown(separator(view.container), "ArrowLeft");
+    // no layout in jsdom: the panel counts as the usual third of the width, one step wider
+    expect(columns(view.container)).toBe(splitColumns(0.35));
+  });
+
+  test("Home, Enter and a double click give the panel its usual width back", async () => {
+    for (const give of [
+      (handle: HTMLElement | null) => keyDown(handle, "Home"),
+      (handle: HTMLElement | null) => keyDown(handle, "Enter"),
+      (handle: HTMLElement | null) =>
+        act(() => {
+          handle?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+        }),
+    ]) {
+      const view = await mountSideBySide({ ...defaultWorkspace(), wsatrade: { ...defaultWsaTrade(), panelShare: 0.5 } });
+      expect(columns(view.container)).toBe(splitColumns(0.5));
+
+      give(separator(view.container));
+      expect(columns(view.container)).toBe(splitColumns(null));
+      expect(separator(view.container)?.getAttribute("aria-valuetext")).toBe("The usual width");
+
+      await wait(900);
+      expect(patches().map((call) => call.body)).toEqual([{ workspace: { wsatrade: { panelShare: null } } }]);
+      unmountAll();
+    }
+  });
+});
+
 describe("TerminalWorkspace - saved workspace", () => {
   test("restores the stored layout, chart settings and the account used last", async () => {
     installFetch({ workspace: STORED, persisted: true });
@@ -649,7 +843,8 @@ describe("TerminalWorkspace - saved workspace", () => {
           symbol: "EURUSD.m",
           volume: 0.25,
           orderKind: "LIMIT",
-          confirm: false,
+          zoom: 0.9,
+          panelShare: 0.35,
           levelMode: "points",
           stopLossPoints: 300,
           takeProfitPoints: 600,
@@ -669,7 +864,8 @@ describe("TerminalWorkspace - saved workspace", () => {
       symbol: "EURUSD.m",
       volume: 0.25,
       orderKind: "LIMIT",
-      confirm: false,
+      zoom: 0.9,
+      panelShare: 0.35,
       levelMode: "points",
       stopLossPoints: 300,
       takeProfitPoints: 600,

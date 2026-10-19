@@ -409,7 +409,7 @@ describe("close several at once", () => {
     expect(bulkPreview("PENDING", "EURUSD", positions, pending).pending.map((entry) => entry.ticket)).toEqual(["12"]);
   });
 
-  test("the question of the second click", () => {
+  test("the count of a bulk command in words", () => {
     expect(bulkQuestion("ALL", null, 3)).toBe("Close 3 positions?");
     expect(bulkQuestion("PROFIT", null, 1)).toBe("Close 1 winning position?");
     expect(bulkQuestion("LOSS", null, 2)).toBe("Close 2 losing positions?");

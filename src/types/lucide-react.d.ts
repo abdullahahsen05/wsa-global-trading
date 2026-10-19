@@ -61,6 +61,8 @@ declare module 'lucide-react' {
   export const TrendingUp: LucideIcon
   export const X: LucideIcon
   export const ZoomIn: LucideIcon
+  export const ZoomOut: LucideIcon
+  export const GripVertical: LucideIcon
 
   // Icons used in AURIX — AI assistant module
   export const Bot: LucideIcon

@@ -14,10 +14,15 @@ if (typeof window !== "undefined") {
  *
  *  - commands:   claimed in batches (FOR UPDATE SKIP LOCKED), one chain per account so a
  *                modify never overtakes the open it belongs to, accounts in parallel;
+ *  - reads (STATE / SYMBOLS) run on a chain of their own: a slow symbol list of an account
+ *                never holds up an order on it, and never takes the slot of one;
  *  - an order that waited past its expiry is NOT sent (the person was already told);
  *  - an order is never run twice: a RUNNING command whose worker died becomes FAILED
  *                (WORKER_LOST) in the sweep, it is never started again;
- *  - the answer of a command that already ran is stored with retries - the order exists;
+ *  - the answer of a command that already ran is stored with retries - the order exists -
+ *                and outside the account's chain, so the next order does not wait for it;
+ *  - right after an order the picture of the account is read again (and kept fresh at a
+ *                faster pace for a few seconds), so the panel shows the result at once;
  *  - without migration 060 the loop sleeps and asks again after a minute.
  *
  * No Next / React imports: runs inside the AWS worker.
@@ -31,6 +36,8 @@ import {
   ORDER_COMMAND_KINDS,
   parseTradeCommand,
   TradeCommandError,
+  type CommandTiming,
+  type GatewayTradingState,
   type ParsedTradeCommand,
   type TradeCommandOutcome,
 } from "./tradeCommands";
@@ -48,12 +55,16 @@ export interface GatewayWorkerOptions {
   idlePollMs?: number;
   /** how often the picture of a watched account is renewed */
   stateRefreshMs?: number;
+  /** how often it is renewed in the few seconds after an order on that account */
+  hotRefreshMs?: number;
   /** how often the list of watched accounts is read (a small indexed table - twice a second is cheap) */
   watchListMs?: number;
   heartbeatMs?: number;
   sweepMs?: number;
   /** commands running at the same time (different accounts) */
   commandConcurrency?: number;
+  /** reads (STATE / SYMBOLS commands) running at the same time; they never use the slots of the orders */
+  readConcurrency?: number;
   /** watched accounts being refreshed at the same time */
   stateConcurrency?: number;
   claimBatch?: number;
@@ -63,10 +74,28 @@ const NOT_INSTALLED_RECHECK_MS = 60_000;
 const ACTIVE_WINDOW_MS = 60_000;
 const OWNER_CACHE_MS = 10 * 60_000;
 const OWNER_CACHE_MAX = 2000;
+/** An owner this old is looked up again in the background while somebody watches the account. */
+const OWNER_PREFETCH_AFTER_MS = OWNER_CACHE_MS / 2;
 const STATE_FAILURE_PAUSE_MS = 3_000;
 const WATCH_TICK_MS = 250;
+/** After an order the picture of its account is renewed faster for this long. */
+const HOT_WINDOW_MS = 4_000;
+/** A picture this young (and taken after the last order on the account) is good enough to read levels from. */
+const RECENT_PICTURE_MAX_AGE_MS = 1_500;
 const STORE_RETRY_PAUSES_MS = [150, 400];
 const NOT_SENT_MESSAGE = "The command waited too long, so it was NOT sent to the broker.";
+/** Commands that only read: they must never wait behind (or in front of) an order. */
+const READ_KINDS: ReadonlySet<string> = new Set(["STATE", "SYMBOLS"]);
+
+/** ", read 80ms, session 0ms, send 312ms, 2 attempts" for the log line of a command. */
+function timingSuffix(timing: Partial<CommandTiming>): string {
+  const parts: string[] = [];
+  if (timing.readMs !== undefined) parts.push(`read ${timing.readMs}ms`);
+  if (timing.sessionMs !== undefined) parts.push(`session ${timing.sessionMs}ms`);
+  if (timing.sendMs !== undefined) parts.push(`send ${timing.sendMs}ms`);
+  if (timing.attempts !== undefined && timing.attempts > 1) parts.push(`${timing.attempts} attempts`);
+  return parts.length > 0 ? `, ${parts.join(", ")}` : "";
+}
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -101,17 +130,30 @@ export class GatewayWorker {
   private readonly pollMs: number;
   private readonly idlePollMs: number;
   private readonly stateRefreshMs: number;
+  private readonly hotRefreshMs: number;
   private readonly watchListMs: number;
   private readonly heartbeatMs: number;
   private readonly sweepMs: number;
   private readonly claimBatch: number;
 
   private readonly commandChains: KeyedChains;
+  private readonly readChains: KeyedChains;
   private readonly stateChains: KeyedChains;
   private readonly owners = new Map<string, { userId: string; at: number }>();
+  private readonly ownerLookupAt = new Map<string, number>();
   private readonly stateBusy = new Set<string>();
   private readonly nextStateAt = new Map<string, number>();
   private readonly stateFailureLoggedAt = new Map<string, number>();
+  /** the last picture read of each watched account, and when that read began / ended */
+  private readonly pictures = new Map<string, { state: GatewayTradingState; startedAt: number; finishedAt: number }>();
+  /** when the last order on an account finished */
+  private readonly orderDoneAt = new Map<string, number>();
+  /** accounts whose picture is renewed faster until the time given */
+  private readonly hotUntil = new Map<string, number>();
+  /** accounts that had a read in flight when an order finished: they are read once more as soon as it ends */
+  private readonly refreshAgain = new Set<string>();
+  /** answers being stored (they are written outside the chain of the account) */
+  private readonly answers = new Set<Promise<void>>();
 
   private running = false;
   private startedAt = new Date(0);
@@ -134,13 +176,15 @@ export class GatewayWorker {
     this.warn = options.warn ?? ((message) => console.warn(message));
     this.now = options.now ?? Date.now;
     this.pollMs = Math.max(50, options.pollMs ?? 150);
-    this.idlePollMs = Math.max(this.pollMs, options.idlePollMs ?? 750);
+    this.idlePollMs = Math.max(this.pollMs, options.idlePollMs ?? 400);
     this.stateRefreshMs = Math.max(250, options.stateRefreshMs ?? 1_000);
+    this.hotRefreshMs = Math.max(150, options.hotRefreshMs ?? 350);
     this.watchListMs = Math.max(250, options.watchListMs ?? 500);
     this.heartbeatMs = Math.max(1_000, options.heartbeatMs ?? 5_000);
     this.sweepMs = Math.max(5_000, options.sweepMs ?? 60_000);
     this.claimBatch = Math.max(1, Math.min(50, options.claimBatch ?? 10));
     this.commandChains = new KeyedChains(Math.max(1, options.commandConcurrency ?? 8));
+    this.readChains = new KeyedChains(Math.max(1, options.readConcurrency ?? 6));
     this.stateChains = new KeyedChains(Math.max(1, options.stateConcurrency ?? 6));
   }
 
@@ -159,14 +203,27 @@ export class GatewayWorker {
     this.running = false;
     for (const wakeUp of [...this.sleepers]) wakeUp();
     await waitAtMost(Promise.allSettled(this.loops), 2_000);
-    await waitAtMost(this.commandChains.idle(), 10_000);
+    await waitAtMost(this.settled(), 10_000);
     await this.store.retire(this.workerId).catch(() => undefined);
   }
 
-  /** Resolves when no command is running or queued (tests, shutdown). */
+  /** Resolves when no command is running or queued and every answer has been stored (tests, shutdown). */
   async idle(): Promise<void> {
-    await this.commandChains.idle();
-    await this.stateChains.idle();
+    do {
+      await this.settled();
+      await this.stateChains.idle();
+    } while (
+      this.commandChains.size > 0 ||
+      this.readChains.size > 0 ||
+      this.stateChains.size > 0 ||
+      this.answers.size > 0
+    );
+  }
+
+  /** The commands (orders and reads) and the stored answers, not the refreshes of the pictures. */
+  private async settled(): Promise<void> {
+    await Promise.all([this.commandChains.idle(), this.readChains.idle()]);
+    await Promise.allSettled([...this.answers]);
   }
 
   /** A pause that `stop()` can cut short. */
@@ -210,7 +267,9 @@ export class GatewayWorker {
     }
     for (const command of claimed) {
       this.lastActivityAt = this.now();
-      void this.commandChains.run(
+      // A read (the symbol list can take seconds) has its own chain: it neither waits for an order nor makes one wait.
+      const chains = READ_KINDS.has(command.kind) ? this.readChains : this.commandChains;
+      void chains.run(
         command.accountId,
         () => this.process(command),
         (error) => this.warn(`[trade-gateway] command ${shortId(command.id)} crashed: ${error instanceof Error ? error.message : "unknown error"}`),
@@ -244,8 +303,32 @@ export class GatewayWorker {
         409,
       );
     }
+    this.rememberOwner(command.accountId, owner.userId, now);
+  }
+
+  private rememberOwner(accountId: string, userId: string, at: number): void {
     if (this.owners.size >= OWNER_CACHE_MAX) this.owners.clear();
-    this.owners.set(command.accountId, { userId: owner.userId, at: now });
+    this.owners.set(accountId, { userId, at });
+  }
+
+  /**
+   * Looks the owner of a watched account up in the background, so the first click on it does not
+   * pay for a database read. What is stored is the real owner from the accounts table (never the
+   * user the watch row names), and `assertOwner` still compares it with the user of every command.
+   */
+  private prefetchOwner(entry: WatchedAccount): void {
+    const now = this.now();
+    const cached = this.owners.get(entry.accountId);
+    if (cached && now - cached.at < OWNER_PREFETCH_AFTER_MS) return;
+    if (now - (this.ownerLookupAt.get(entry.accountId) ?? Number.NEGATIVE_INFINITY) < 30_000) return;
+    if (this.ownerLookupAt.size >= OWNER_CACHE_MAX) this.ownerLookupAt.clear();
+    this.ownerLookupAt.set(entry.accountId, now);
+    void this.store
+      .owner(entry.accountId)
+      .then((owner) => {
+        if (owner?.providerAccountId) this.rememberOwner(entry.accountId, owner.userId, this.now());
+      })
+      .catch(() => undefined);
   }
 
   private async withRetries<T>(task: () => Promise<T>): Promise<T> {
@@ -263,9 +346,12 @@ export class GatewayWorker {
     const startedAt = this.now();
     const queueMs = Math.max(0, startedAt - Date.parse(command.createdAt));
     const label = `${command.kind} ${shortId(command.accountId)}`;
+    // filled in by the executor while it works: where the time of this command goes
+    const timing: Partial<CommandTiming> = {};
 
     let parsed: ParsedTradeCommand;
     let outcome: TradeCommandOutcome;
+    let touchesBroker = false;
     try {
       parsed = parseTradeCommand(command.kind, command.payload);
       // An order that waited past its expiry is not sent: the person was already told it did not go through.
@@ -273,11 +359,20 @@ export class GatewayWorker {
         throw new TradeCommandError("NOT_SENT", NOT_SENT_MESSAGE, 504);
       }
       await this.assertOwner(command);
-      outcome = await executeTradeCommand(this.adapter, command.accountId, parsed);
+      touchesBroker = ORDER_COMMAND_KINDS.has(parsed.kind);
+      outcome = await executeTradeCommand(this.adapter, command.accountId, parsed, {
+        // a modify reads the levels from the picture taken a moment ago when that picture is certain to be current
+        recentState: parsed.kind === "MODIFY" ? this.recentPicture(command.accountId) : null,
+        timing,
+      });
     } catch (error) {
+      // a refused or failed order may still have changed something: the picture is read again
+      if (touchesBroker) this.orderFinished(command.accountId);
       const failure = describeCommandError(error);
       this.commandsFailed += 1;
-      this.log(`[trade-gateway] ${label} failed in ${this.now() - startedAt}ms (queue ${queueMs}ms): ${failure.code} - ${failure.message}`);
+      this.log(
+        `[trade-gateway] ${label} failed in ${this.now() - startedAt}ms (queue ${queueMs}ms${timingSuffix(timing)}): ${failure.code} - ${failure.message}`,
+      );
       await this.withRetries(() => this.store.fail(command.id, failure)).catch((storeError) => {
         this.warn(`[trade-gateway] could not store the failure of ${shortId(command.id)}: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
       });
@@ -287,6 +382,8 @@ export class GatewayWorker {
     // The command has run: from here on only the answer must be stored - it is never run again.
     const runMs = this.now() - startedAt;
     this.commandsRun += 1;
+    if (touchesBroker) this.orderFinished(command.accountId);
+    if (parsed.kind !== "STATE") this.log(`[trade-gateway] ${label} done in ${runMs}ms (queue ${queueMs}ms${timingSuffix(timing)})`);
     if (parsed.kind === "SYMBOLS" && outcome.symbols) {
       await this.store.saveSymbols(command.accountId, outcome.symbols, new Date(this.now())).catch((storeError) => {
         if (!this.noteNotInstalled(storeError)) {
@@ -294,11 +391,67 @@ export class GatewayWorker {
         }
       });
     }
-    if (ORDER_COMMAND_KINDS.has(parsed.kind)) this.nextStateAt.delete(command.accountId);
-    await this.withRetries(() => this.store.complete(command.id, { ...outcome, timing: { queueMs, runMs } })).catch((storeError) => {
-      this.warn(`[trade-gateway] ${label} ran but its answer could not be stored: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
-    });
-    if (parsed.kind !== "STATE") this.log(`[trade-gateway] ${label} done in ${runMs}ms (queue ${queueMs}ms)`);
+    // Written outside the chain of the account: the next order on it does not wait for this round trip.
+    this.storeAnswer(command, label, { ...outcome, timing: { ...timing, queueMs, runMs } });
+  }
+
+  /** Stores the answer of a command that has run - with retries, because the order exists whatever happens now. */
+  private storeAnswer(command: ClaimedCommand, label: string, answer: TradeCommandOutcome): void {
+    const task: Promise<void> = this.withRetries(() => this.store.complete(command.id, answer))
+      .catch((storeError) => {
+        this.warn(`[trade-gateway] ${label} ran but its answer could not be stored: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
+      })
+      .finally(() => {
+        this.answers.delete(task);
+      });
+    this.answers.add(task);
+  }
+
+  // ── what the worker knows about an account right after an order ───────────
+
+  /** The picture of an account if it was read after the last order on it finished and is only a moment old. */
+  private recentPicture(accountId: string): GatewayTradingState | null {
+    const picture = this.pictures.get(accountId);
+    if (!picture) return null;
+    if (this.now() - picture.finishedAt > RECENT_PICTURE_MAX_AGE_MS) return null;
+    // read before the last order on this account ended: it may not show what that order did
+    if (picture.startedAt < (this.orderDoneAt.get(accountId) ?? 0)) return null;
+    return picture.state;
+  }
+
+  /** An order on the account has just finished (or failed in a way that may have changed something). */
+  private orderFinished(accountId: string): void {
+    const now = this.now();
+    if (this.orderDoneAt.size > 500) this.forgetOldAccounts(now);
+    this.orderDoneAt.set(accountId, now);
+    this.pictures.delete(accountId);
+    this.hotUntil.set(accountId, now + HOT_WINDOW_MS);
+    this.refreshSoon(accountId);
+  }
+
+  private forgetOldAccounts(now: number): void {
+    for (const [accountId, at] of this.orderDoneAt) {
+      if (now - at > 60_000) this.orderDoneAt.delete(accountId);
+    }
+    for (const [accountId, until] of this.hotUntil) {
+      if (until < now) this.hotUntil.delete(accountId);
+    }
+    for (const [accountId, picture] of this.pictures) {
+      if (now - picture.finishedAt > 60_000) this.pictures.delete(accountId);
+    }
+  }
+
+  /** Reads the account again now instead of at the next tick - after an order the panel wants to see its result. */
+  private refreshSoon(accountId: string): void {
+    this.nextStateAt.delete(accountId);
+    const entry = this.watchedList.find((candidate) => candidate.accountId === accountId);
+    if (!entry) return; // nobody is looking at this account: there is nothing to publish
+    if (this.stateBusy.has(accountId)) {
+      // that read began before the order ended and may not show it: read once more as soon as it is done
+      this.refreshAgain.add(accountId);
+      return;
+    }
+    this.startRefresh(entry);
   }
 
   // ── live picture of the accounts somebody is looking at ────────────────────
@@ -331,15 +484,12 @@ export class GatewayWorker {
     }
     let started = 0;
     for (const entry of this.watchedList) {
+      // the owner is looked up before the first click, not during it
+      this.prefetchOwner(entry);
       if (this.stateBusy.has(entry.accountId)) continue;
       if ((this.nextStateAt.get(entry.accountId) ?? 0) > now) continue;
-      this.stateBusy.add(entry.accountId);
       started += 1;
-      void this.stateChains.run(
-        entry.accountId,
-        () => this.refreshOne(entry),
-        (error) => this.warn(`[trade-gateway] refresh of ${shortId(entry.accountId)} crashed: ${error instanceof Error ? error.message : "unknown error"}`),
-      );
+      this.startRefresh(entry);
     }
     if (this.nextStateAt.size > 1000) {
       const live = new Set(this.watchedList.map((entry) => entry.accountId));
@@ -348,11 +498,34 @@ export class GatewayWorker {
     return started;
   }
 
+  private startRefresh(entry: WatchedAccount): void {
+    this.stateBusy.add(entry.accountId);
+    void this.stateChains.run(
+      entry.accountId,
+      () => this.refreshOne(entry),
+      (error) => this.warn(`[trade-gateway] refresh of ${shortId(entry.accountId)} crashed: ${error instanceof Error ? error.message : "unknown error"}`),
+    );
+  }
+
+  /** The pause before the next read of an account: shorter in the seconds after an order on it. */
+  private refreshInterval(accountId: string): number {
+    const hotUntil = this.hotUntil.get(accountId);
+    if (hotUntil === undefined) return this.stateRefreshMs;
+    if (hotUntil <= this.now()) {
+      this.hotUntil.delete(accountId);
+      return this.stateRefreshMs;
+    }
+    return Math.min(this.stateRefreshMs, this.hotRefreshMs);
+  }
+
   private async refreshOne(entry: WatchedAccount): Promise<void> {
+    const readStartedAt = this.now();
     try {
       const state = await readGatewayState(this.adapter, entry.accountId, entry.symbols);
+      // kept for a modify that comes right after: it can read the levels from here instead of asking the broker again
+      this.pictures.set(entry.accountId, { state, startedAt: readStartedAt, finishedAt: this.now() });
       await this.store.saveState(entry.accountId, state, null, new Date(this.now()));
-      this.nextStateAt.set(entry.accountId, this.now() + this.stateRefreshMs);
+      this.nextStateAt.set(entry.accountId, this.now() + this.refreshInterval(entry.accountId));
     } catch (error) {
       const message = describeCommandError(error).message;
       this.nextStateAt.set(entry.accountId, this.now() + STATE_FAILURE_PAUSE_MS);
@@ -364,6 +537,11 @@ export class GatewayWorker {
       await this.store.saveState(entry.accountId, null, message, new Date(this.now())).catch(() => undefined);
     } finally {
       this.stateBusy.delete(entry.accountId);
+      // an order finished while this read was in flight: the picture just taken may not show it - read again now
+      if (this.refreshAgain.delete(entry.accountId)) {
+        const current = this.watchedList.find((candidate) => candidate.accountId === entry.accountId);
+        if (current) this.startRefresh(current);
+      }
     }
   }
 

@@ -3,8 +3,9 @@
  * settings (symbol, timeframe, personal watchlist, side panels, chart options
  * such as style, indicators and toolbars), the MetaTrader web terminal
  * settings (source, selected account, accounts added by hand) and the WSA Trade
- * order panel (account, symbol, volume, order type and the person's own trade
- * rules such as "ask before sending", "always a stop loss", "never above N lots").
+ * order panel (account, symbol, volume, order type, the size of the panel and the
+ * person's own trade rules such as "always a stop loss", "never above N lots").
+ * There is no "ask before sending" setting any more: a button is the command.
  *
  * It is stored per user in `terminal_user_preferences.layout.workspace` (JSONB,
  * migration 016), so no new migration is needed. Everything here is pure and
@@ -16,6 +17,7 @@
  */
 
 import { isBrokerTerminalKey } from "@/lib/terminal/brokerTerminal";
+import { sanitizeShare, sanitizeZoom } from "@/lib/trade/panelLayout";
 import {
   isValidLots,
   normalizeTradeSymbol,
@@ -279,8 +281,9 @@ export const WSA_TRADE_LEVEL_MODES: ReadonlyArray<WsaTradeLevelMode> = ["price",
 
 /**
  * The WSA Trade order panel: which of the user's accounts it trades, what the ticket starts
- * with and the person's own trade rules. The rules are checked in the panel BEFORE an order is
- * sent (they are the person's discipline, not the platform's gates, which the server enforces).
+ * with, how big the panel is and the person's own trade rules. The rules are checked in the panel
+ * BEFORE an order is sent (they are the person's discipline, not the platform's gates, which the
+ * server enforces). Every button is the command itself: there is no confirmation step.
  */
 export interface WsaTradeWorkspace {
   /** a platform account of this user; null = the first one that is ready */
@@ -291,8 +294,10 @@ export interface WsaTradeWorkspace {
   volume: number;
   /** the order type the ticket starts with: at the market, or waiting for a price */
   orderKind: WebTradeOrderKind;
-  /** ask once more before an order leaves; off = one click sends it */
-  confirm: boolean;
+  /** size of the panel's contents (0.6 ... 1.6); null = fit to the room the panel has */
+  zoom: number | null;
+  /** side by side with the chart: the share of the width the panel takes (0.2 ... 0.6); null = its usual column */
+  panelShare: number | null;
   /** how the stop loss / take profit boxes are typed */
   levelMode: WsaTradeLevelMode;
   /** a new ticket starts with a stop loss this many points from the entry (null = none) */
@@ -317,7 +322,8 @@ export function defaultWsaTrade(): WsaTradeWorkspace {
     symbol: DEFAULT_WSA_TRADE_SYMBOL,
     volume: DEFAULT_WSA_TRADE_VOLUME,
     orderKind: DEFAULT_WSA_TRADE_ORDER_KIND,
-    confirm: true,
+    zoom: null,
+    panelShare: null,
     levelMode: "price",
     stopLossPoints: null,
     takeProfitPoints: null,
@@ -681,7 +687,8 @@ export function sanitizeWorkspace(input: unknown): TerminalWorkspace {
     symbol: normalizeTradeSymbol(wt.symbol) ?? base.wsatrade.symbol,
     volume: isValidLots(wt.volume) ? wt.volume : base.wsatrade.volume,
     orderKind: WEB_TRADE_ORDER_KINDS.find((kind) => kind === wt.orderKind) ?? base.wsatrade.orderKind,
-    confirm: flag(wt.confirm, base.wsatrade.confirm),
+    zoom: sanitizeZoom(wt.zoom),
+    panelShare: sanitizeShare(wt.panelShare),
     levelMode: WSA_TRADE_LEVEL_MODES.find((mode) => mode === wt.levelMode) ?? base.wsatrade.levelMode,
     stopLossPoints: sanitizePoints(wt.stopLossPoints),
     takeProfitPoints: sanitizePoints(wt.takeProfitPoints),
@@ -755,7 +762,9 @@ export function mergeWorkspace(current: TerminalWorkspace, patch: unknown): Term
       symbol: normalizeTradeSymbol(wt.symbol) ?? current.wsatrade.symbol,
       volume: isValidLots(wt.volume) ? wt.volume : current.wsatrade.volume,
       orderKind: WEB_TRADE_ORDER_KINDS.find((kind) => kind === wt.orderKind) ?? current.wsatrade.orderKind,
-      confirm: flag(wt.confirm, current.wsatrade.confirm),
+      // null = fit / the usual column; a bad value changes nothing
+      zoom: patchNullable(wt.zoom, current.wsatrade.zoom, sanitizeZoom),
+      panelShare: patchNullable(wt.panelShare, current.wsatrade.panelShare, sanitizeShare),
       levelMode: WSA_TRADE_LEVEL_MODES.find((mode) => mode === wt.levelMode) ?? current.wsatrade.levelMode,
       // null switches the default distance / the limit off; a bad value changes nothing
       stopLossPoints: patchNullable(wt.stopLossPoints, current.wsatrade.stopLossPoints, sanitizePoints),

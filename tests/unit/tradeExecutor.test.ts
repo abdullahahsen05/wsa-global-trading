@@ -1,6 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
-import { BrokerExecutionError, type BrokerAdapter, type BrokerTradingState } from "@/lib/broker/BrokerAdapter";
-import { parseTradeCommand, TradeCommandError } from "@/lib/gateway/tradeCommands";
+import {
+  BrokerExecutionError,
+  type BrokerAdapter,
+  type BrokerTradingState,
+  type ExecutionStages,
+} from "@/lib/broker/BrokerAdapter";
+import { parseTradeCommand, TradeCommandError, type CommandTiming } from "@/lib/gateway/tradeCommands";
 import {
   BULK_CONCURRENCY,
   bulkTargets,
@@ -8,6 +13,7 @@ import {
   executeTradeCommand,
   MAX_BULK_ITEMS,
   readGatewayState,
+  type ExecuteContext,
 } from "@/lib/gateway/tradeExecutor";
 import { WEB_TRADE_COMMENT } from "@/lib/trade/webTrade";
 
@@ -82,6 +88,12 @@ function run(adapter: ReturnType<typeof makeAdapter>, kind: string, payload: unk
   return executeTradeCommand(adapter as unknown as BrokerAdapter, ACCOUNT, parseTradeCommand(kind, payload));
 }
 
+function runWith(adapter: ReturnType<typeof makeAdapter>, kind: string, payload: unknown, context: ExecuteContext) {
+  return executeTradeCommand(adapter as unknown as BrokerAdapter, ACCOUNT, parseTradeCommand(kind, payload), context);
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 async function failure(task: Promise<unknown>): Promise<TradeCommandError | BrokerExecutionError> {
   try {
     await task;
@@ -106,6 +118,7 @@ describe("OPEN", () => {
       stopLoss: 1.12,
       takeProfit: 1.08,
       comment: WEB_TRADE_COMMENT,
+      stages: expect.any(Object),
     });
     expect(outcome.ticket).toBe("9001");
     expect(outcome.detail).toMatchObject({ symbol: "EURUSD.r" });
@@ -146,6 +159,7 @@ describe("CLOSE", () => {
       brokerPositionId: "5001",
       volume: null,
       comment: WEB_TRADE_COMMENT,
+      stages: expect.any(Object),
     });
     expect(adapter.fetchTradingState).not.toHaveBeenCalled();
     expect(outcome.ticket).toBe("5001");
@@ -184,6 +198,7 @@ describe("MODIFY a position", () => {
       brokerPositionId: "5001",
       stopLoss: 2380,
       takeProfit: 2420,
+      stages: expect.any(Object),
     });
     expect(outcome.detail).toMatchObject({ symbol: "XAUUSD", stopLoss: 2380, takeProfit: 2420 });
   });
@@ -192,7 +207,13 @@ describe("MODIFY a position", () => {
     const adapter = makeAdapter();
     const outcome = await run(adapter, "MODIFY", { ticket: "5001", stopLoss: null });
 
-    expect(adapter.modifyTrade).toHaveBeenCalledWith({ accountId: ACCOUNT, brokerPositionId: "5001", stopLoss: 0, takeProfit: 2410 });
+    expect(adapter.modifyTrade).toHaveBeenCalledWith({
+      accountId: ACCOUNT,
+      brokerPositionId: "5001",
+      stopLoss: 0,
+      takeProfit: 2410,
+      stages: expect.any(Object),
+    });
     expect(outcome.detail).toMatchObject({ stopLoss: null, takeProfit: 2410 });
   });
 
@@ -246,6 +267,7 @@ describe("MODIFY a pending order", () => {
       price: 1.075,
       stopLoss: 1.07,
       takeProfit: 1.1,
+      stages: expect.any(Object),
     });
     expect(outcome.detail).toMatchObject({ symbol: "EURUSD.r", price: 1.075 });
   });
@@ -272,7 +294,7 @@ describe("CANCEL", () => {
     const adapter = makeAdapter();
     const outcome = await run(adapter, "CANCEL", { ticket: "6001" });
 
-    expect(adapter.cancelOrder).toHaveBeenCalledWith({ accountId: ACCOUNT, brokerOrderId: "6001" });
+    expect(adapter.cancelOrder).toHaveBeenCalledWith({ accountId: ACCOUNT, brokerOrderId: "6001", stages: expect.any(Object) });
     expect(outcome).toMatchObject({ ticket: "6001", detail: { symbol: "EURUSD.r" } });
   });
 
@@ -423,6 +445,138 @@ describe("reads", () => {
   test("an adapter that cannot read positions is NOT_SUPPORTED", async () => {
     const adapter = makeAdapter({ fetchTradingState: undefined });
     expect(await failure(run(adapter, "STATE", { symbols: [] }))).toMatchObject({ code: "NOT_SUPPORTED", statusCode: 501 });
+  });
+});
+
+describe("speed: the recent picture", () => {
+  test("a modify takes the current levels from it and reads nothing", async () => {
+    const adapter = makeAdapter();
+    const outcome = await runWith(adapter, "MODIFY", { ticket: "5001", takeProfit: 2420 }, { recentState: tradingState() });
+
+    expect(adapter.fetchTradingState).not.toHaveBeenCalled();
+    expect(adapter.modifyTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ brokerPositionId: "5001", stopLoss: 2380, takeProfit: 2420 }),
+    );
+    expect(outcome.detail).toMatchObject({ symbol: "XAUUSD", stopLoss: 2380, takeProfit: 2420 });
+  });
+
+  test("a pending order is modified from it as well", async () => {
+    const adapter = makeAdapter();
+    await runWith(adapter, "MODIFY", { ticket: "6001", price: 1.075 }, { recentState: tradingState() });
+
+    expect(adapter.fetchTradingState).not.toHaveBeenCalled();
+    expect(adapter.modifyTrade).toHaveBeenCalledWith(
+      expect.objectContaining({ brokerPositionId: "6001", price: 1.075, stopLoss: 1.07, takeProfit: 1.1 }),
+    );
+  });
+
+  test("a ticket it does not list is looked up with a fresh read before the command gives up", async () => {
+    const adapter = makeAdapter();
+    const outcome = await runWith(
+      adapter,
+      "MODIFY",
+      { ticket: "5001", takeProfit: 2420 },
+      { recentState: tradingState({ positions: [], pending: [] }) },
+    );
+
+    expect(adapter.fetchTradingState).toHaveBeenCalledTimes(1);
+    expect(outcome.ticket).toBe("5001");
+  });
+
+  test("a ticket that is nowhere is still a 404 - after the fresh read", async () => {
+    const adapter = makeAdapter();
+    const error = await failure(runWith(adapter, "MODIFY", { ticket: "7777", takeProfit: 2420 }, { recentState: tradingState() }));
+
+    expect(error).toMatchObject({ code: "POSITION_NOT_FOUND", statusCode: 404 });
+    expect(adapter.fetchTradingState).toHaveBeenCalledTimes(1);
+    expect(adapter.modifyTrade).not.toHaveBeenCalled();
+  });
+
+  test("a delete and a close-several always read the account fresh", async () => {
+    const adapter = makeAdapter();
+    await runWith(adapter, "CANCEL", { ticket: "6001" }, { recentState: tradingState() });
+    expect(adapter.fetchTradingState).toHaveBeenCalledTimes(1);
+
+    const bulk = makeAdapter();
+    await runWith(bulk, "CLOSE_BULK", { scope: "PENDING" }, { recentState: tradingState({ pending: [] }) });
+    expect(bulk.fetchTradingState).toHaveBeenCalledTimes(1);
+    expect(bulk.cancelOrder).toHaveBeenCalledWith({ accountId: ACCOUNT, brokerOrderId: "6001" });
+  });
+
+  test("a close and an order never read anything, with or without a picture", async () => {
+    const adapter = makeAdapter();
+    await runWith(adapter, "CLOSE", { ticket: "5001" }, { recentState: tradingState() });
+    await runWith(adapter, "OPEN", { symbol: "EURUSD", side: "BUY", volume: 0.1 }, { recentState: tradingState() });
+
+    expect(adapter.fetchTradingState).not.toHaveBeenCalled();
+  });
+});
+
+describe("speed: where the time went", () => {
+  test("a modify that has to read notes the read, and what the broker call measured", async () => {
+    const adapter = makeAdapter({
+      fetchTradingState: vi.fn(async () => {
+        await wait(30);
+        return tradingState();
+      }),
+      modifyTrade: vi.fn(async (request: { stages?: ExecutionStages }) => {
+        if (request.stages) Object.assign(request.stages, { sessionMs: 12, sendMs: 210, attempts: 2 });
+        return { ok: true };
+      }),
+    });
+    const timing: Partial<CommandTiming> = {};
+    await runWith(adapter, "MODIFY", { ticket: "5001", takeProfit: 2420 }, { timing });
+
+    expect(timing.readMs).toBeGreaterThanOrEqual(15);
+    expect(timing).toMatchObject({ sessionMs: 12, sendMs: 210, attempts: 2 });
+  });
+
+  test("with a recent picture there is no read to report", async () => {
+    const adapter = makeAdapter();
+    const timing: Partial<CommandTiming> = {};
+    await runWith(adapter, "MODIFY", { ticket: "5001", takeProfit: 2420 }, { recentState: tradingState(), timing });
+
+    expect(timing.readMs).toBeUndefined();
+  });
+
+  test("an order that fails still reports what was measured before it failed", async () => {
+    const adapter = makeAdapter({
+      openTrade: vi.fn(async (request: { stages?: ExecutionStages }) => {
+        if (request.stages) Object.assign(request.stages, { sessionMs: 0, sendMs: 95, attempts: 1 });
+        throw new BrokerExecutionError("BROKER_PROVIDER_ERROR", "Not enough money.", 502);
+      }),
+    });
+    const timing: Partial<CommandTiming> = {};
+    const error = await failure(runWith(adapter, "OPEN", { symbol: "EURUSD", side: "BUY", volume: 5 }, { timing }));
+
+    expect(error).toMatchObject({ code: "BROKER_PROVIDER_ERROR" });
+    expect(timing).toMatchObject({ sessionMs: 0, sendMs: 95, attempts: 1 });
+  });
+
+  test("the price the broker filled at travels with the answer", async () => {
+    const adapter = makeAdapter({
+      openTrade: vi.fn(async () => ({ ok: true, brokerPositionId: "9001", executedPrice: 1.08123, executedVolume: 0.2 })),
+    });
+    const outcome = await run(adapter, "OPEN", { symbol: "EURUSD", side: "BUY", volume: 0.25 });
+
+    expect(outcome.detail).toMatchObject({ symbol: "EURUSD", fillPrice: 1.08123, volume: 0.2 });
+  });
+
+  test("a nonsense fill price is left out", async () => {
+    const adapter = makeAdapter({
+      openTrade: vi.fn(async () => ({ ok: true, brokerPositionId: "9001", executedPrice: 0 })),
+    });
+    const outcome = await run(adapter, "OPEN", { symbol: "EURUSD", side: "BUY", volume: 0.25 });
+
+    expect(outcome.detail).not.toHaveProperty("fillPrice");
+  });
+
+  test("without a context everything still works and nothing is timed", async () => {
+    const adapter = makeAdapter();
+    const outcome = await run(adapter, "MODIFY", { ticket: "5001", takeProfit: 2420 });
+
+    expect(adapter.fetchTradingState).toHaveBeenCalledTimes(1);
+    expect(outcome.ticket).toBe("5001");
   });
 });
 

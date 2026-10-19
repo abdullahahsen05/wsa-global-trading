@@ -8,7 +8,7 @@ import { resetGatewayAvailability } from "@/lib/gateway/gatewayQueue";
 import { createSupabaseGatewayStore } from "@/lib/gateway/gatewayStore";
 import { GatewayWorker } from "@/lib/gateway/gatewayWorker";
 import { writeAuditLog } from "@/lib/services/auditService";
-import { getPlatformSubscriptionAccess } from "@/lib/services/billingService";
+import { getPlatformSubscriptionAccess, hasActivePlatformProductSubscription } from "@/lib/services/billingService";
 import { getRiskEnforcementState } from "@/lib/services/riskService";
 import { GET as listAccounts } from "@/app/api/terminal/trade/accounts/route";
 import { GET as readState } from "@/app/api/terminal/trade/state/route";
@@ -18,6 +18,7 @@ import { POST as modifyPosition } from "@/app/api/terminal/trade/modify/route";
 import { POST as closePosition } from "@/app/api/terminal/trade/close/route";
 import { POST as cancelOrder } from "@/app/api/terminal/trade/cancel/route";
 import { POST as closeBulk } from "@/app/api/terminal/trade/close-bulk/route";
+import { resetWebTradeCaches } from "@/lib/services/webTradeService";
 import { WEB_TRADE_COMMENT } from "@/lib/trade/webTrade";
 import { sharedClient, sharedDb as db } from "./helpers/memoryDb";
 import {
@@ -64,7 +65,10 @@ vi.mock("@/lib/auth/session", () => {
 });
 
 vi.mock("@/lib/services/auditService", () => ({ writeAuditLog: vi.fn(async () => undefined) }));
-vi.mock("@/lib/services/billingService", () => ({ getPlatformSubscriptionAccess: vi.fn() }));
+vi.mock("@/lib/services/billingService", () => ({
+  getPlatformSubscriptionAccess: vi.fn(),
+  hasActivePlatformProductSubscription: vi.fn(),
+}));
 vi.mock("@/lib/services/riskService", () => ({ getRiskEnforcementState: vi.fn() }));
 vi.mock("@/lib/broker/provider", () => ({ createBrokerAdapter: vi.fn() }));
 
@@ -196,8 +200,11 @@ beforeEach(() => {
   db.tables.trading_accounts = [accountRow(ACCOUNT, USER), accountRow(FOREIGN_ACCOUNT, OTHER_USER)];
   beat();
   vi.mocked(writeAuditLog).mockClear();
+  resetWebTradeCaches();
   vi.mocked(getPlatformSubscriptionAccess).mockReset();
   vi.mocked(getPlatformSubscriptionAccess).mockResolvedValue({ status: "ACTIVE" } as never);
+  vi.mocked(hasActivePlatformProductSubscription).mockReset();
+  vi.mocked(hasActivePlatformProductSubscription).mockResolvedValue(false);
   vi.mocked(getRiskEnforcementState).mockReset();
   vi.mocked(getRiskEnforcementState).mockResolvedValue(null);
   signIn();
@@ -258,7 +265,19 @@ describe("an order through the AWS system", () => {
     const body = await readJson(response);
 
     expect(response.status).toBe(200);
-    expect(body.data).toMatchObject({ ok: true, ticket: "9001", timing: { queueMs: expect.any(Number), runMs: expect.any(Number) } });
+    expect(body.data).toMatchObject({
+      ok: true,
+      ticket: "9001",
+      timing: {
+        // the trading system's part ...
+        queueMs: expect.any(Number),
+        runMs: expect.any(Number),
+        // ... and the web server's own: the whole request, and the wait for the answer within it
+        serverMs: expect.any(Number),
+        waitMs: expect.any(Number),
+      },
+    });
+    expect(body.data.timing.serverMs).toBeGreaterThanOrEqual(body.data.timing.waitMs);
     expect(workerAdapter.openTrade).toHaveBeenCalledWith({
       accountId: ACCOUNT,
       symbol: "EURUSD.r",
@@ -269,6 +288,7 @@ describe("an order through the AWS system", () => {
       stopLoss: 1.12,
       takeProfit: 1.08,
       comment: WEB_TRADE_COMMENT,
+      stages: expect.any(Object),
     });
     expect(webAdapter.openTrade).not.toHaveBeenCalled();
     expect(commands()).toHaveLength(1);
@@ -335,6 +355,7 @@ describe("an order through the AWS system", () => {
       brokerPositionId: "5001",
       volume: 0.2,
       comment: WEB_TRADE_COMMENT,
+      stages: expect.any(Object),
     });
     expect(workerAdapter.fetchTradingState).not.toHaveBeenCalled();
     expect(commands()[0]).toMatchObject({ kind: "CLOSE", status: "DONE" });
@@ -349,6 +370,7 @@ describe("an order through the AWS system", () => {
       brokerPositionId: "5001",
       stopLoss: 2380,
       takeProfit: 2420,
+      stages: expect.any(Object),
     });
     expect(auditCall()).toMatchObject({ action: "WEB_TRADE_POSITION_MODIFIED", metadata: { symbol: "XAUUSD", takeProfit: 2420, route: "gateway" } });
 
@@ -365,7 +387,11 @@ describe("an order through the AWS system", () => {
   test("a pending order is deleted by its ticket - an open position is not", async () => {
     const deleted = await withWorker(cancelOrder(post({ accountId: ACCOUNT, ticket: PENDING.ticket })));
     expect(deleted.status).toBe(200);
-    expect(workerAdapter.cancelOrder).toHaveBeenCalledWith({ accountId: ACCOUNT, brokerOrderId: "6001" });
+    expect(workerAdapter.cancelOrder).toHaveBeenCalledWith({
+      accountId: ACCOUNT,
+      brokerOrderId: "6001",
+      stages: expect.any(Object),
+    });
     expect(auditCall()).toMatchObject({ action: "WEB_TRADE_ORDER_CANCELLED", metadata: { ticket: "6001", route: "gateway" } });
 
     const refused = await withWorker(cancelOrder(post({ accountId: ACCOUNT, ticket: POSITION.ticket })));

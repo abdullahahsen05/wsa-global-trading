@@ -2,10 +2,24 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, ChevronUp, Loader2, Minus, Plus, RotateCw, Settings2, Zap } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  Minus,
+  Plus,
+  RotateCw,
+  Settings2,
+  Zap,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import {
   newRequestId,
+  requestFastRefresh,
   sendWebTrade,
+  useWarmWebTradeRoutes,
   useWebTradeAccounts,
   useWebTradeState,
   useWebTradeSymbols,
@@ -28,16 +42,24 @@ import { coreSymbol, findBrokerSymbol, sameInstrument, toTradingViewSymbol } fro
 import {
   breakEvenLevel,
   buildOrderPlan,
-  describePlan,
-  formatRatio,
+  bulkPreview,
   partialLots,
   planToRequest,
   pointsBetween,
   resolveDigits,
-  riskReward,
   stepLots,
   type OrderPlan,
 } from "@/lib/trade/ticketMath";
+import { effectiveZoom, isWideLayout, PANEL_ZOOM_MAX, PANEL_ZOOM_MIN, stepZoom, zoomLabel } from "@/lib/trade/panelLayout";
+import {
+  applyChanges,
+  changesFromBulk,
+  changesFromClose,
+  changesFromModify,
+  changesFromOpen,
+  OVERLAY_TTL_MS,
+  type StateChange,
+} from "@/lib/trade/stateOverlay";
 import {
   isValidLots,
   levelsProblem,
@@ -62,6 +84,7 @@ import {
   parseDecimal,
   parseLevelInput,
   resultTone,
+  timingHeadline,
   timingText,
 } from "@/lib/trade/webTradeFormat";
 import type { WsaTradePatch, WsaTradeWorkspace } from "@/lib/terminal/workspace";
@@ -81,6 +104,11 @@ import type { WsaTradePatch, WsaTradeWorkspace } from "@/lib/terminal/workspace"
  * which sends them and reports how long it took. Every order passes WSA's gates (subscription,
  * execution switch, risk rules) and is written to the audit log. Only the caller's own accounts
  * are offered. Nothing here touches credentials.
+ *
+ * A button is the command: Buy, Sell, Close, Delete and "close several" act at once, with no
+ * "Confirm" step. What the trading system answered is shown at once on the lists (`stateOverlay`) and
+ * the result line says how long it took and where the time went. The panel fits the room it has
+ * (zoom "Auto") or the size the person chose with the zoom buttons.
  */
 
 const QUICK_VOLUMES: ReadonlyArray<number> = [0.01, 0.05, 0.1, 0.5, 1];
@@ -98,11 +126,6 @@ const ORDER_KINDS: ReadonlyArray<{ id: WebTradeOrderKind; label: string }> = [
 
 type BookTab = "positions" | "pending" | "activity";
 
-interface OrderDraft {
-  plan: OrderPlan;
-  requestId: string;
-}
-
 interface Problem {
   message: string;
   /** the request may have reached the broker: check the positions before sending again */
@@ -114,7 +137,30 @@ interface ActivityEntry {
   at: number;
   tone: "ok" | "error";
   text: string;
+  /** the whole wait, e.g. "412 ms" */
+  headline?: string;
+  /** where the time went */
+  detail?: string;
 }
+
+/** The answer to the last command: what happened, how long it took in all, where the time went. */
+interface Notice {
+  text: string;
+  headline: string;
+  detail: string;
+}
+
+interface RunOptions {
+  /** after a successful answer */
+  onDone?: () => void;
+  /** what the answer means for the lists; laid over the picture until the real one arrives */
+  changes?: (result: WebTradeOrderResult) => StateChange[];
+  /** the same order sent again after an answer that never came keeps this id (the server never places it twice) */
+  retry?: { key: string; id: string };
+}
+
+/** How long an order whose answer never came may be re-sent with the same id. */
+const RETRY_ID_MS = 90_000;
 
 export interface WsaTradePanelProps {
   settings: WsaTradeWorkspace;
@@ -174,7 +220,7 @@ function bulkSuccess(scope: WebTradeBulkScope, result: WebTradeOrderResult): str
 }
 
 function rulesSummary(settings: WsaTradeWorkspace): string {
-  const parts = [settings.confirm ? "asks before sending" : "one-click"];
+  const parts = ["one click"];
   if (settings.requireStopLoss) parts.push("stop loss required");
   if (settings.maxVolume !== null) parts.push(`max ${formatLots(settings.maxVolume)} lots`);
   if (settings.stopLossPoints !== null) parts.push(`SL ${settings.stopLossPoints} pt`);
@@ -212,10 +258,33 @@ export function WsaTradePanel({
   const reading = active && workspaceLoaded;
   const stateQuery = useWebTradeState(accountId, symbol, reading);
   const symbolsQuery = useWebTradeSymbols(accountId, reading);
+  useWarmWebTradeRoutes(reading);
+  // what the trading system has confirmed since the last picture (shown at once, dropped after a few seconds)
+  const [changes, setChanges] = useState<StateChange[]>([]);
   // while another account's answer is still on screen it must not be shown as this account's
-  const state = stateQuery.data && stateQuery.data.accountId === accountId ? stateQuery.data : null;
+  const polled = stateQuery.data && stateQuery.data.accountId === accountId ? stateQuery.data : null;
+  const state = useMemo(() => (polled ? applyChanges(polled, changes) : null), [polled, changes]);
   const positions = state?.positions ?? EMPTY_POSITIONS;
   const pendingOrders = state?.pending ?? EMPTY_PENDING;
+
+  // ── the room the panel has -> its zoom and whether ticket and lists stand side by side ──
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const [box, setBox] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const node = sectionRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setBox((current) => (current.width === width && current.height === height ? current : { width, height }));
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  const zoom = effectiveZoom(settings.zoom, box.width, box.height);
+  const wide = isWideLayout(box.width, zoom);
 
   // ── the broker's symbols ──────────────────────────────────────────────────
   const brokerSymbols = useMemo(() => {
@@ -286,26 +355,26 @@ export function WsaTradePanel({
   const [stopLossDraft, setStopLossDraft] = useState("");
   const [takeProfitDraft, setTakeProfitDraft] = useState("");
 
-  const [order, setOrder] = useState<OrderDraft | null>(null);
   const [rowEdit, setRowEdit] = useState<RowEdit | null>(null);
-  const [bulk, setBulk] = useState<WebTradeBulkScope | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [tab, setTab] = useState<BookTab>("positions");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const activityId = useRef(0);
-  const refreshTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const overlayTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   useEffect(() => {
-    const timers = refreshTimers.current;
+    const timers = overlayTimers.current;
     return () => {
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
     };
   }, []);
+  // an order whose answer never came: sent again, it keeps its id, so it can never be placed twice
+  const retryId = useRef<{ key: string; id: string; at: number } | null>(null);
 
   const readOnly = Boolean(state?.readOnly);
   const canOpen = Boolean(platformGate?.canOpen) && !state?.riskBlocked && !readOnly;
@@ -314,13 +383,11 @@ export function WsaTradePanel({
   const route = state?.route ?? accountsQuery.data?.route;
 
   function dropTransient() {
-    setOrder(null);
     setFormError(null);
   }
 
   function selectSymbol(name: string) {
     dropTransient();
-    setBulk(null);
     onSettingsChange({ symbol: name });
     const chart = toTradingViewSymbol(name);
     if (chart && onChartSymbol && !(chartSymbol && sameInstrument(chart, chartSymbol))) onChartSymbol(chart);
@@ -351,21 +418,40 @@ export function WsaTradePanel({
     void queryClient.invalidateQueries({ queryKey: [WEB_TRADE_STATE_QUERY_KEY, accountId] });
   }
 
-  function log(tone: ActivityEntry["tone"], text: string) {
+  function log(tone: ActivityEntry["tone"], text: string, headline = "", detail = "") {
     activityId.current += 1;
-    const entry: ActivityEntry = { id: activityId.current, at: currentTimeMs(), tone, text };
+    const entry: ActivityEntry = { id: activityId.current, at: currentTimeMs(), tone, text, headline, detail };
     setActivity((current) => [entry, ...current].slice(0, MAX_ACTIVITY));
   }
 
+  /** Lays what the answer meant over the lists until the real picture has caught up. */
+  function remember(list: StateChange[]) {
+    if (list.length === 0) return;
+    setChanges((current) => [...current, ...list]);
+    const timer = setTimeout(() => {
+      overlayTimers.current.delete(timer);
+      setChanges((current) => current.filter((entry) => !list.includes(entry)));
+    }, OVERLAY_TTL_MS);
+    overlayTimers.current.add(timer);
+  }
+
+  /** The id an order is sent with: the one of the attempt whose answer never came, if this is the same order again. */
+  function idFor(key: string): { key: string; id: string } {
+    const kept = retryId.current;
+    if (kept && kept.key === key && currentTimeMs() - kept.at < RETRY_ID_MS) return { key, id: kept.id };
+    return { key, id: newRequestId() };
+  }
+
   /**
-   * One request at a time. Afterwards the account is read again - also after a failure (it may
-   * have gone through) - and once more a moment later, when the trading system's own picture has caught up.
+   * One request at a time. The answer is shown at once on the lists; the account is read again
+   * straight away - also after a failure (it may have gone through) - and every 400 ms for the next
+   * few seconds, until the trading system's own picture has caught up.
    */
   async function run(
     action: WebTradeAction,
     body: Record<string, unknown>,
     success: string | ((result: WebTradeOrderResult) => string),
-    onDone?: () => void,
+    options: RunOptions = {},
   ) {
     if (busyRef.current) return;
     busyRef.current = true;
@@ -374,51 +460,50 @@ export function WsaTradePanel({
     setNotice(null);
     try {
       const result = await sendWebTrade(action, body);
+      if (options.retry && retryId.current?.key === options.retry.key) retryId.current = null;
       const base = result.repeated
         ? "This order had already been sent - nothing was sent twice."
         : typeof success === "function"
           ? success(result)
           : success;
-      const timing = result.repeated ? "" : timingText(result.timing);
-      const text = timing ? `${base} ${timing}` : base;
-      setNotice(text);
-      log("ok", text);
+      const headline = result.repeated ? "" : timingHeadline(result.timing);
+      const detail = result.repeated ? "" : timingText(result.timing);
+      setNotice({ text: base, headline, detail });
+      log("ok", base, headline, detail);
+      if (!result.repeated && options.changes) remember(options.changes(result));
       if (result.failed && result.failed > 0) {
-        const detail = (result.failures ?? [])
+        const failures = (result.failures ?? [])
           .slice(0, 3)
           .map((failure) => `${failure.symbol} ${failure.ticket}: ${failure.message}`)
           .join("; ");
-        const message = `${result.failed} could not be handled${detail ? ` - ${detail}` : ""}.`;
+        const message = `${result.failed} could not be handled${failures ? ` - ${failures}` : ""}.`;
         setProblem({ message, uncertain: false });
         log("error", message);
       }
-      onDone?.();
+      options.onDone?.();
     } catch (error) {
       const message = error instanceof Error ? error.message : "The request failed.";
-      setProblem({ message, uncertain: error instanceof WebTradeRequestError ? error.uncertain : false });
+      const uncertain = error instanceof WebTradeRequestError ? error.uncertain : false;
+      if (uncertain && options.retry) retryId.current = { ...options.retry, at: currentTimeMs() };
+      setProblem({ message, uncertain });
       log("error", message);
     } finally {
       busyRef.current = false;
       setBusy(false);
+      requestFastRefresh();
       refresh();
-      const timer = setTimeout(() => {
-        refreshTimers.current.delete(timer);
-        refresh();
-      }, 1200);
-      refreshTimers.current.add(timer);
     }
   }
 
-  // ── new orders ────────────────────────────────────────────────────────────
-  function sendPlan(draft: OrderDraft) {
+  // ── new orders: Buy / Sell send the order at once ─────────────────────────
+  function sendPlan(plan: OrderPlan) {
     if (!accountId) return;
-    const { plan } = draft;
-    void run(
-      "open",
-      { accountId, ...planToRequest(plan), clientRequestId: draft.requestId },
-      openSuccess(plan),
-      () => {
-        setOrder(null);
+    const request = planToRequest(plan);
+    const attempt = idFor(JSON.stringify([accountId, request]));
+    void run("open", { accountId, ...request, clientRequestId: attempt.id }, openSuccess(plan), {
+      retry: attempt,
+      changes: (result) => changesFromOpen(accountId, result, request, quote),
+      onDone: () => {
         setPriceDraft("");
         // a distance in points can be reused for the next order; a price cannot
         if (settings.levelMode === "price") {
@@ -426,7 +511,7 @@ export function WsaTradePanel({
           setTakeProfitDraft("");
         }
       },
-    );
+    });
   }
 
   function startOrder(side: WebTradeSide) {
@@ -449,9 +534,7 @@ export function WsaTradePanel({
       rules: { requireStopLoss: settings.requireStopLoss, maxVolume: settings.maxVolume },
     });
     if (!result.ok) return setFormError(result.message);
-    const draft: OrderDraft = { plan: result.plan, requestId: newRequestId() };
-    if (settings.confirm) setOrder(draft);
-    else sendPlan(draft);
+    sendPlan(result.plan);
   }
 
   // ── positions ─────────────────────────────────────────────────────────────
@@ -459,7 +542,6 @@ export function WsaTradePanel({
     setProblem(null);
     setNotice(null);
     setFormError(null);
-    setBulk(null);
     setRowEdit(edit);
   }
 
@@ -472,6 +554,7 @@ export function WsaTradePanel({
     });
   }
 
+  /** Closes the position, or only `lots` of it, at once. */
   function closeNow(position: WebTradePosition, lots: number | null) {
     if (!accountId) return;
     const partial = lots !== null && roundLots(lots) < roundLots(position.volume);
@@ -479,14 +562,11 @@ export function WsaTradePanel({
       "close",
       { accountId, ticket: position.ticket, ...(partial ? { volume: lots } : {}) },
       partial ? `${formatLots(lots)} lots of ${position.symbol} closed.` : `${position.symbol} position closed.`,
-      () => setRowEdit(null),
+      {
+        onDone: () => setRowEdit(null),
+        changes: (result) => changesFromClose(accountId, result, position, partial ? lots : null),
+      },
     );
-  }
-
-  /** "Close": asks first when the person wants to be asked, otherwise closes the whole position at once. */
-  function startClose(position: WebTradePosition) {
-    if (settings.confirm) openEditor({ kind: "close", ticket: position.ticket, lots: formatLots(position.volume) });
-    else closeNow(position, null);
   }
 
   function startPartial(position: WebTradePosition) {
@@ -524,12 +604,10 @@ export function WsaTradePanel({
     }
     const mismatch = levelsProblem(position.side, stopLoss, takeProfit);
     if (mismatch) return setProblem({ message: mismatch, uncertain: false });
-    void run(
-      "modify",
-      { accountId, ticket: position.ticket, ...patch },
-      `Stop loss / take profit of ${position.symbol} updated.`,
-      () => setRowEdit(null),
-    );
+    void run("modify", { accountId, ticket: position.ticket, ...patch }, `Stop loss / take profit of ${position.symbol} updated.`, {
+      onDone: () => setRowEdit(null),
+      changes: (result) => changesFromModify(accountId, position.ticket, result, patch),
+    });
   }
 
   function breakEven(position: WebTradePosition) {
@@ -539,6 +617,7 @@ export function WsaTradePanel({
       "modify",
       { accountId, ticket: position.ticket, stopLoss: level },
       `Stop loss of ${position.symbol} moved to the entry price ${formatPrice(level)}.`,
+      { changes: (result) => changesFromModify(accountId, position.ticket, result, { stopLoss: level }) },
     );
   }
 
@@ -573,37 +652,37 @@ export function WsaTradePanel({
     }
     const mismatch = pendingLevelsProblem(pending.side, price, stopLoss, takeProfit);
     if (mismatch) return setProblem({ message: mismatch, uncertain: false });
-    void run(
-      "modify",
-      { accountId, ticket: pending.ticket, ...patch },
-      `Pending order ${pending.symbol} ${pending.ticket} updated.`,
-      () => setRowEdit(null),
-    );
+    void run("modify", { accountId, ticket: pending.ticket, ...patch }, `Pending order ${pending.symbol} ${pending.ticket} updated.`, {
+      onDone: () => setRowEdit(null),
+      changes: (result) => changesFromModify(accountId, pending.ticket, result, patch),
+    });
   }
 
+  /** Deletes the pending order at once. */
   function cancelNow(pending: WebTradePendingOrder) {
     if (!accountId) return;
-    void run(
-      "cancel",
-      { accountId, ticket: pending.ticket },
-      `Pending order ${pending.symbol} ${pending.ticket} deleted.`,
-      () => setRowEdit(null),
-    );
+    void run("cancel", { accountId, ticket: pending.ticket }, `Pending order ${pending.symbol} ${pending.ticket} deleted.`, {
+      onDone: () => setRowEdit(null),
+      changes: () => [{ kind: "removed", accountId, ticket: pending.ticket }],
+    });
   }
 
-  function startCancel(pending: WebTradePendingOrder) {
-    if (settings.confirm) openEditor({ kind: "cancel", ticket: pending.ticket });
-    else cancelNow(pending);
-  }
-
-  // ── several at once (always asks once) ────────────────────────────────────
-  function confirmBulk(scope: WebTradeBulkScope) {
+  // ── several at once: a chip is the command ────────────────────────────────
+  function runBulk(scope: WebTradeBulkScope) {
     if (!accountId) return;
+    const symbolFilter = scope === "SYMBOL" ? symbol : null;
+    const targets = bulkPreview(scope, symbolFilter, positions, pendingOrders);
+    if (targets.positions.length + targets.pending.length === 0) return;
+    const attempt = idFor(JSON.stringify([accountId, scope, symbolFilter]));
     void run(
       "close-bulk",
-      { accountId, scope, symbol: scope === "SYMBOL" ? symbol : null, clientRequestId: newRequestId() },
+      { accountId, scope, symbol: symbolFilter, clientRequestId: attempt.id },
       (result) => bulkSuccess(scope, result),
-      () => setBulk(null),
+      {
+        retry: attempt,
+        changes: (result) => changesFromBulk(accountId, result, targets),
+        onDone: () => setRowEdit(null),
+      },
     );
   }
 
@@ -620,32 +699,73 @@ export function WsaTradePanel({
   const levelUnit = settings.levelMode === "points" ? "points" : "price";
   const slPlaceholder = settings.stopLossPoints !== null ? `default ${settings.stopLossPoints} pt` : "none";
   const tpPlaceholder = settings.takeProfitPoints !== null ? `default ${settings.takeProfitPoints} pt` : "none";
-  const draftSide = order?.plan.side ?? null;
-  const confirmRatio = order
-    ? formatRatio(riskReward(order.plan.side, order.plan.entry, order.plan.stopLoss, order.plan.takeProfit))
-    : "-";
   const pendingCount = Math.max(pendingOrders.length, state?.pendingOrders ?? 0);
 
   return (
-    <section aria-label="WSA Trade" className="section-surface @container flex flex-col overflow-hidden" style={{ height }}>
-      <div className="flex flex-col gap-2 border-b border-line px-3 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground">WSA Trade</h3>
-            <span className="status-pill px-2 py-0.5 text-[10px]">{selectedAccount?.platform ?? "MT4 / MT5"}</span>
-            <span
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-muted"
-              title="Where orders run: the WSA trading system holds the broker session of the account and sends them"
-            >
-              <Zap className="h-3 w-3" aria-hidden="true" />
-              {routeLabel(route)}
-            </span>
-          </div>
-          <span className="text-[11px] text-muted" aria-live="polite">
-            {state ? `Live · updated ${clock(state.fetchedAt)}` : "Broker connection"}
+    <section
+      ref={sectionRef}
+      aria-label="WSA Trade"
+      className="section-surface flex flex-col overflow-hidden"
+      style={{ height }}
+    >
+      {/* the title bar keeps its size whatever the zoom, so the zoom buttons are always in reach */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-foreground">WSA Trade</h3>
+          <span className="status-pill px-2 py-0.5 text-[10px]">{selectedAccount?.platform ?? "MT4 / MT5"}</span>
+          <span
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-muted"
+            title="Where orders run: the WSA trading system holds the broker session of the account and sends them"
+          >
+            <Zap className="h-3 w-3" aria-hidden="true" />
+            {routeLabel(route)}
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted" aria-live="polite">
+            {state ? `Live · updated ${clock(state.fetchedAt)}` : "Broker connection"}
+          </span>
+          <div role="group" aria-label="Panel size" className="flex items-center gap-1">
+            <button
+              type="button"
+              className={CHIP_CLASS}
+              disabled={zoom <= PANEL_ZOOM_MIN}
+              onClick={() => onSettingsChange({ zoom: stepZoom(zoom, -1) })}
+              aria-label="Make the panel smaller"
+              title="Make the panel smaller"
+            >
+              <ZoomOut className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className={`${CHIP_CLASS} min-w-[3.25rem] tabular-nums`}
+              onClick={() => onSettingsChange({ zoom: null })}
+              aria-label={
+                settings.zoom === null
+                  ? `Panel size: fits automatically (${zoomLabel(zoom)})`
+                  : `Panel size ${zoomLabel(zoom)} - click to fit automatically`
+              }
+              title={settings.zoom === null ? "Fits the room the panel has" : "Click to fit the room the panel has"}
+            >
+              {settings.zoom === null ? `Auto ${zoomLabel(zoom)}` : zoomLabel(zoom)}
+            </button>
+            <button
+              type="button"
+              className={CHIP_CLASS}
+              disabled={zoom >= PANEL_ZOOM_MAX}
+              onClick={() => onSettingsChange({ zoom: stepZoom(zoom, 1) })}
+              aria-label="Make the panel larger"
+              title="Make the panel larger"
+            >
+              <ZoomIn className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* everything below is scaled by the zoom: the layout is worked out for the zoomed size */}
+      <div className="flex min-h-0 flex-1 flex-col" style={zoom === 1 ? undefined : { zoom }}>
+        <div className="flex items-center gap-2 border-b border-line px-3 py-2">
           <label className="sr-only" htmlFor={`${idPrefix}-account`}>
             Account to trade
           </label>
@@ -654,9 +774,7 @@ export function WsaTradePanel({
             value={accountId ?? ""}
             disabled={loadingAccounts || (accounts ?? []).length === 0}
             onChange={(event) => {
-              setOrder(null);
               setRowEdit(null);
-              setBulk(null);
               setProblem(null);
               setNotice(null);
               onSettingsChange({ accountId: event.target.value || null });
@@ -685,284 +803,265 @@ export function WsaTradePanel({
             )}
           </button>
         </div>
-      </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="space-y-3 p-3 @2xl:grid @2xl:grid-cols-[minmax(340px,420px)_minmax(0,1fr)] @2xl:items-start @2xl:gap-4 @2xl:space-y-0 @2xl:p-4">
-          {/* ── left: banners, figures, the ticket ── */}
-          <div className="space-y-3">
-            {accountsQuery.isError ? (
-              <p role="alert" className={`${BANNER_CLASS} text-danger`}>
-                {accountsQuery.error.message}
-              </p>
-            ) : null}
-            {noAccounts ? (
-              <p role="status" className={`${BANNER_CLASS} text-muted`}>
-                None of your accounts is connected to the broker service yet. Add and connect a trading account under
-                Accounts, then come back here.
-              </p>
-            ) : null}
-            {gateMessage ? (
-              <p role="status" className={`${BANNER_CLASS} text-muted`}>
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                {gateMessage}
-              </p>
-            ) : null}
-            {readOnly ? (
-              <p role="status" className={`${BANNER_CLASS} text-muted`}>
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                This account is connected with its read-only (investor) password: you can follow it here but not trade
-                it.
-              </p>
-            ) : null}
-            {state?.riskBlocked && state.riskMessage ? (
-              <p role="status" className={`${BANNER_CLASS} text-danger`}>
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                {state.riskMessage}
-              </p>
-            ) : null}
-            {state?.delayed ? (
-              <p role="status" className={`${BANNER_CLASS} text-muted`}>
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                The trading system is slow to answer right now, so the figures below can be a few seconds old.
-              </p>
-            ) : null}
-            {stateError ? (
-              <p role="alert" className={`${BANNER_CLASS} text-danger`}>
-                {stateError}
-              </p>
-            ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            className={
+              wide
+                ? "grid grid-cols-[minmax(340px,420px)_minmax(0,1fr)] items-start gap-4 p-4"
+                : "space-y-3 p-3"
+            }
+          >
+            {/* ── left: banners, figures, the ticket ── */}
+            <div className="space-y-3">
+              {accountsQuery.isError ? (
+                <p role="alert" className={`${BANNER_CLASS} text-danger`}>
+                  {accountsQuery.error.message}
+                </p>
+              ) : null}
+              {noAccounts ? (
+                <p role="status" className={`${BANNER_CLASS} text-muted`}>
+                  None of your accounts is connected to the broker service yet. Add and connect a trading account under
+                  Accounts, then come back here.
+                </p>
+              ) : null}
+              {gateMessage ? (
+                <p role="status" className={`${BANNER_CLASS} text-muted`}>
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  {gateMessage}
+                </p>
+              ) : null}
+              {readOnly ? (
+                <p role="status" className={`${BANNER_CLASS} text-muted`}>
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  This account is connected with its read-only (investor) password: you can follow it here but not trade
+                  it.
+                </p>
+              ) : null}
+              {state?.riskBlocked && state.riskMessage ? (
+                <p role="status" className={`${BANNER_CLASS} text-danger`}>
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  {state.riskMessage}
+                </p>
+              ) : null}
+              {state?.delayed ? (
+                <p role="status" className={`${BANNER_CLASS} text-muted`}>
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  The trading system is slow to answer right now, so the figures below can be a few seconds old.
+                </p>
+              ) : null}
+              {stateError ? (
+                <p role="alert" className={`${BANNER_CLASS} text-danger`}>
+                  {stateError}
+                </p>
+              ) : null}
 
-            {accountId ? (
-              <>
-                <div className="definition-grid grid grid-cols-3 gap-0" aria-label="Account figures">
-                  <Figure label="Balance" value={state ? formatMoney(state.balance, currency) : "-"} />
-                  <Figure label="Equity" value={state ? formatMoney(state.equity, currency) : "-"} />
-                  <Figure
-                    label="Floating P/L"
-                    value={state ? formatSigned(state.floatingProfit) : "-"}
-                    tone={state ? resultTone(state.floatingProfit) : "flat"}
-                  />
-                  <Figure label="Margin" value={state ? formatMoney(state.margin, currency) : "-"} />
-                  <Figure label="Free margin" value={state ? formatMoney(state.freeMargin, currency) : "-"} />
-                  <Figure label="Margin level" value={state ? formatPercent(state.marginLevel) : "-"} />
-                </div>
+              {accountId ? (
+                <>
+                  <div className="definition-grid grid grid-cols-3 gap-0" aria-label="Account figures">
+                    <Figure label="Balance" value={state ? formatMoney(state.balance, currency) : "-"} />
+                    <Figure label="Equity" value={state ? formatMoney(state.equity, currency) : "-"} />
+                    <Figure
+                      label="Floating P/L"
+                      value={state ? formatSigned(state.floatingProfit) : "-"}
+                      tone={state ? resultTone(state.floatingProfit) : "flat"}
+                    />
+                    <Figure label="Margin" value={state ? formatMoney(state.margin, currency) : "-"} />
+                    <Figure label="Free margin" value={state ? formatMoney(state.freeMargin, currency) : "-"} />
+                    <Figure label="Margin level" value={state ? formatPercent(state.marginLevel) : "-"} />
+                  </div>
 
-                <form
-                  onSubmit={(event) => event.preventDefault()}
-                  className="space-y-3 rounded-[4px] border border-line bg-background p-3"
-                  aria-label="Order ticket"
-                >
-                  <SymbolPicker
-                    id={`${idPrefix}-symbol`}
-                    value={symbol}
-                    symbols={brokerSymbols}
-                    loading={symbolsLoading}
-                    disabled={!accountId}
-                    onSelect={selectSymbol}
-                  />
-                  {symbolChips.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Symbols from your chart watchlist">
-                      {symbolChips.map((name) => (
+                  <form
+                    onSubmit={(event) => event.preventDefault()}
+                    className="space-y-3 rounded-[4px] border border-line bg-background p-3"
+                    aria-label="Order ticket"
+                  >
+                    <SymbolPicker
+                      id={`${idPrefix}-symbol`}
+                      value={symbol}
+                      symbols={brokerSymbols}
+                      loading={symbolsLoading}
+                      disabled={!accountId}
+                      onSelect={selectSymbol}
+                    />
+                    {symbolChips.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5" role="group" aria-label="Symbols from your chart watchlist">
+                        {symbolChips.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            className={`${CHIP_CLASS} ${name === symbol ? "border-accent text-foreground" : ""}`}
+                            aria-pressed={name === symbol}
+                            onClick={() => selectSymbol(name)}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {symbolsQuery.isError ? (
+                      <p className="text-[11px] leading-snug text-muted">
+                        The broker&apos;s symbol list could not be loaded - type the symbol the way your broker spells it
+                        (for example XAUUSD or EURUSD.m).
+                      </p>
+                    ) : null}
+                    {chartHasNoMatch ? (
+                      <p className="text-[11px] leading-snug text-muted" role="status">
+                        The chart shows {chartSymbol}, which this broker does not list - choose the symbol here.
+                      </p>
+                    ) : null}
+
+                    <div role="tablist" aria-label="Order type" className="grid grid-cols-3 gap-1.5">
+                      {ORDER_KINDS.map((entry) => (
                         <button
-                          key={name}
+                          key={entry.id}
                           type="button"
-                          className={`${CHIP_CLASS} ${name === symbol ? "border-accent text-foreground" : ""}`}
-                          aria-pressed={name === symbol}
-                          onClick={() => selectSymbol(name)}
+                          role="tab"
+                          aria-selected={kind === entry.id}
+                          onClick={() => selectKind(entry.id)}
+                          className={`btn-dark text-xs ${kind === entry.id ? "btn-active" : ""}`}
                         >
-                          {name}
+                          {entry.label}
                         </button>
                       ))}
                     </div>
-                  ) : null}
-                  {symbolsQuery.isError ? (
-                    <p className="text-[11px] leading-snug text-muted">
-                      The broker&apos;s symbol list could not be loaded - type the symbol the way your broker spells it
-                      (for example XAUUSD or EURUSD.m).
-                    </p>
-                  ) : null}
-                  {chartHasNoMatch ? (
-                    <p className="text-[11px] leading-snug text-muted" role="status">
-                      The chart shows {chartSymbol}, which this broker does not list - choose the symbol here.
-                    </p>
-                  ) : null}
 
-                  <div role="tablist" aria-label="Order type" className="grid grid-cols-3 gap-1.5">
-                    {ORDER_KINDS.map((entry) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={kind === entry.id}
-                        onClick={() => selectKind(entry.id)}
-                        className={`btn-dark text-xs ${kind === entry.id ? "btn-active" : ""}`}
-                      >
-                        {entry.label}
-                      </button>
-                    ))}
-                  </div>
+                    {pricing ? (
+                      <div>
+                        <label className={LABEL_CLASS} htmlFor={`${idPrefix}-price`}>
+                          Price (entry)
+                        </label>
+                        <div className="flex gap-1.5">
+                          <input
+                            id={`${idPrefix}-price`}
+                            inputMode="decimal"
+                            placeholder="price the order waits for"
+                            value={priceDraft}
+                            autoComplete="off"
+                            onChange={(event) => {
+                              dropTransient();
+                              setPriceDraft(event.target.value);
+                            }}
+                            className={FIELD_CLASS}
+                          />
+                          <button
+                            type="button"
+                            className={CHIP_CLASS}
+                            disabled={!quote}
+                            onClick={() => quote && setPriceDraft(formatPrice(quote.bid))}
+                            aria-label="Use the bid price"
+                          >
+                            Bid
+                          </button>
+                          <button
+                            type="button"
+                            className={CHIP_CLASS}
+                            disabled={!quote}
+                            onClick={() => quote && setPriceDraft(formatPrice(quote.ask))}
+                            aria-label="Use the ask price"
+                          >
+                            Ask
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
 
-                  {pricing ? (
                     <div>
-                      <label className={LABEL_CLASS} htmlFor={`${idPrefix}-price`}>
-                        Price (entry)
+                      <label className={LABEL_CLASS} htmlFor={`${idPrefix}-volume`}>
+                        Volume (lots)
                       </label>
-                      <div className="flex gap-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <button type="button" className={CHIP_CLASS} onClick={() => stepVolume(-1)} aria-label="Decrease volume">
+                          <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
                         <input
-                          id={`${idPrefix}-price`}
+                          id={`${idPrefix}-volume`}
                           inputMode="decimal"
-                          placeholder="price the order waits for"
-                          value={priceDraft}
+                          value={volumeDraft}
                           autoComplete="off"
                           onChange={(event) => {
                             dropTransient();
-                            setPriceDraft(event.target.value);
+                            setVolumeDraft(event.target.value);
+                          }}
+                          onBlur={(event) => commitVolume(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              commitVolume(volumeDraft);
+                            }
+                          }}
+                          className={`${FIELD_CLASS} text-center`}
+                        />
+                        <button type="button" className={CHIP_CLASS} onClick={() => stepVolume(1)} aria-label="Increase volume">
+                          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </button>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Quick</span>
+                        {QUICK_VOLUMES.map((lots) => (
+                          <button
+                            key={lots}
+                            type="button"
+                            className={CHIP_CLASS}
+                            onClick={() => {
+                              dropTransient();
+                              commitVolume(String(lots));
+                            }}
+                            aria-label={`Set volume to ${lots} lots`}
+                          >
+                            {lots}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className={LABEL_CLASS} htmlFor={`${idPrefix}-sl`}>
+                          {`Stop loss (${levelUnit})`}
+                        </label>
+                        <input
+                          id={`${idPrefix}-sl`}
+                          inputMode="decimal"
+                          placeholder={slPlaceholder}
+                          value={stopLossDraft}
+                          autoComplete="off"
+                          onChange={(event) => {
+                            dropTransient();
+                            setStopLossDraft(event.target.value);
                           }}
                           className={FIELD_CLASS}
                         />
-                        <button
-                          type="button"
-                          className={CHIP_CLASS}
-                          disabled={!quote}
-                          onClick={() => quote && setPriceDraft(formatPrice(quote.bid))}
-                          aria-label="Use the bid price"
-                        >
-                          Bid
-                        </button>
-                        <button
-                          type="button"
-                          className={CHIP_CLASS}
-                          disabled={!quote}
-                          onClick={() => quote && setPriceDraft(formatPrice(quote.ask))}
-                          aria-label="Use the ask price"
-                        >
-                          Ask
-                        </button>
                       </div>
-                    </div>
-                  ) : null}
-
-                  <div>
-                    <label className={LABEL_CLASS} htmlFor={`${idPrefix}-volume`}>
-                      Volume (lots)
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <button type="button" className={CHIP_CLASS} onClick={() => stepVolume(-1)} aria-label="Decrease volume">
-                        <Minus className="h-3.5 w-3.5" aria-hidden="true" />
-                      </button>
-                      <input
-                        id={`${idPrefix}-volume`}
-                        inputMode="decimal"
-                        value={volumeDraft}
-                        autoComplete="off"
-                        onChange={(event) => {
-                          dropTransient();
-                          setVolumeDraft(event.target.value);
-                        }}
-                        onBlur={(event) => commitVolume(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            commitVolume(volumeDraft);
-                          }
-                        }}
-                        className={`${FIELD_CLASS} text-center`}
-                      />
-                      <button type="button" className={CHIP_CLASS} onClick={() => stepVolume(1)} aria-label="Increase volume">
-                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                      </button>
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">Quick</span>
-                      {QUICK_VOLUMES.map((lots) => (
-                        <button
-                          key={lots}
-                          type="button"
-                          className={CHIP_CLASS}
-                          onClick={() => {
+                      <div>
+                        <label className={LABEL_CLASS} htmlFor={`${idPrefix}-tp`}>
+                          {`Take profit (${levelUnit})`}
+                        </label>
+                        <input
+                          id={`${idPrefix}-tp`}
+                          inputMode="decimal"
+                          placeholder={tpPlaceholder}
+                          value={takeProfitDraft}
+                          autoComplete="off"
+                          onChange={(event) => {
                             dropTransient();
-                            commitVolume(String(lots));
+                            setTakeProfitDraft(event.target.value);
                           }}
-                          aria-label={`Set volume to ${lots} lots`}
-                        >
-                          {lots}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className={LABEL_CLASS} htmlFor={`${idPrefix}-sl`}>
-                        {`Stop loss (${levelUnit})`}
-                      </label>
-                      <input
-                        id={`${idPrefix}-sl`}
-                        inputMode="decimal"
-                        placeholder={slPlaceholder}
-                        value={stopLossDraft}
-                        autoComplete="off"
-                        onChange={(event) => {
-                          dropTransient();
-                          setStopLossDraft(event.target.value);
-                        }}
-                        className={FIELD_CLASS}
-                      />
-                    </div>
-                    <div>
-                      <label className={LABEL_CLASS} htmlFor={`${idPrefix}-tp`}>
-                        {`Take profit (${levelUnit})`}
-                      </label>
-                      <input
-                        id={`${idPrefix}-tp`}
-                        inputMode="decimal"
-                        placeholder={tpPlaceholder}
-                        value={takeProfitDraft}
-                        autoComplete="off"
-                        onChange={(event) => {
-                          dropTransient();
-                          setTakeProfitDraft(event.target.value);
-                        }}
-                        className={FIELD_CLASS}
-                      />
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] leading-snug text-muted" aria-live="polite">
-                    {quote
-                      ? `Bid ${formatPrice(quote.bid)} · Ask ${formatPrice(quote.ask)} · Spread ${formatPrice(
-                          quote.ask - quote.bid,
-                        )}${spreadPoints === null ? "" : ` (${spreadPoints} pt)`}`
-                      : state
-                        ? "No price for this symbol - the order is sent at the market price."
-                        : ""}
-                  </p>
-
-                  {order ? (
-                    <div
-                      role="group"
-                      aria-label="Confirm order"
-                      className="space-y-2 rounded-[4px] border border-accent px-3 py-2 text-xs"
-                    >
-                      <p className="font-semibold text-foreground">
-                        {describePlan(order.plan)}
-                        {selectedAccount ? ` · ${selectedAccount.name}` : ""}
-                      </p>
-                      {order.plan.stopLoss !== null && order.plan.takeProfit !== null ? (
-                        <p className="text-muted">Risk : reward {confirmRatio}</p>
-                      ) : null}
-                      <div className="flex flex-wrap gap-2">
-                        <button type="button" className="btn-active text-xs" disabled={busy} onClick={() => sendPlan(order)}>
-                          {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
-                          Confirm {draftSide === "BUY" ? "buy" : "sell"}
-                        </button>
-                        <button type="button" className="btn-dark text-xs" disabled={busy} onClick={() => setOrder(null)}>
-                          Cancel
-                        </button>
+                          className={FIELD_CLASS}
+                        />
                       </div>
                     </div>
-                  ) : (
+
+                    <p className="text-[11px] leading-snug text-muted" aria-live="polite">
+                      {quote
+                        ? `Bid ${formatPrice(quote.bid)} · Ask ${formatPrice(quote.ask)} · Spread ${formatPrice(
+                            quote.ask - quote.bid,
+                          )}${spreadPoints === null ? "" : ` (${spreadPoints} pt)`}`
+                        : state
+                          ? "No price for this symbol - the order is sent at the market price."
+                          : ""}
+                    </p>
+
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -989,232 +1088,219 @@ export function WsaTradePanel({
                         <span className="block text-base font-bold tabular-nums">{quote ? formatPrice(quote.ask) : "-"}</span>
                       </button>
                     </div>
-                  )}
-                  {!settings.confirm && !order ? (
-                    <p className="text-[11px] leading-snug text-muted">
-                      One-click is on: Buy and Sell send the order at once.
-                    </p>
-                  ) : null}
-                  {formError ? (
-                    <p role="alert" className="text-xs text-danger">
-                      {formError}
-                    </p>
-                  ) : null}
-                </form>
-              </>
-            ) : null}
-          </div>
-
-          {/* ── right: the result, positions and orders, the person's rules ── */}
-          {accountId ? (
-            <div className="space-y-3">
-              {problem ? (
-                <p role="alert" className={`${BANNER_CLASS} text-danger`}>
-                  {problem.message}
-                  {problem.uncertain
-                    ? " If you are not sure whether it went through, check the positions below before sending it again."
-                    : ""}
-                </p>
+                    {formError ? (
+                      <p role="alert" className="text-xs text-danger">
+                        {formError}
+                      </p>
+                    ) : null}
+                  </form>
+                </>
               ) : null}
-              {notice ? (
-                <p role="status" className={`${BANNER_CLASS} text-accent-2`}>
-                  {notice}
-                </p>
-              ) : null}
+            </div>
 
-              <div role="tablist" aria-label="Positions and orders" className="flex flex-wrap gap-1.5">
-                {(
-                  [
-                    { id: "positions", label: `Positions${state ? ` (${positions.length})` : ""}` },
-                    { id: "pending", label: `Pending${state ? ` (${pendingCount})` : ""}` },
-                    { id: "activity", label: "Activity" },
-                  ] as const
-                ).map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === entry.id}
-                    onClick={() => {
-                      setTab(entry.id);
-                      setRowEdit(null);
-                      setBulk(null);
-                    }}
-                    className={`btn-dark text-xs ${tab === entry.id ? "btn-active" : ""}`}
-                  >
-                    {entry.label}
-                  </button>
-                ))}
-              </div>
+            {/* ── right: the result, positions and orders, the person's rules ── */}
+            {accountId ? (
+              <div className="space-y-3">
+                {problem ? (
+                  <p role="alert" className={`${BANNER_CLASS} text-danger`}>
+                    {problem.message}
+                    {problem.uncertain
+                      ? " If you are not sure whether it went through, check the positions below before sending it again."
+                      : ""}
+                  </p>
+                ) : null}
+                {notice ? (
+                  <div role="status" className={`${BANNER_CLASS} flex-col gap-0.5 text-accent-2`}>
+                    <p>
+                      {notice.text}
+                      {notice.headline ? <strong className="ml-2 font-bold tabular-nums">{notice.headline}</strong> : null}
+                    </p>
+                    {notice.detail ? <p className="text-[11px] tabular-nums text-muted">{notice.detail}</p> : null}
+                  </div>
+                ) : null}
 
-              {tab === "positions" ? (
-                <div className="space-y-2" role="tabpanel" aria-label="Open positions">
-                  {!state ? (
-                    <p className={`${BANNER_CLASS} text-muted`} role="status">
-                      {stateQuery.isError ? "Positions could not be read." : "Reading the account from the broker…"}
-                    </p>
-                  ) : positions.length === 0 ? (
-                    <p className={`${BANNER_CLASS} text-muted`} role="status">
-                      No open positions on this account.
-                    </p>
-                  ) : (
-                    <>
-                      <BulkBar
-                        list="positions"
-                        symbol={symbol}
-                        positions={positions}
-                        pending={pendingOrders}
-                        asked={bulk}
-                        busy={busy}
-                        canManage={canManage}
-                        onAsk={(scope) => {
-                          setRowEdit(null);
-                          setBulk(scope);
-                        }}
-                        onConfirm={confirmBulk}
-                        onCancel={() => setBulk(null)}
-                      />
-                      <ul className="space-y-2" aria-label="Open positions">
-                        {positions.map((position) => (
-                          <PositionCard
-                            key={position.ticket}
-                            position={position}
-                            editing={rowEdit && rowEdit.ticket === position.ticket ? rowEdit : null}
-                            busy={busy}
-                            canManage={canManage}
-                            canBreakEven={breakEvenLevel(position) !== null}
-                            onStartLevels={() => startLevels(position)}
-                            onStartClose={() => startClose(position)}
-                            onStartPartial={() => startPartial(position)}
-                            onBreakEven={() => breakEven(position)}
-                            onChange={setRowEdit}
-                            onCancelEdit={() => setRowEdit(null)}
-                            onSaveLevels={(edit) => saveLevels(position, edit)}
-                            onSubmitClose={(edit) => submitClose(position, edit)}
-                          />
-                        ))}
-                      </ul>
-                    </>
-                  )}
+                <div role="tablist" aria-label="Positions and orders" className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { id: "positions", label: `Positions${state ? ` (${positions.length})` : ""}` },
+                      { id: "pending", label: `Pending${state ? ` (${pendingCount})` : ""}` },
+                      { id: "activity", label: "Activity" },
+                    ] as const
+                  ).map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === entry.id}
+                      onClick={() => {
+                        setTab(entry.id);
+                        setRowEdit(null);
+                      }}
+                      className={`btn-dark text-xs ${tab === entry.id ? "btn-active" : ""}`}
+                    >
+                      {entry.label}
+                    </button>
+                  ))}
                 </div>
-              ) : null}
 
-              {tab === "pending" ? (
-                <div className="space-y-2" role="tabpanel" aria-label="Pending orders">
-                  {!state ? (
-                    <p className={`${BANNER_CLASS} text-muted`} role="status">
-                      {stateQuery.isError ? "Orders could not be read." : "Reading the account from the broker…"}
-                    </p>
-                  ) : pendingCount === 0 ? (
-                    <p className={`${BANNER_CLASS} text-muted`} role="status">
-                      No pending orders on this account.
-                    </p>
-                  ) : (
-                    <>
-                      {pendingOrders.length > 0 ? (
+                {tab === "positions" ? (
+                  <div className="space-y-2" role="tabpanel" aria-label="Open positions">
+                    {!state ? (
+                      <p className={`${BANNER_CLASS} text-muted`} role="status">
+                        {stateQuery.isError ? "Positions could not be read." : "Reading the account from the broker…"}
+                      </p>
+                    ) : positions.length === 0 ? (
+                      <p className={`${BANNER_CLASS} text-muted`} role="status">
+                        No open positions on this account.
+                      </p>
+                    ) : (
+                      <>
                         <BulkBar
-                          list="pending"
+                          list="positions"
                           symbol={symbol}
                           positions={positions}
                           pending={pendingOrders}
-                          asked={bulk}
                           busy={busy}
                           canManage={canManage}
-                          onAsk={(scope) => {
-                            setRowEdit(null);
-                            setBulk(scope);
-                          }}
-                          onConfirm={confirmBulk}
-                          onCancel={() => setBulk(null)}
+                          onRun={runBulk}
                         />
-                      ) : null}
-                      <ul className="space-y-2" aria-label="Pending orders">
-                        {pendingOrders.map((pending) => (
-                          <PendingCard
-                            key={pending.ticket}
-                            order={pending}
-                            editing={rowEdit && rowEdit.ticket === pending.ticket ? rowEdit : null}
-                            busy={busy}
-                            canManage={canManage}
-                            onStartEdit={() => startPendingEdit(pending)}
-                            onStartCancel={() => startCancel(pending)}
-                            onChange={setRowEdit}
-                            onCancelEdit={() => setRowEdit(null)}
-                            onSave={(edit) => savePending(pending, edit)}
-                            onConfirmCancel={() => cancelNow(pending)}
-                          />
-                        ))}
-                      </ul>
-                      {pendingCount > pendingOrders.length ? (
-                        <p className="text-[11px] leading-snug text-muted">
-                          {pendingCount - pendingOrders.length} more pending order
-                          {pendingCount - pendingOrders.length === 1 ? "" : "s"} exist at the broker but could not be
-                          read here.
-                        </p>
-                      ) : null}
-                    </>
-                  )}
-                </div>
-              ) : null}
-
-              {tab === "activity" ? (
-                <div role="tabpanel" aria-label="Activity">
-                  {activity.length === 0 ? (
-                    <p className={`${BANNER_CLASS} text-muted`} role="status">
-                      What you send from this panel is listed here, with how long the trading system took.
-                    </p>
-                  ) : (
-                    <ol className="space-y-1.5" aria-label="Activity">
-                      {activity.map((entry) => (
-                        <li
-                          key={entry.id}
-                          className={`rounded-[4px] border border-line bg-background px-3 py-2 text-xs ${
-                            entry.tone === "error" ? "text-danger" : toneClass("flat")
-                          }`}
-                        >
-                          <span className="mr-2 tabular-nums text-muted">{new Date(entry.at).toLocaleTimeString("en-GB")}</span>
-                          {entry.text}
-                        </li>
-                      ))}
-                    </ol>
-                  )}
-                </div>
-              ) : null}
-
-              <div>
-                <button
-                  type="button"
-                  aria-expanded={settingsOpen}
-                  aria-controls={`${idPrefix}-settings`}
-                  onClick={() => setSettingsOpen((open) => !open)}
-                  className="flex w-full items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-3 py-2 text-left text-xs font-semibold text-foreground"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Settings2 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span className="shrink-0">Trade settings</span>
-                    {!settingsOpen ? (
-                      <span className="truncate text-[11px] font-medium text-muted">{rulesSummary(settings)}</span>
-                    ) : null}
-                  </span>
-                  {settingsOpen ? (
-                    <ChevronUp className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  )}
-                </button>
-                {settingsOpen ? (
-                  <div id={`${idPrefix}-settings`} className="mt-2">
-                    <TradeSettings settings={settings} onChange={onSettingsChange} />
+                        <ul className="space-y-2" aria-label="Open positions">
+                          {positions.map((position) => (
+                            <PositionCard
+                              key={position.ticket}
+                              position={position}
+                              editing={rowEdit && rowEdit.ticket === position.ticket ? rowEdit : null}
+                              busy={busy}
+                              canManage={canManage}
+                              canBreakEven={breakEvenLevel(position) !== null}
+                              onStartLevels={() => startLevels(position)}
+                              onClose={() => closeNow(position, null)}
+                              onStartPartial={() => startPartial(position)}
+                              onBreakEven={() => breakEven(position)}
+                              onChange={setRowEdit}
+                              onCancelEdit={() => setRowEdit(null)}
+                              onSaveLevels={(edit) => saveLevels(position, edit)}
+                              onSubmitClose={(edit) => submitClose(position, edit)}
+                            />
+                          ))}
+                        </ul>
+                      </>
+                    )}
                   </div>
                 ) : null}
-              </div>
 
-              <p className="text-[11px] leading-relaxed text-muted">
-                Orders sent here use your connected account, pass the platform&apos;s subscription and risk checks and are
-                recorded in the audit log. Prices come from the broker connection and can differ slightly from the fill.
-              </p>
-            </div>
-          ) : null}
+                {tab === "pending" ? (
+                  <div className="space-y-2" role="tabpanel" aria-label="Pending orders">
+                    {!state ? (
+                      <p className={`${BANNER_CLASS} text-muted`} role="status">
+                        {stateQuery.isError ? "Orders could not be read." : "Reading the account from the broker…"}
+                      </p>
+                    ) : pendingCount === 0 ? (
+                      <p className={`${BANNER_CLASS} text-muted`} role="status">
+                        No pending orders on this account.
+                      </p>
+                    ) : (
+                      <>
+                        {pendingOrders.length > 0 ? (
+                          <BulkBar
+                            list="pending"
+                            symbol={symbol}
+                            positions={positions}
+                            pending={pendingOrders}
+                            busy={busy}
+                            canManage={canManage}
+                            onRun={runBulk}
+                          />
+                        ) : null}
+                        <ul className="space-y-2" aria-label="Pending orders">
+                          {pendingOrders.map((pending) => (
+                            <PendingCard
+                              key={pending.ticket}
+                              order={pending}
+                              editing={rowEdit && rowEdit.ticket === pending.ticket ? rowEdit : null}
+                              busy={busy}
+                              canManage={canManage}
+                              onStartEdit={() => startPendingEdit(pending)}
+                              onDelete={() => cancelNow(pending)}
+                              onChange={setRowEdit}
+                              onCancelEdit={() => setRowEdit(null)}
+                              onSave={(edit) => savePending(pending, edit)}
+                            />
+                          ))}
+                        </ul>
+                        {pendingCount > pendingOrders.length ? (
+                          <p className="text-[11px] leading-snug text-muted">
+                            {pendingCount - pendingOrders.length} more pending order
+                            {pendingCount - pendingOrders.length === 1 ? "" : "s"} exist at the broker but could not be
+                            read here.
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+
+                {tab === "activity" ? (
+                  <div role="tabpanel" aria-label="Activity">
+                    {activity.length === 0 ? (
+                      <p className={`${BANNER_CLASS} text-muted`} role="status">
+                        What you send from this panel is listed here, with how long the trading system took.
+                      </p>
+                    ) : (
+                      <ol className="space-y-1.5" aria-label="Activity">
+                        {activity.map((entry) => (
+                          <li
+                            key={entry.id}
+                            className={`rounded-[4px] border border-line bg-background px-3 py-2 text-xs ${
+                              entry.tone === "error" ? "text-danger" : toneClass("flat")
+                            }`}
+                          >
+                            <span className="mr-2 tabular-nums text-muted">{new Date(entry.at).toLocaleTimeString("en-GB")}</span>
+                            {entry.text}
+                            {entry.headline ? <strong className="ml-2 font-bold tabular-nums">{entry.headline}</strong> : null}
+                            {entry.detail ? <span className="mt-0.5 block text-[11px] tabular-nums text-muted">{entry.detail}</span> : null}
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                ) : null}
+
+                <div>
+                  <button
+                    type="button"
+                    aria-expanded={settingsOpen}
+                    aria-controls={`${idPrefix}-settings`}
+                    onClick={() => setSettingsOpen((open) => !open)}
+                    className="flex w-full items-center justify-between gap-3 rounded-[4px] border border-line bg-background px-3 py-2 text-left text-xs font-semibold text-foreground"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Settings2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span className="shrink-0">Trade settings</span>
+                      {!settingsOpen ? (
+                        <span className="truncate text-[11px] font-medium text-muted">{rulesSummary(settings)}</span>
+                      ) : null}
+                    </span>
+                    {settingsOpen ? (
+                      <ChevronUp className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    )}
+                  </button>
+                  {settingsOpen ? (
+                    <div id={`${idPrefix}-settings`} className="mt-2">
+                      <TradeSettings settings={settings} onChange={onSettingsChange} />
+                    </div>
+                  ) : null}
+                </div>
+
+                <p className="text-[11px] leading-relaxed text-muted">
+                  Orders sent here use your connected account, pass the platform&apos;s subscription and risk checks and are
+                  recorded in the audit log. Prices come from the broker connection and can differ slightly from the fill.
+                </p>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </section>

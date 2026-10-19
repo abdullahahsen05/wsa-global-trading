@@ -54,9 +54,14 @@ export WSA_COPY_EXECUTION_PRIORITY_MS="${WSA_COPY_EXECUTION_PRIORITY_MS:-4000}"
 # WSA Trade gateway (runs inside the copy worker): carries out the orders the web app queues
 # (open / close / modify / cancel / close all) and keeps the live picture of the accounts people
 # are looking at fresh. It needs migration 060; without it the loop sleeps and copy trading is
-# not affected. Keep it disabled for this rollout; enable explicitly after AWS verification.
-export WSA_TRADE_GATEWAY_ENABLED="${WSA_TRADE_GATEWAY_ENABLED:-false}"
+# not affected. Set WSA_TRADE_GATEWAY_ENABLED=false to switch it off.
+export WSA_TRADE_GATEWAY_ENABLED="${WSA_TRADE_GATEWAY_ENABLED:-true}"
 export WSA_TRADE_GATEWAY_POLL_MS="${WSA_TRADE_GATEWAY_POLL_MS:-100}"
+# A command that arrives while the loop is idle waits at most this long before it is claimed (was 750).
+export WSA_TRADE_GATEWAY_IDLE_POLL_MS="${WSA_TRADE_GATEWAY_IDLE_POLL_MS:-400}"
+# In the seconds after an order the live picture of that account is renewed this often, so the
+# result shows up in the web panel almost at once.
+export WSA_TRADE_GATEWAY_HOT_STATE_MS="${WSA_TRADE_GATEWAY_HOT_STATE_MS:-350}"
 # Node resolves host names on a pool of 4 threads by default; a burst of orders that opens many new
 # connections at once would queue on it. Sixteen leaves room (connections are kept open afterwards).
 export UV_THREADPOOL_SIZE="${UV_THREADPOOL_SIZE:-16}"
