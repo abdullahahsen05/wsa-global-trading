@@ -1,7 +1,16 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { GatewayNotInstalledError, resetGatewayState, WATCH_MS } from "@/lib/gateway/gatewayDb";
+import {
+  gatewayKnownMissing,
+  GatewayNotInstalledError,
+  LONG_POLL_TROUBLE_PAUSE_MS,
+  longPollKnownOff,
+  LongPollUnavailableError,
+  resetGatewayState,
+  WATCH_MS,
+} from "@/lib/gateway/gatewayDb";
 import {
   abandonCommand,
+  awaitCommand,
   commandAnswer,
   enqueueCommand,
   gatewayAvailability,
@@ -79,13 +88,64 @@ describe("is the AWS system there?", () => {
     expect(db.callsTo("gateway_heartbeat")).toHaveLength(asked);
   });
 
-  test("the answer is kept for two seconds", async () => {
+  test("while a worker reports in the answer is kept for six seconds - an order does not ask the heartbeat itself", async () => {
     db.tables.gateway_heartbeat = [{ worker: "w1", updated_at: iso(-1_000), info: {} }];
+    await gatewayAvailability(client, NOW);
+    await gatewayAvailability(client, NOW + 5_500);
+    expect(db.callsTo("gateway_heartbeat")).toHaveLength(1);
+    await gatewayAvailability(client, NOW + 6_500);
+    expect(db.callsTo("gateway_heartbeat")).toHaveLength(2);
+  });
+
+  test("while nobody is there it is asked again after two seconds, so a worker that has just started is noticed at once", async () => {
+    db.tables.gateway_heartbeat = [];
     await gatewayAvailability(client, NOW);
     await gatewayAvailability(client, NOW + 1_500);
     expect(db.callsTo("gateway_heartbeat")).toHaveLength(1);
     await gatewayAvailability(client, NOW + 2_500);
     expect(db.callsTo("gateway_heartbeat")).toHaveLength(2);
+  });
+
+  test("a caller can ask for a younger answer than the usual keep time (the panel's background upkeep does)", async () => {
+    db.tables.gateway_heartbeat = [{ worker: "w1", updated_at: iso(-1_000), info: {} }];
+    await gatewayAvailability(client, NOW);
+
+    await gatewayAvailability(client, NOW + 2_000, 3_000);
+    expect(db.callsTo("gateway_heartbeat")).toHaveLength(1);
+
+    await gatewayAvailability(client, NOW + 3_500, 3_000);
+    expect(db.callsTo("gateway_heartbeat")).toHaveLength(2);
+
+    // a larger limit never makes the answer older than the usual keep time
+    await gatewayAvailability(client, NOW + 3_500 + 7_000, 60_000);
+    expect(db.callsTo("gateway_heartbeat")).toHaveLength(3);
+  });
+
+  test("the newest worker's own measurements come with the answer: round trip to the database, event-loop lateness, waiting inside the database", async () => {
+    db.tables.gateway_heartbeat = [
+      { worker: "old", updated_at: iso(-9_000), info: { executionAvailable: true, dbRttMs: 400, loopLagMs: 90, longPoll: false } },
+      { worker: "new", updated_at: iso(-1_000), info: { executionAvailable: true, dbRttMs: 14.4, loopLagMs: 3, longPoll: true } },
+    ];
+
+    expect(await gatewayAvailability(client, NOW)).toEqual({
+      state: "online",
+      workers: 2,
+      executionEnabled: true,
+      awsDbMs: 14,
+      awsLoopMs: 3,
+      awsLongPoll: true,
+    });
+  });
+
+  test("an older worker reports none of it, and nonsense is left out", async () => {
+    db.tables.gateway_heartbeat = [{ worker: "w1", updated_at: iso(-1_000), info: { executionAvailable: true } }];
+    expect(await gatewayAvailability(client, NOW)).toEqual({ state: "online", workers: 1, executionEnabled: true });
+
+    resetGatewayAvailability();
+    db.tables.gateway_heartbeat = [
+      { worker: "w1", updated_at: iso(-1_000), info: { dbRttMs: -5, loopLagMs: "slow", longPoll: "yes" } },
+    ];
+    expect(await gatewayAvailability(client, NOW)).toEqual({ state: "online", workers: 1, executionEnabled: true });
   });
 
   test("another database failure is 'offline', not an exception", async () => {
@@ -225,6 +285,150 @@ describe("waiting for the answer", () => {
     db.tables.trade_commands[0].status = "DONE";
 
     expect(await abandonCommand(client, queued.row.id, NOW)).toBe("FINISHED");
+  });
+});
+
+describe("waiting for the answer inside the database", () => {
+  const DONE = { id: "cmd-1", status: "DONE", result: { ticket: "7" }, error_code: null, error_message: null };
+
+  /** A clock the test moves: `sleep` and the (pretend) waiting of the database both advance it. */
+  function clock() {
+    let now = NOW;
+    return {
+      now: () => now,
+      advance: (ms: number) => {
+        now += ms;
+      },
+      sleep: async (ms: number) => {
+        now += ms;
+      },
+    };
+  }
+
+  const input = { userId: USER, clientRequestId: "request-0010", timeoutMs: 24_000 };
+
+  test("one call returns the finished command - found by user and request id, not by its id", async () => {
+    const asked: Array<Record<string, unknown>> = [];
+    db.rpcHandlers.await_trade_command = (args) => {
+      asked.push(args);
+      return { data: [DONE], error: null };
+    };
+
+    const row = await awaitCommand(client, input, clock());
+
+    expect(row?.status).toBe("DONE");
+    expect(asked).toEqual([{ p_user_id: USER, p_client_request_id: "request-0010", p_wait_ms: 2_500 }]);
+  });
+
+  test("a wait that ends with the command still running is repeated until the deadline, each call no longer than what is left", async () => {
+    const time = clock();
+    const waits: number[] = [];
+    db.rpcHandlers.await_trade_command = (args) => {
+      waits.push(args.p_wait_ms as number);
+      time.advance(args.p_wait_ms as number); // the database really did wait
+      return { data: [{ ...DONE, status: "RUNNING" }], error: null };
+    };
+
+    const row = await awaitCommand(client, { ...input, timeoutMs: 6_000 }, time);
+
+    expect(row).toBeNull();
+    expect(waits).toEqual([2_500, 2_500, 1_000]);
+  });
+
+  test("a command that is not written yet (the wait began together with the write) is just another round", async () => {
+    const time = clock();
+    let calls = 0;
+    db.rpcHandlers.await_trade_command = () => {
+      calls += 1;
+      return { data: calls === 1 ? [] : [DONE], error: null };
+    };
+
+    const row = await awaitCommand(client, input, time);
+
+    expect(row?.status).toBe("DONE");
+    expect(calls).toBe(2);
+  });
+
+  test("a call that comes back at once without an answer is not repeated in a tight loop", async () => {
+    const time = clock();
+    let calls = 0;
+    db.rpcHandlers.await_trade_command = () => {
+      calls += 1;
+      return { data: [], error: null };
+    };
+
+    const row = await awaitCommand(client, { ...input, timeoutMs: 300 }, time);
+
+    expect(row).toBeNull();
+    expect(calls).toBeLessThanOrEqual(12);
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  test("a wait the caller no longer needs stops at its next look", async () => {
+    const stop = new AbortController();
+    let calls = 0;
+    db.rpcHandlers.await_trade_command = () => {
+      calls += 1;
+      stop.abort();
+      return { data: [], error: null };
+    };
+
+    const row = await awaitCommand(client, { ...input, signal: stop.signal }, clock());
+
+    expect(row).toBeNull();
+    expect(calls).toBe(1);
+
+    calls = 0;
+    expect(await awaitCommand(client, { ...input, signal: stop.signal }, clock())).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  test("without migration 062 it says so and remembers it for ten minutes - the next wait does not even ask", async () => {
+    const time = clock();
+
+    await expect(awaitCommand(client, input, time)).rejects.toBeInstanceOf(LongPollUnavailableError);
+    expect(longPollKnownOff(NOW + 5 * 60_000)).toBe(true);
+    expect(longPollKnownOff(NOW + 11 * 60_000)).toBe(false);
+
+    let asked = 0;
+    db.rpcHandlers.await_trade_command = () => {
+      asked += 1;
+      return { data: [DONE], error: null };
+    };
+    await expect(awaitCommand(client, input, time)).rejects.toBeInstanceOf(LongPollUnavailableError);
+    expect(asked).toBe(0);
+  });
+
+  test("any other failure (a time-out, a refused long statement, a dropped connection) sends the caller to the plain way only for a short while", async () => {
+    db.rpcHandlers.await_trade_command = () => ({
+      data: null,
+      error: { code: "57014", message: "canceling statement due to statement timeout" },
+    });
+
+    await expect(awaitCommand(client, input, clock())).rejects.toBeInstanceOf(LongPollUnavailableError);
+
+    expect(longPollKnownOff(NOW + 10_000)).toBe(true);
+    expect(longPollKnownOff(NOW + LONG_POLL_TROUBLE_PAUSE_MS + 1)).toBe(false);
+  });
+
+  test("a call that throws is the same", async () => {
+    db.rpcHandlers.await_trade_command = () => {
+      throw new Error("socket hang up");
+    };
+
+    await expect(awaitCommand(client, input, clock())).rejects.toThrow(/not available/);
+    expect(longPollKnownOff(NOW + 1_000)).toBe(true);
+  });
+
+  test("a gateway that is not installed (migration 060) is the gateway's error, not the wait's", async () => {
+    db.rpcHandlers.await_trade_command = () => ({
+      data: null,
+      error: { code: "42P01", message: 'relation "trade_commands" does not exist' },
+    });
+
+    await expect(awaitCommand(client, input, clock())).rejects.toBeInstanceOf(GatewayNotInstalledError);
+    expect(gatewayKnownMissing(NOW + 1_000)).toBe(true);
+    expect(longPollKnownOff(NOW + 1_000)).toBe(false);
   });
 });
 

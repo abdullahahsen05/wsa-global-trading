@@ -23,14 +23,22 @@ if (typeof window !== "undefined") {
  *                and outside the account's chain, so the next order does not wait for it;
  *  - right after an order the picture of the account is read again (and kept fresh at a
  *                faster pace for a few seconds), so the panel shows the result at once;
- *  - without migration 060 the loop sleeps and asks again after a minute.
+ *  - without migration 060 the loop sleeps and asks again after a minute;
+ *  - with migration 062 (and `longPollMs` > 0) a command is not WAITED FOR by asking again and again: the
+ *                claim waits inside the database and returns the moment a command is written. Two such
+ *                calls run half a window apart so there is no gap between one call and the next. Without
+ *                062 (or when the database refuses the long call) it polls exactly as before;
+ *  - the heartbeat carries what the worker knows about itself - the round trip to the database, how late its
+ *                event loop runs, whether it waits inside the database - so the web panel can say where a
+ *                delay comes from.
  *
  * No Next / React imports: runs inside the AWS worker.
  */
 
+import { monitorEventLoopDelay, performance, type IntervalHistogram } from "node:perf_hooks";
 import type { BrokerAdapter } from "@/lib/broker/BrokerAdapter";
 import { KeyedChains } from "@/lib/copy/keyedChains";
-import { GatewayNotInstalledError } from "./gatewayDb";
+import { GatewayNotInstalledError, LONG_POLL_TROUBLE_PAUSE_MS, LongPollUnavailableError } from "./gatewayDb";
 import type { ClaimedCommand, GatewayStore, WatchedAccount } from "./gatewayStore";
 import {
   ORDER_COMMAND_KINDS,
@@ -53,6 +61,11 @@ export interface GatewayWorkerOptions {
   /** command poll while somebody is looking / when nothing has happened for a minute */
   pollMs?: number;
   idlePollMs?: number;
+  /**
+   * How long one claim may WAIT inside the database for a command to arrive (migration 062). 0 = poll as
+   * before. The store must offer `claimWait`; if the database has no such function the worker polls.
+   */
+  longPollMs?: number;
   /** how often the picture of a watched account is renewed */
   stateRefreshMs?: number;
   /** how often it is renewed in the few seconds after an order on that account */
@@ -84,6 +97,24 @@ const HOT_WINDOW_MS = 4_000;
 const RECENT_PICTURE_MAX_AGE_MS = 1_500;
 const STORE_RETRY_PAUSES_MS = [150, 400];
 const NOT_SENT_MESSAGE = "The command waited too long, so it was NOT sent to the broker.";
+/** The longest wait inside the database one claim may ask for. */
+const LONG_POLL_MAX_MS = 3_000;
+/** A database without the wait function is asked again after this long (the migration may have been applied meanwhile). */
+const LONG_POLL_MISSING_RECHECK_MS = 5 * 60_000;
+/** This many failed waits in a row, and the worker polls for a while. */
+const LONG_POLL_MAX_FAILURES = 3;
+/** The sampling rate of the event-loop monitor; what it reports is this plus the lateness. */
+const LAG_RESOLUTION_MS = 10;
+/** How many database round trips are remembered for the median. */
+const DB_SAMPLES = 7;
+
+/** What one round of claiming brought. */
+interface ClaimRound {
+  claimed: number;
+  /** the call waited inside the database (long poll) */
+  waited: boolean;
+  tookMs: number;
+}
 /** Commands that only read: they must never wait behind (or in front of) an order. */
 const READ_KINDS: ReadonlySet<string> = new Set(["STATE", "SYMBOLS"]);
 
@@ -129,6 +160,7 @@ export class GatewayWorker {
   private readonly now: () => number;
   private readonly pollMs: number;
   private readonly idlePollMs: number;
+  private readonly longPollMs: number;
   private readonly stateRefreshMs: number;
   private readonly hotRefreshMs: number;
   private readonly watchListMs: number;
@@ -159,6 +191,13 @@ export class GatewayWorker {
   private startedAt = new Date(0);
   private notInstalledUntil = 0;
   private notInstalledLogged = false;
+  /** the wait inside the database is not used before this time (migration 062 missing, or the database refused it) */
+  private longPollOffUntil = 0;
+  private longPollFailures = 0;
+  private longPollLogged = false;
+  /** the last few round trips to the database (the heartbeat's write), in milliseconds */
+  private readonly dbSamples: number[] = [];
+  private lagMonitor: IntervalHistogram | null = null;
   private lastActivityAt = 0;
   private watchedList: WatchedAccount[] = [];
   private nextWatchListAt = 0;
@@ -177,6 +216,7 @@ export class GatewayWorker {
     this.now = options.now ?? Date.now;
     this.pollMs = Math.max(50, options.pollMs ?? 150);
     this.idlePollMs = Math.max(this.pollMs, options.idlePollMs ?? 400);
+    this.longPollMs = Math.max(0, Math.min(LONG_POLL_MAX_MS, Math.round(options.longPollMs ?? 0)));
     this.stateRefreshMs = Math.max(250, options.stateRefreshMs ?? 1_000);
     this.hotRefreshMs = Math.max(150, options.hotRefreshMs ?? 350);
     this.watchListMs = Math.max(250, options.watchListMs ?? 500);
@@ -194,7 +234,13 @@ export class GatewayWorker {
     if (this.running) return;
     this.running = true;
     this.startedAt = new Date(this.now());
-    this.loops = [this.commandLoop(), this.watchLoop(), this.housekeepingLoop()];
+    this.startLagMonitor();
+    this.loops = [this.commandLoop(0), this.watchLoop(), this.housekeepingLoop()];
+    // Two waiting calls, half a window apart: while one is on its way back to the worker and the next one is on its
+    // way to the database the other is still waiting, so a command written in that gap is not left for the next call.
+    if (this.longPollMs > 0 && typeof this.store.claimWait === "function") {
+      this.loops.push(this.commandLoop(Math.round(this.longPollMs / 2)));
+    }
   }
 
   /** Stops the loops, lets running commands finish (up to ten seconds) and takes the worker off the heartbeat. */
@@ -204,7 +250,41 @@ export class GatewayWorker {
     for (const wakeUp of [...this.sleepers]) wakeUp();
     await waitAtMost(Promise.allSettled(this.loops), 2_000);
     await waitAtMost(this.settled(), 10_000);
+    this.lagMonitor?.disable();
+    this.lagMonitor = null;
     await this.store.retire(this.workerId).catch(() => undefined);
+  }
+
+  // ── what the worker knows about itself (reported in the heartbeat) ──────────
+
+  private startLagMonitor(): void {
+    try {
+      this.lagMonitor = monitorEventLoopDelay({ resolution: LAG_RESOLUTION_MS });
+      this.lagMonitor.enable();
+    } catch {
+      this.lagMonitor = null; // a runtime without the monitor simply reports nothing
+    }
+  }
+
+  /** How late the event loop has been running since the last look (99th percentile, ms), then starts afresh. */
+  private takeLagMs(): number | undefined {
+    const monitor = this.lagMonitor;
+    if (!monitor) return undefined;
+    const p99Ms = monitor.count > 0 ? monitor.percentile(99) / 1e6 : 0;
+    monitor.reset();
+    return Math.max(0, Math.round(p99Ms - LAG_RESOLUTION_MS));
+  }
+
+  private noteDbSample(ms: number): void {
+    this.dbSamples.push(Math.max(0, Math.round(ms)));
+    if (this.dbSamples.length > DB_SAMPLES) this.dbSamples.shift();
+  }
+
+  /** The middle of the recent round trips to the database (undefined until there is one). */
+  private medianDbMs(): number | undefined {
+    if (this.dbSamples.length === 0) return undefined;
+    const sorted = [...this.dbSamples].sort((left, right) => left - right);
+    return sorted[Math.floor(sorted.length / 2)];
   }
 
   /** Resolves when no command is running or queued and every answer has been stored (tests, shutdown). */
@@ -241,28 +321,79 @@ export class GatewayWorker {
 
   // ── commands ───────────────────────────────────────────────────────────────
 
-  private async commandLoop(): Promise<void> {
+  private async commandLoop(initialDelayMs: number): Promise<void> {
+    if (initialDelayMs > 0) await this.sleep(initialDelayMs);
     while (this.running) {
-      let claimed = 0;
+      let round: ClaimRound = { claimed: 0, waited: false, tookMs: 0 };
       try {
-        claimed = await this.pollCommandsOnce();
+        round = await this.claimRound();
       } catch (error) {
         this.warn(`[trade-gateway] polling for commands failed: ${error instanceof Error ? error.message : "unknown error"}`);
       }
       if (!this.running) break;
-      const busy = claimed > 0 || this.watchedList.length > 0 || this.now() - this.lastActivityAt < ACTIVE_WINDOW_MS;
-      await this.sleep(claimed >= this.claimBatch ? 0 : busy ? this.pollMs : this.idlePollMs);
+      if (round.claimed >= this.claimBatch) {
+        await this.sleep(0);
+      } else if (round.waited) {
+        // The call itself waited for work, so the next one is made at once. One that came back empty far too soon
+        // did not wait (it should have): it is not repeated in a tight loop.
+        await this.sleep(round.claimed > 0 || round.tookMs >= this.longPollMs / 2 ? 0 : this.idlePollMs);
+      } else {
+        const busy = round.claimed > 0 || this.watchedList.length > 0 || this.now() - this.lastActivityAt < ACTIVE_WINDOW_MS;
+        await this.sleep(busy ? this.pollMs : this.idlePollMs);
+      }
     }
   }
 
   /** One claim round. Returns how many commands were taken. */
   async pollCommandsOnce(): Promise<number> {
-    if (this.now() < this.notInstalledUntil) return 0;
+    return (await this.claimRound()).claimed;
+  }
+
+  /** Is the wait inside the database in use right now? (Needs migration 062; falls back to polling when it fails.) */
+  private longPollActive(): boolean {
+    return this.longPollMs > 0 && typeof this.store.claimWait === "function" && this.now() >= this.longPollOffUntil;
+  }
+
+  /** The wait failed: remember it, and poll the plain way for a while. */
+  private noteLongPollTrouble(error: unknown): void {
+    if (error instanceof LongPollUnavailableError) {
+      this.longPollOffUntil = this.now() + LONG_POLL_MISSING_RECHECK_MS;
+      if (!this.longPollLogged) {
+        this.longPollLogged = true;
+        this.log("[trade-gateway] migration 062 is not applied - commands are picked up by polling (slower). Apply 062 to wake up at once.");
+      }
+      return;
+    }
+    this.longPollFailures += 1;
+    if (this.longPollFailures >= LONG_POLL_MAX_FAILURES) {
+      this.longPollFailures = 0;
+      this.longPollOffUntil = this.now() + LONG_POLL_TROUBLE_PAUSE_MS;
+      this.warn(`[trade-gateway] the wait inside the database failed ${LONG_POLL_MAX_FAILURES} times in a row (${error instanceof Error ? error.message : "unknown error"}) - polling for a while.`);
+    }
+  }
+
+  private async claimRound(): Promise<ClaimRound> {
+    if (this.now() < this.notInstalledUntil) return { claimed: 0, waited: false, tookMs: 0 };
+    const startedAt = this.now();
     let claimed: ClaimedCommand[];
+    let waited = false;
     try {
-      claimed = await this.store.claim(this.workerId, this.claimBatch);
+      if (this.longPollActive()) {
+        try {
+          claimed = await (this.store.claimWait as NonNullable<GatewayStore["claimWait"]>)(this.workerId, this.claimBatch, this.longPollMs);
+          waited = true;
+          this.longPollFailures = 0;
+        } catch (error) {
+          if (error instanceof GatewayNotInstalledError) throw error;
+          this.noteLongPollTrouble(error);
+          // this round still takes whatever is waiting, the plain way
+          claimed = await this.store.claim(this.workerId, this.claimBatch);
+        }
+      } else {
+        claimed = await this.store.claim(this.workerId, this.claimBatch);
+      }
     } catch (error) {
-      if (this.noteNotInstalled(error)) return 0;
+      if (this.noteNotInstalled(error)) return { claimed: 0, waited: false, tookMs: 0 };
       throw error;
     }
     for (const command of claimed) {
@@ -275,7 +406,7 @@ export class GatewayWorker {
         (error) => this.warn(`[trade-gateway] command ${shortId(command.id)} crashed: ${error instanceof Error ? error.message : "unknown error"}`),
       );
     }
-    return claimed.length;
+    return { claimed: claimed.length, waited, tookMs: this.now() - startedAt };
   }
 
   private noteNotInstalled(error: unknown): boolean {
@@ -568,18 +699,25 @@ export class GatewayWorker {
   }
 
   async heartbeatOnce(): Promise<void> {
-    await this.store.heartbeat(
-      this.workerId,
-      this.startedAt,
-      {
-        executionAvailable: this.adapter.executionAvailable(),
-        pollMs: this.pollMs,
-        watching: this.watchedList.length,
-        commandsRun: this.commandsRun,
-        commandsFailed: this.commandsFailed,
-      },
-      new Date(this.now()),
-    );
+    // What the worker knows about itself travels with the heartbeat, so the panel's time report can say whether a
+    // delay is the distance to the database (dbRttMs), a busy worker (loopLagMs) or the way commands are picked up
+    // (longPoll) - without anyone logging in to the AWS box.
+    const info: Record<string, unknown> = {
+      executionAvailable: this.adapter.executionAvailable(),
+      pollMs: this.pollMs,
+      watching: this.watchedList.length,
+      commandsRun: this.commandsRun,
+      commandsFailed: this.commandsFailed,
+      longPoll: this.longPollActive(),
+    };
+    const dbRttMs = this.medianDbMs();
+    if (dbRttMs !== undefined) info.dbRttMs = dbRttMs;
+    const loopLagMs = this.takeLagMs();
+    if (loopLagMs !== undefined) info.loopLagMs = loopLagMs;
+
+    const writeStartedAt = performance.now();
+    await this.store.heartbeat(this.workerId, this.startedAt, info, new Date(this.now()));
+    this.noteDbSample(performance.now() - writeStartedAt);
     if (this.notInstalledLogged) {
       this.notInstalledLogged = false;
       this.log("[trade-gateway] migration 060 found - the gateway is running.");

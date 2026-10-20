@@ -5,7 +5,7 @@ import {
   type BrokerTradingState,
   type ExecutionStages,
 } from "@/lib/broker/BrokerAdapter";
-import { GatewayNotInstalledError } from "@/lib/gateway/gatewayDb";
+import { GatewayNotInstalledError, LONG_POLL_TROUBLE_PAUSE_MS, LongPollUnavailableError } from "@/lib/gateway/gatewayDb";
 import type { ClaimedCommand, GatewayStore, WatchedAccount } from "@/lib/gateway/gatewayStore";
 import { GatewayWorker, startGatewayWorker } from "@/lib/gateway/gatewayWorker";
 
@@ -1154,6 +1154,352 @@ describe("heartbeat and housekeeping", () => {
     store.sweep.mockResolvedValue({ expired: 2, lost: 1, purged: 40 });
     await worker.sweepOnce();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("2 expired, 1 lost, 40 old rows removed"));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Waiting for commands inside the database (migration 062)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A store that can also wait: `claimWait` takes what is queued, like the database function does when something is pending. */
+function waitingStore() {
+  const store = makeStore();
+  const claimWait = vi.fn<NonNullable<GatewayStore["claimWait"]>>(async (_worker, limit) => store.queue.splice(0, limit));
+  return Object.assign(store, { claimWait });
+}
+
+function waitingRig(options: { longPollMs?: number; store?: ReturnType<typeof waitingStore> } = {}) {
+  const store = options.store ?? waitingStore();
+  const log = vi.fn();
+  const warn = vi.fn();
+  const worker = new GatewayWorker({
+    store,
+    adapter: makeAdapter() as unknown as BrokerAdapter,
+    workerId: "worker-1",
+    log,
+    warn,
+    now,
+    longPollMs: options.longPollMs ?? 800,
+  });
+  return { store, worker, log, warn };
+}
+
+describe("waiting for commands inside the database", () => {
+  test("a round waits inside the database for as long as it was told, and takes what arrives", async () => {
+    const { store, worker } = waitingRig({ longPollMs: 800 });
+    store.queue.push(command());
+
+    expect(await worker.pollCommandsOnce()).toBe(1);
+    await worker.idle();
+
+    expect(store.claimWait).toHaveBeenCalledWith("worker-1", 10, 800);
+    expect(store.claim).not.toHaveBeenCalled();
+    expect(store.complete).toHaveBeenCalledTimes(1);
+  });
+
+  test("switched off (the default) it asks the plain way even though the store could wait", async () => {
+    const store = waitingStore();
+    const worker = new GatewayWorker({
+      store,
+      adapter: makeAdapter() as unknown as BrokerAdapter,
+      workerId: "worker-1",
+      log: vi.fn(),
+      warn: vi.fn(),
+      now,
+    });
+    store.queue.push(command());
+
+    expect(await worker.pollCommandsOnce()).toBe(1);
+
+    expect(store.claim).toHaveBeenCalledTimes(1);
+    expect(store.claimWait).not.toHaveBeenCalled();
+  });
+
+  test("a store that cannot wait is asked the plain way, whatever the setting", async () => {
+    const { store } = rig();
+    store.queue.push(command());
+    const patient = new GatewayWorker({
+      store,
+      adapter: makeAdapter() as unknown as BrokerAdapter,
+      workerId: "worker-1",
+      log: vi.fn(),
+      warn: vi.fn(),
+      now,
+      longPollMs: 800,
+    });
+
+    expect(await patient.pollCommandsOnce()).toBe(1);
+
+    expect(store.claim).toHaveBeenCalledTimes(1);
+  });
+
+  test("the wait is never longer than three seconds, however large the setting", async () => {
+    const { store, worker } = waitingRig({ longPollMs: 60_000 });
+
+    await worker.pollCommandsOnce();
+
+    expect(store.claimWait).toHaveBeenCalledWith("worker-1", 10, 3_000);
+  });
+
+  test("a database without migration 062 is noticed once: the same round still takes its commands, the log says why, later rounds do not try again", async () => {
+    const { store, worker, log } = waitingRig();
+    store.claimWait.mockRejectedValue(new LongPollUnavailableError("migration 062 is not applied"));
+    store.queue.push(command());
+
+    expect(await worker.pollCommandsOnce()).toBe(1);
+    await worker.idle();
+    await worker.pollCommandsOnce();
+    await worker.pollCommandsOnce();
+
+    expect(store.claimWait).toHaveBeenCalledTimes(1);
+    expect(store.claim).toHaveBeenCalledTimes(3);
+    expect(store.complete).toHaveBeenCalledTimes(1);
+    const notes = log.mock.calls.map((call) => String(call[0])).filter((line) => line.includes("migration 062"));
+    expect(notes).toHaveLength(1);
+  });
+
+  test("a database that got migration 062 meanwhile is found again after a few minutes", async () => {
+    const { store, worker } = waitingRig();
+    store.claimWait.mockRejectedValueOnce(new LongPollUnavailableError("migration 062 is not applied"));
+
+    await worker.pollCommandsOnce();
+    clock.t += 4 * 60_000;
+    await worker.pollCommandsOnce();
+    expect(store.claimWait).toHaveBeenCalledTimes(1);
+
+    clock.t += 2 * 60_000;
+    await worker.pollCommandsOnce();
+    expect(store.claimWait).toHaveBeenCalledTimes(2);
+  });
+
+  test("three failed waits in a row (a refused long statement) send the worker back to polling for a while, with a warning", async () => {
+    const { store, worker, warn } = waitingRig();
+    store.claimWait.mockRejectedValue(new Error("canceling statement due to statement timeout"));
+    store.queue.push(command());
+
+    expect(await worker.pollCommandsOnce()).toBe(1); // the failed wait still took the command, the plain way
+    await worker.idle();
+    await worker.pollCommandsOnce();
+    await worker.pollCommandsOnce();
+
+    expect(store.claimWait).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("failed 3 times in a row"));
+
+    await worker.pollCommandsOnce();
+    expect(store.claimWait).toHaveBeenCalledTimes(3);
+
+    clock.t += LONG_POLL_TROUBLE_PAUSE_MS + 1;
+    await worker.pollCommandsOnce();
+    expect(store.claimWait).toHaveBeenCalledTimes(4);
+  });
+
+  test("a wait that works resets the count of failures", async () => {
+    const { store, worker, warn } = waitingRig();
+    store.claimWait
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("timeout"))
+      .mockRejectedValueOnce(new Error("timeout"));
+
+    for (let round = 0; round < 5; round += 1) await worker.pollCommandsOnce();
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(store.claimWait).toHaveBeenCalledTimes(5);
+  });
+
+  test("a gateway that is not installed at all is not a failed wait: the worker sleeps, as before", async () => {
+    const { store, worker, log } = waitingRig();
+    store.claimWait.mockRejectedValue(new GatewayNotInstalledError());
+
+    expect(await worker.pollCommandsOnce()).toBe(0);
+    expect(await worker.pollCommandsOnce()).toBe(0);
+
+    expect(store.claimWait).toHaveBeenCalledTimes(1);
+    expect(store.claim).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("migration 060"));
+  });
+
+  test("two waiting calls run half a window apart, so there is no gap between one call and the next", async () => {
+    const store = waitingStore();
+    let inFlight = 0;
+    let mostInFlight = 0;
+    store.claimWait.mockImplementation(async (_worker, limit, waitMs) => {
+      inFlight += 1;
+      mostInFlight = Math.max(mostInFlight, inFlight);
+      try {
+        const until = Date.now() + waitMs;
+        while (Date.now() < until) {
+          if (store.queue.length > 0) return store.queue.splice(0, limit);
+          await settle(5);
+        }
+        return [];
+      } finally {
+        inFlight -= 1;
+      }
+    });
+    const worker = startGatewayWorker({
+      store,
+      adapter: makeAdapter() as unknown as BrokerAdapter,
+      workerId: "worker-wait",
+      log: vi.fn(),
+      warn: vi.fn(),
+      now,
+      pollMs: 50,
+      idlePollMs: 50,
+      longPollMs: 200,
+      watchListMs: 250,
+    });
+    try {
+      await vi.waitFor(() => expect(mostInFlight).toBe(2), { timeout: 3_000 });
+      expect(store.claim).not.toHaveBeenCalled();
+    } finally {
+      await worker.stop();
+    }
+  });
+
+  test("a command written while a wait is running is taken at once - not on the next poll", async () => {
+    const store = waitingStore();
+    store.claimWait.mockImplementation(async (_worker, limit, waitMs) => {
+      const until = Date.now() + waitMs;
+      while (Date.now() < until) {
+        if (store.queue.length > 0) return store.queue.splice(0, limit);
+        await settle(2);
+      }
+      return [];
+    });
+    const worker = startGatewayWorker({
+      store,
+      adapter: makeAdapter() as unknown as BrokerAdapter,
+      workerId: "worker-wait",
+      log: vi.fn(),
+      warn: vi.fn(),
+      now,
+      // a worker that only polled would look every 2 s
+      pollMs: 2_000,
+      idlePollMs: 2_000,
+      longPollMs: 400,
+      watchListMs: 250,
+    });
+    try {
+      await settle(60);
+      const writtenAt = Date.now();
+      store.queue.push(command());
+      await vi.waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1), { timeout: 1_500 });
+      expect(Date.now() - writtenAt).toBeLessThan(600);
+    } finally {
+      await worker.stop();
+    }
+  });
+
+  test("a wait that comes back empty far too soon is not repeated in a tight loop", async () => {
+    const store = waitingStore();
+    store.claimWait.mockResolvedValue([]); // answers at once, as a database without the wait would
+    const worker = startGatewayWorker({
+      store,
+      adapter: makeAdapter() as unknown as BrokerAdapter,
+      workerId: "worker-wait",
+      log: vi.fn(),
+      warn: vi.fn(),
+      now,
+      pollMs: 100,
+      idlePollMs: 100,
+      longPollMs: 1_000,
+      watchListMs: 250,
+    });
+    try {
+      await settle(450);
+    } finally {
+      await worker.stop();
+    }
+
+    // two loops, each at most once per idle poll: a handful of calls, not thousands
+    expect(store.claimWait.mock.calls.length).toBeLessThan(20);
+  });
+});
+
+describe("what the heartbeat tells about the worker", () => {
+  test("whether it waits inside the database", async () => {
+    const waiting = waitingRig();
+    await waiting.worker.heartbeatOnce();
+    expect(waiting.store.heartbeat.mock.calls[0][2]).toMatchObject({ longPoll: true });
+
+    const polling = rig();
+    await polling.worker.heartbeatOnce();
+    expect(polling.store.heartbeat.mock.calls[0][2]).toMatchObject({ longPoll: false });
+  });
+
+  test("after the migration is found missing it says it polls", async () => {
+    const { store, worker } = waitingRig();
+    store.claimWait.mockRejectedValue(new LongPollUnavailableError("migration 062 is not applied"));
+    await worker.pollCommandsOnce();
+
+    await worker.heartbeatOnce();
+
+    expect(store.heartbeat.mock.calls[0][2]).toMatchObject({ longPoll: false });
+  });
+
+  test("the round trip to the database, as the worker measured it on its own writes, from the second beat on", async () => {
+    const { store, worker } = rig();
+    store.heartbeat.mockImplementation(async () => {
+      await settle(8);
+    });
+
+    await worker.heartbeatOnce();
+    await worker.heartbeatOnce();
+
+    const first = store.heartbeat.mock.calls[0][2] as Record<string, unknown>;
+    const second = store.heartbeat.mock.calls[1][2] as Record<string, unknown>;
+    expect(first).not.toHaveProperty("dbRttMs");
+    expect(typeof second.dbRttMs).toBe("number");
+    expect(second.dbRttMs as number).toBeGreaterThanOrEqual(5);
+    expect(second.dbRttMs as number).toBeLessThan(500);
+  });
+
+  test("the middle of the recent round trips: one slow write does not move it", async () => {
+    const { store, worker } = rig();
+    const pauses = [6, 6, 400, 6, 6];
+    store.heartbeat.mockImplementation(async () => {
+      await settle(pauses.shift() ?? 6);
+    });
+
+    for (let beat = 0; beat < 6; beat += 1) await worker.heartbeatOnce();
+
+    // (an average of those five writes would be above 80 ms)
+    const last = store.heartbeat.mock.calls[5][2] as Record<string, unknown>;
+    expect(last.dbRttMs as number).toBeLessThan(40);
+  });
+
+  test("how late its event loop ran, once it is running", async () => {
+    const store = makeStore();
+    const worker = startGatewayWorker({
+      store,
+      adapter: makeAdapter() as unknown as BrokerAdapter,
+      workerId: "worker-lag",
+      log: vi.fn(),
+      warn: vi.fn(),
+      now,
+      pollMs: 50,
+      idlePollMs: 50,
+    });
+    try {
+      await settle(80);
+      await worker.heartbeatOnce();
+      const calls = store.heartbeat.mock.calls;
+      const info = calls[calls.length - 1][2] as Record<string, unknown>;
+      expect(typeof info.loopLagMs).toBe("number");
+      expect(info.loopLagMs as number).toBeGreaterThanOrEqual(0);
+    } finally {
+      await worker.stop();
+    }
+  });
+
+  test("a worker that is not running reports no lag (there is nothing to measure)", async () => {
+    const { store, worker } = rig();
+
+    await worker.heartbeatOnce();
+
+    expect(store.heartbeat.mock.calls[0][2]).not.toHaveProperty("loopLagMs");
   });
 });
 

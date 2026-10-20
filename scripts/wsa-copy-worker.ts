@@ -1000,6 +1000,10 @@ async function main() {
       pollMs: intFromEnv("WSA_TRADE_GATEWAY_POLL_MS", 100, 50, 5_000),
       // a command that arrives while the loop is idle waits at most this long before it is claimed
       idlePollMs: intFromEnv("WSA_TRADE_GATEWAY_IDLE_POLL_MS", 400, 100, 10_000),
+      // Migration 062: the claim WAITS inside the database for a command and returns the moment one is written
+      // (two such calls run half a window apart, so there is no gap). 0 = poll as before; without 062 the worker
+      // notices the missing function and polls by itself.
+      longPollMs: intFromEnv("WSA_TRADE_GATEWAY_LONG_POLL_MS", 1_000, 0, 2_000),
       stateRefreshMs: intFromEnv("WSA_TRADE_GATEWAY_STATE_MS", 1_000, 250, 10_000),
       // in the seconds after an order the picture of that account is renewed this often
       hotRefreshMs: intFromEnv("WSA_TRADE_GATEWAY_HOT_STATE_MS", 350, 150, 5_000),

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
-import { AuthError, requireTrader } from "@/lib/auth/session";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { AuthError, requireTrader, type SessionUser } from "@/lib/auth/session";
 import { BROKER_EXEC_ERROR, BrokerExecutionError } from "@/lib/broker/BrokerAdapter";
 import { createBrokerAdapter } from "@/lib/broker/provider";
 import { resetGatewayState } from "@/lib/gateway/gatewayDb";
@@ -20,7 +20,7 @@ import { GET as warmModify } from "@/app/api/terminal/trade/modify/route";
 import { GET as warmClose } from "@/app/api/terminal/trade/close/route";
 import { GET as warmCancel } from "@/app/api/terminal/trade/cancel/route";
 import { GET as warmCloseBulk } from "@/app/api/terminal/trade/close-bulk/route";
-import { resetWebTradeCaches } from "@/lib/services/webTradeService";
+import { resetWebTradeCaches, warmWebTradeGates } from "@/lib/services/webTradeService";
 import { WEB_TRADE_COMMENT } from "@/lib/trade/webTrade";
 import { sharedDb as db } from "./helpers/memoryDb";
 import {
@@ -1219,7 +1219,7 @@ describe("waking the order routes up", () => {
     vi.mocked(requireTrader).mockRejectedValue(new AuthError("UNAUTHORIZED", "Not authenticated", 401));
 
     for (const warm of [warmOpen, warmModify, warmClose, warmCancel, warmCloseBulk]) {
-      const response = warm();
+      const response = await warm();
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toContain("no-store");
       expect(await readJson(response)).toEqual({ ok: true, data: { warm: true } });
@@ -1228,5 +1228,277 @@ describe("waking the order routes up", () => {
     expect(requireTrader).not.toHaveBeenCalled();
     expect(db.calls).toHaveLength(0);
     expect(adapter.openTrade).not.toHaveBeenCalled();
+  });
+
+  test("a GET that names an account also reads what an order on it checks - once - so the order finds it in memory", async () => {
+    vi.mocked(requireTrader).mockClear();
+
+    const response = await warmOpen(getRequest("open", { accountId: ACCOUNT }));
+
+    expect(await readJson(response)).toEqual({ ok: true, data: { warm: true } });
+    // it signed in the cheap way, and looked at the account, its risk verdict and the subscription
+    expect(requireTrader).toHaveBeenCalledWith({ cached: true });
+    expect(db.callsTo("trading_accounts")).toHaveLength(1);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(1);
+    expect(getPlatformSubscriptionAccess).toHaveBeenCalledTimes(1);
+
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+
+    expect(db.callsTo("trading_accounts")).toHaveLength(1);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(1);
+    expect(getPlatformSubscriptionAccess).toHaveBeenCalledTimes(1);
+    expect(adapter.openTrade).toHaveBeenCalledTimes(1);
+  });
+
+  test("the warm-up never says more than { warm: true }: not for an account that is not the caller's, not when signed out", async () => {
+    const foreign = await warmOpen(getRequest("open", { accountId: FOREIGN_ACCOUNT }));
+    expect(await readJson(foreign)).toEqual({ ok: true, data: { warm: true } });
+    // the foreign account was looked up for the caller and found nothing: nothing is kept, no risk verdict was read
+    expect(getRiskEnforcementState).not.toHaveBeenCalled();
+
+    vi.mocked(requireTrader).mockRejectedValue(new AuthError("UNAUTHORIZED", "Not authenticated", 401));
+    db.reset();
+    const signedOut = await warmOpen(getRequest("open", { accountId: ACCOUNT }));
+    expect(signedOut.status).toBe(200);
+    expect(await readJson(signedOut)).toEqual({ ok: true, data: { warm: true } });
+    expect(db.calls).toHaveLength(0);
+  });
+
+  test("an id that is not an account id is ignored: the route is only woken up", async () => {
+    vi.mocked(requireTrader).mockClear();
+
+    const response = await warmOpen(getRequest("open", { accountId: "not-an-id" }));
+
+    expect(await readJson(response)).toEqual({ ok: true, data: { warm: true } });
+    expect(requireTrader).not.toHaveBeenCalled();
+    expect(db.calls).toHaveLength(0);
+  });
+});
+
+describe("what an order keeps in memory for a few seconds", () => {
+  const START = new Date("2026-10-20T10:00:00.000Z");
+  /** Only the clock is faked: the routes and the in-memory database run as usual. */
+  const clockAt = (offsetMs = 0) => vi.useFakeTimers({ toFake: ["Date"], now: new Date(START.getTime() + offsetMs) });
+  const later = (ms: number) => vi.setSystemTime(Date.now() + ms);
+  const BLOCK = {
+    accountId: ACCOUNT,
+    blockedNewTrades: true,
+    restricted: true,
+    breachedRules: [{ name: "Max drawdown" }],
+    source: "RISK_WORKER",
+    lastEvaluatedAt: "2026-10-20T09:59:58.000Z",
+  };
+  const trader = () =>
+    ({ id: USER, email: "trader@example.com", name: "Test Trader", role: "TRADER", status: "ACTIVE" }) as SessionUser;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  test("every poll and every order signs in the cheap way (a verified sign-in is reused for a few seconds)", async () => {
+    vi.mocked(requireTrader).mockClear();
+
+    await listAccounts();
+    await readState(stateRequest({ accountId: ACCOUNT }));
+    await readSymbols(getRequest("symbols", { accountId: ACCOUNT }));
+    await openOrder(post(openBody()));
+    await modifyPosition(post({ accountId: ACCOUNT, ticket: "5001", takeProfit: 2420 }));
+    await closePosition(post({ accountId: ACCOUNT, ticket: "5001" }));
+    await cancelOrder(post({ accountId: ACCOUNT, ticket: "6001" }));
+    await closeBulk(post({ accountId: ACCOUNT, scope: "ALL" }));
+
+    const calls = vi.mocked(requireTrader).mock.calls;
+    expect(calls).toHaveLength(8);
+    for (const call of calls) expect(call[0]).toEqual({ cached: true });
+  });
+
+  test("a connected account is read once for a series of orders and polls - and again after fifteen seconds", async () => {
+    clockAt();
+
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect((await closePosition(post({ accountId: ACCOUNT, ticket: "5001" }))).status).toBe(200);
+    expect((await readState(stateRequest({ accountId: ACCOUNT }))).status).toBe(200);
+    expect(db.callsTo("trading_accounts")).toHaveLength(1);
+
+    later(14_000);
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect(db.callsTo("trading_accounts")).toHaveLength(1);
+
+    later(2_000);
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect(db.callsTo("trading_accounts")).toHaveLength(2);
+    // (always for the signed-in person: the owner is part of every read)
+    for (const read of db.callsTo("trading_accounts")) expect(read.filters).toContainEqual({ op: "eq", column: "user_id", value: USER });
+  });
+
+  test("listing the accounts is enough for the first order to find its account in memory", async () => {
+    await listAccounts();
+    expect(db.callsTo("trading_accounts")).toHaveLength(1);
+
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+
+    expect(db.callsTo("trading_accounts")).toHaveLength(1);
+  });
+
+  test("an account that is not valid is never kept: reconnecting it is seen by the very next order", async () => {
+    clockAt();
+    db.tables.trading_accounts = [accountRow(ACCOUNT, USER, { status: "DISCONNECTED" })];
+    expect((await openOrder(post(openBody()))).status).toBe(409);
+    expect((await openOrder(post(openBody()))).status).toBe(409);
+    expect(db.callsTo("trading_accounts")).toHaveLength(2);
+
+    db.tables.trading_accounts = [accountRow(ACCOUNT, USER)];
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect(db.callsTo("trading_accounts")).toHaveLength(3);
+
+    db.tables.trading_accounts = [];
+    later(16_000);
+    expect((await openOrder(post(openBody()))).status).toBe(404);
+  });
+
+  test("what is kept belongs to the person who was signed in: nobody else gets an account out of memory", async () => {
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+
+    signIn({ id: freshUserId() });
+    const response = await openOrder(post(openBody()));
+
+    expect(response.status).toBe(404);
+    expect((await readJson(response)).error?.code).toBe("ACCOUNT_NOT_FOUND");
+    expect(adapter.openTrade).toHaveBeenCalledTimes(1);
+  });
+
+  test("a risk verdict that lets orders through is kept for four seconds, then read again", async () => {
+    clockAt();
+
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    later(3_900);
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(1);
+
+    later(200);
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(2);
+  });
+
+  test("a risk block is never kept: it is refused every time, and lifted at the very next order", async () => {
+    vi.mocked(getRiskEnforcementState).mockResolvedValue(BLOCK as never);
+
+    expect((await openOrder(post(openBody()))).status).toBe(423);
+    expect((await openOrder(post(openBody()))).status).toBe(423);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(2);
+
+    vi.mocked(getRiskEnforcementState).mockResolvedValue(null);
+    expect((await openOrder(post(openBody()))).status).toBe(200);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(3);
+    expect(adapter.openTrade).toHaveBeenCalledTimes(1);
+  });
+
+  test("reducing risk never asks about risk at all", async () => {
+    vi.mocked(getRiskEnforcementState).mockResolvedValue(BLOCK as never);
+
+    expect((await closePosition(post({ accountId: ACCOUNT, ticket: "5001" }))).status).toBe(200);
+    expect((await modifyPosition(post({ accountId: ACCOUNT, ticket: "5001", takeProfit: 2420 }))).status).toBe(200);
+
+    expect(getRiskEnforcementState).not.toHaveBeenCalled();
+  });
+
+  test("a poll every second reads the account once and the risk verdict every four seconds", async () => {
+    clockAt();
+
+    for (let poll = 0; poll < 5; poll += 1) {
+      expect((await readState(stateRequest({ accountId: ACCOUNT }))).status).toBe(200);
+      later(1_000);
+    }
+
+    expect(db.callsTo("trading_accounts")).toHaveLength(1);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(2);
+  });
+
+  test("a poll still shows a risk block as soon as it is read (and an order is refused with it)", async () => {
+    vi.mocked(getRiskEnforcementState).mockResolvedValue(BLOCK as never);
+
+    const state = (await readJson(await readState(stateRequest({ accountId: ACCOUNT })))).data;
+
+    expect(state.riskBlocked).toBe(true);
+    expect(state.riskMessage).toContain("Max drawdown");
+  });
+
+  describe("the upkeep that keeps all of it young", () => {
+    test("renews a copy that is about half old and leaves a young one alone", async () => {
+      clockAt();
+      vi.mocked(hasActivePlatformProductSubscription).mockResolvedValue(true);
+      const reads = () => ({
+        accounts: db.callsTo("trading_accounts").length,
+        risk: vi.mocked(getRiskEnforcementState).mock.calls.length,
+        subscription: vi.mocked(hasActivePlatformProductSubscription).mock.calls.length,
+      });
+
+      await warmWebTradeGates(trader(), ACCOUNT, true);
+      expect(reads()).toEqual({ accounts: 1, risk: 1, subscription: 1 });
+
+      later(1_000);
+      await warmWebTradeGates(trader(), ACCOUNT, false);
+      expect(reads()).toEqual({ accounts: 1, risk: 1, subscription: 1 });
+
+      // account (7 s) and risk verdict (2 s) are old enough, the subscription (15 s) is not
+      later(7_000);
+      await warmWebTradeGates(trader(), ACCOUNT, false);
+      expect(reads()).toEqual({ accounts: 2, risk: 2, subscription: 1 });
+
+      later(8_000);
+      await warmWebTradeGates(trader(), ACCOUNT, false);
+      expect(reads()).toEqual({ accounts: 3, risk: 3, subscription: 2 });
+    });
+
+    test("an order that follows finds everything in memory", async () => {
+      clockAt();
+      vi.mocked(hasActivePlatformProductSubscription).mockResolvedValue(true);
+      await warmWebTradeGates(trader(), ACCOUNT, true);
+
+      later(1_500);
+      expect((await openOrder(post(openBody()))).status).toBe(200);
+
+      expect(db.callsTo("trading_accounts")).toHaveLength(1);
+      expect(getRiskEnforcementState).toHaveBeenCalledTimes(1);
+      expect(hasActivePlatformProductSubscription).toHaveBeenCalledTimes(1);
+    });
+
+    test("a poll alone never checks the subscription of somebody who was not seen to have one", async () => {
+      await warmWebTradeGates(trader(), ACCOUNT, false);
+
+      expect(hasActivePlatformProductSubscription).not.toHaveBeenCalled();
+      expect(getPlatformSubscriptionAccess).not.toHaveBeenCalled();
+      expect(db.callsTo("trading_accounts")).toHaveLength(1);
+    });
+
+    test("it never throws and never refuses anything, whatever fails", async () => {
+      db.errors.trading_accounts = { code: "XX000", message: "database down" };
+      vi.mocked(hasActivePlatformProductSubscription).mockRejectedValue(new Error("billing down"));
+      vi.mocked(getPlatformSubscriptionAccess).mockRejectedValue(new Error("billing down"));
+
+      await expect(warmWebTradeGates(trader(), ACCOUNT, true)).resolves.toBeUndefined();
+      expect(getRiskEnforcementState).not.toHaveBeenCalled();
+    });
+
+    test("an account that is not the person's costs a lookup and keeps nothing", async () => {
+      await warmWebTradeGates(trader(), FOREIGN_ACCOUNT, true);
+
+      expect(getRiskEnforcementState).not.toHaveBeenCalled();
+      expect((await openOrder(post(openBody({ accountId: FOREIGN_ACCOUNT })))).status).toBe(404);
+    });
+
+    test("a partner is not warmed at all", async () => {
+      await warmWebTradeGates({ ...trader(), role: "PARTNER" }, ACCOUNT, true);
+
+      expect(db.calls).toHaveLength(0);
+      expect(getRiskEnforcementState).not.toHaveBeenCalled();
+    });
+
+    test("an administrator needs no subscription: nothing is asked of billing", async () => {
+      await warmWebTradeGates({ ...trader(), role: "ADMIN" }, ACCOUNT, true);
+
+      expect(hasActivePlatformProductSubscription).not.toHaveBeenCalled();
+      expect(getPlatformSubscriptionAccess).not.toHaveBeenCalled();
+    });
   });
 });

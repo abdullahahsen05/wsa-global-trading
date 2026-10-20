@@ -258,7 +258,8 @@ export function WsaTradePanel({
   const reading = active && workspaceLoaded;
   const stateQuery = useWebTradeState(accountId, symbol, reading);
   const symbolsQuery = useWebTradeSymbols(accountId, reading);
-  useWarmWebTradeRoutes(reading);
+  // (a hand on the panel renews what an order checks, so the click itself only has to write the command)
+  const warmNow = useWarmWebTradeRoutes(reading, accountId);
   // what the trading system has confirmed since the last picture (shown at once, dropped after a few seconds)
   const [changes, setChanges] = useState<StateChange[]>([]);
   // while another account's answer is still on screen it must not be shown as this account's
@@ -707,6 +708,10 @@ export function WsaTradePanel({
       aria-label="WSA Trade"
       className="section-surface flex flex-col overflow-hidden"
       style={{ height }}
+      onPointerMove={warmNow}
+      onPointerDownCapture={warmNow}
+      onFocusCapture={warmNow}
+      onKeyDownCapture={warmNow}
     >
       {/* the title bar keeps its size whatever the zoom, so the zoom buttons are always in reach */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-line px-3 py-2">

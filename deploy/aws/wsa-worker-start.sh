@@ -45,7 +45,6 @@ fi
 export BROKER_EXECUTION_ENABLED=true
 export WSA_COPY_ENGINE_ENABLED=true
 export WSA_COPY_POLL_MS="${WSA_COPY_POLL_MS:-100}"
-export WSA_COPY_TIMING_LOGS="${WSA_COPY_TIMING_LOGS:-true}"
 export WSA_RISK_ENGINE_ENABLED=true
 export WSA_RISK_RECONCILE_MS="${WSA_RISK_RECONCILE_MS:-5000}"
 export WSA_RISK_SNAPSHOT_MS=30000
@@ -59,6 +58,10 @@ export WSA_TRADE_GATEWAY_ENABLED="${WSA_TRADE_GATEWAY_ENABLED:-true}"
 export WSA_TRADE_GATEWAY_POLL_MS="${WSA_TRADE_GATEWAY_POLL_MS:-100}"
 # A command that arrives while the loop is idle waits at most this long before it is claimed (was 750).
 export WSA_TRADE_GATEWAY_IDLE_POLL_MS="${WSA_TRADE_GATEWAY_IDLE_POLL_MS:-400}"
+# Migration 062 (optional, apply it in Supabase first): the claim waits INSIDE the database for a command and
+# returns the moment one is written, so an order is picked up in one round trip instead of after a poll gap.
+# Two such calls run half a window apart. 0 = poll as before (also what happens by itself when 062 is missing).
+export WSA_TRADE_GATEWAY_LONG_POLL_MS="${WSA_TRADE_GATEWAY_LONG_POLL_MS:-1000}"
 # In the seconds after an order the live picture of that account is renewed this often, so the
 # result shows up in the web panel almost at once.
 export WSA_TRADE_GATEWAY_HOT_STATE_MS="${WSA_TRADE_GATEWAY_HOT_STATE_MS:-350}"

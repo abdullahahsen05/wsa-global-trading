@@ -70,6 +70,60 @@ describe("the time report of an order", () => {
     );
   });
 
+  describe("what the web server and the AWS worker add (sign-in, checks, database trips, wake-up)", () => {
+    const whole = { queueMs: 60, runMs: 330, serverMs: 520, waitMs: 430, totalMs: 640 };
+    const plain = "640 ms in total: network 120 ms · server 90 ms";
+    const tail = " · queue 60 ms · broker 330 ms · relay 40 ms";
+
+    test("the server's own part says what it was spent on - and a held sign-in that cost nothing is still a measurement", () => {
+      expect(timingText({ ...whole, signInMs: 40, checksMs: 12 })).toBe(`${plain} (sign-in 40 ms · checks 12 ms)${tail}`);
+      expect(timingText({ ...whole, checksMs: 3 })).toBe(`${plain} (checks 3 ms)${tail}`);
+      expect(timingText({ ...whole, signInMs: 0, checksMs: 0 })).toBe(`${plain} (sign-in 0 ms · checks 0 ms)${tail}`);
+    });
+
+    test("a report without any of it reads exactly as before", () => {
+      expect(timingText(whole)).toBe(`${plain}${tail}`);
+      expect(timingText({ ...whole, signInMs: -5, checksMs: Number.NaN })).toBe(`${plain}${tail}`);
+    });
+
+    test("the distance to the database is told for both sides - the floor under 'queue' and 'relay'", () => {
+      expect(timingText({ ...whole, insertMs: 96, awsDbMs: 14 })).toBe(`${plain}${tail} Database round trip: web 96 ms · AWS 14 ms.`);
+      expect(timingText({ ...whole, insertMs: 96 })).toBe(`${plain}${tail} Database round trip: web 96 ms.`);
+      expect(timingText({ ...whole, awsDbMs: 14 })).toBe(`${plain}${tail} Database round trip: AWS 14 ms.`);
+    });
+
+    test("a busy AWS worker is named only when its loop really ran late", () => {
+      expect(timingText({ ...whole, awsLoopMs: 3 })).toBe(`${plain}${tail}`);
+      expect(timingText({ ...whole, awsLoopMs: 19 })).toBe(`${plain}${tail}`);
+      expect(timingText({ ...whole, awsLoopMs: 20 })).toBe(`${plain}${tail} The AWS worker is busy: its loop ran 20 ms late.`);
+      expect(timingText({ ...whole, awsLoopMs: 450 })).toBe(`${plain}${tail} The AWS worker is busy: its loop ran 450 ms late.`);
+    });
+
+    test("how the command and its answer found each other: live, or which side still asks again and again", () => {
+      expect(timingText({ ...whole, wake: "live" })).toBe(`${plain}${tail} Wake-up: live.`);
+      expect(timingText({ ...whole, wake: "web-poll" })).toBe(
+        `${plain}${tail} Wake-up: the web server still asks the database again and again - apply migration 062.`,
+      );
+      expect(timingText({ ...whole, wake: "aws-poll" })).toBe(
+        `${plain}${tail} Wake-up: the AWS worker still asks the database again and again - apply migration 062 and update the worker.`,
+      );
+    });
+
+    test("everything together, in the order it is read", () => {
+      expect(
+        timingText({ ...whole, signInMs: 40, checksMs: 12, insertMs: 96, awsDbMs: 14, awsLoopMs: 80, wake: "live" }),
+      ).toBe(
+        `${plain} (sign-in 40 ms · checks 12 ms)${tail} Database round trip: web 96 ms · AWS 14 ms. The AWS worker is busy: its loop ran 80 ms late. Wake-up: live.`,
+      );
+    });
+
+    test("the short form (no web server part) carries none of it", () => {
+      expect(timingText({ queueMs: 60, runMs: 330, insertMs: 96, awsDbMs: 14, wake: "live", signInMs: 40 })).toBe(
+        "390 ms (queue 60 ms · broker 330 ms)",
+      );
+    });
+  });
+
   test("without the web server's part the short form is used, even when the browser measured the total", () => {
     expect(timingText({ queueMs: 60, runMs: 330, totalMs: 640 })).toBe("390 ms (queue 60 ms · broker 330 ms)");
   });

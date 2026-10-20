@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { requireTrader } from "@/lib/auth/session";
 import { BROKER_EXEC_ERROR, BrokerExecutionError, type BrokerAdapter } from "@/lib/broker/BrokerAdapter";
 import { createBrokerAdapter } from "@/lib/broker/provider";
-import { resetGatewayState } from "@/lib/gateway/gatewayDb";
+import { longPollKnownOff, resetGatewayState } from "@/lib/gateway/gatewayDb";
 import { resetGatewayAvailability } from "@/lib/gateway/gatewayQueue";
 import { createSupabaseGatewayStore } from "@/lib/gateway/gatewayStore";
 import { GatewayWorker } from "@/lib/gateway/gatewayWorker";
@@ -788,5 +788,166 @@ describe("the symbols of the account", () => {
 
     expect(response.status).toBe(404);
     expect(commands()).toHaveLength(0);
+  });
+});
+
+describe("waiting for the answer inside the database (migration 062)", () => {
+  /** The database side of 062 for one command. The in-memory database cannot wait: it answers with what is there. */
+  function installLongPoll() {
+    const asked: Array<{ args: Record<string, unknown>; writtenBefore: number }> = [];
+    db.rpcHandlers.await_trade_command = (args) => {
+      asked.push({ args, writtenBefore: db.callsTo("trade_commands", "insert").length });
+      const row = commands().find(
+        (candidate) => candidate.user_id === args.p_user_id && candidate.client_request_id === args.p_client_request_id,
+      );
+      return { data: row ? [{ ...row }] : [], error: null };
+    };
+    return asked;
+  }
+
+  /** A worker that waits for commands inside the database and reports what it measures. */
+  function beatLive(info: Record<string, unknown> = {}) {
+    db.tables.gateway_heartbeat = [
+      {
+        worker: "w1",
+        role: "trade-gateway",
+        updated_at: new Date().toISOString(),
+        info: { executionAvailable: true, longPoll: true, dbRttMs: 12.4, loopLagMs: 3, ...info },
+      },
+    ];
+    resetGatewayAvailability();
+  }
+
+  test("the wait starts together with the write and finds the command by user and request id", async () => {
+    const asked = installLongPoll();
+    beatLive();
+    const body = openBody();
+
+    const response = await withWorker(openOrder(post(body)));
+
+    expect(response.status).toBe(200);
+    expect((await readJson(response)).data).toMatchObject({ ok: true, ticket: "9001" });
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked[0].args).toMatchObject({ p_user_id: USER, p_client_request_id: body.clientRequestId });
+    // the first look was asked before the command was even written - the wait does not wait for the write
+    expect(asked[0].writtenBefore).toBe(0);
+    expect(commands()).toHaveLength(1);
+    expect(commands()[0]).toMatchObject({ status: "DONE" });
+  });
+
+  test("nothing looks the command up again and again, and the report says the wake-up was live", async () => {
+    installLongPoll();
+    beatLive();
+
+    const response = await withWorker(openOrder(post(openBody())));
+    const timing = (await readJson(response)).data.timing;
+
+    expect(timing).toMatchObject({
+      wake: "live",
+      awsDbMs: 12,
+      awsLoopMs: 3,
+      insertMs: expect.any(Number),
+      checksMs: expect.any(Number),
+      signInMs: expect.any(Number),
+    });
+    expect(db.callsTo("trade_commands", "select")).toHaveLength(0);
+  });
+
+  test("without 062 the web server asks again and again as before - and once it knows, it does not try the wait again", async () => {
+    let attempts = 0;
+    db.rpcHandlers.await_trade_command = () => {
+      attempts += 1;
+      return {
+        data: null,
+        error: { code: "PGRST202", message: "Could not find the function public.await_trade_command(p_client_request_id) in the schema cache" },
+      };
+    };
+    beatLive();
+
+    const first = (await readJson(await withWorker(openOrder(post(openBody()))))).data;
+    const second = (await readJson(await withWorker(openOrder(post(openBody()))))).data;
+
+    expect(first).toMatchObject({ ok: true, ticket: "9001", timing: { wake: "web-poll" } });
+    expect(second).toMatchObject({ ok: true, ticket: "9001", timing: { wake: "web-poll" } });
+    expect(attempts).toBe(1);
+    expect(longPollKnownOff()).toBe(true);
+  });
+
+  test("a wait the database refuses (a time-out) falls back to asking again at once - the order is not lost", async () => {
+    let attempts = 0;
+    db.rpcHandlers.await_trade_command = () => {
+      attempts += 1;
+      return { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } };
+    };
+    beatLive();
+
+    const first = (await readJson(await withWorker(openOrder(post(openBody()))))).data;
+    const second = (await readJson(await withWorker(openOrder(post(openBody()))))).data;
+
+    expect(first).toMatchObject({ ok: true, ticket: "9001", timing: { wake: "web-poll" } });
+    expect(second).toMatchObject({ ok: true, ticket: "9001", timing: { wake: "web-poll" } });
+    expect(attempts).toBe(1); // twenty seconds of plain asking before the wait is tried again
+    expect(workerAdapter.openTrade).toHaveBeenCalledTimes(2);
+  });
+
+  test("a worker that still polls the database for commands is named in the report - the order goes through all the same", async () => {
+    installLongPoll();
+    beatLive({ longPoll: false });
+    const flagged = (await readJson(await withWorker(openOrder(post(openBody()))))).data;
+
+    // an older worker does not say anything about it: it counts as polling
+    beatLive({ longPoll: undefined });
+    const silent = (await readJson(await withWorker(openOrder(post(openBody()))))).data;
+
+    expect(flagged).toMatchObject({ ok: true, ticket: "9001", timing: { wake: "aws-poll" } });
+    expect(silent).toMatchObject({ ok: true, ticket: "9001", timing: { wake: "aws-poll" } });
+  });
+
+  test("a refusal of the broker arrives through the wait like any answer - nothing is audited", async () => {
+    useWorkerAdapter({
+      openTrade: vi.fn(async () => {
+        throw new BrokerExecutionError("PROVIDER_ERROR", "Invalid stops", 502);
+      }),
+    });
+    installLongPoll();
+    beatLive();
+
+    const response = await withWorker(openOrder(post(openBody())));
+
+    expect(response.status).toBe(502);
+    expect((await readJson(response)).error).toEqual({ code: "PROVIDER_ERROR", message: "Invalid stops" });
+    expect(commands()[0]).toMatchObject({ status: "FAILED", error_code: "PROVIDER_ERROR" });
+    expect(writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  test("the same request id sent again is the same command: the wait finds the answer that is already there", async () => {
+    installLongPoll();
+    beatLive();
+    const body = openBody();
+
+    await withWorker(openOrder(post(body)));
+    const second = await readJson(await openOrder(post(body)));
+
+    expect(second.data).toMatchObject({ ok: true, ticket: "9001", repeated: true });
+    expect(workerAdapter.openTrade).toHaveBeenCalledTimes(1);
+    expect(commands()).toHaveLength(1);
+  });
+
+  test("an order nobody picks up is still cancelled and never sent later", async () => {
+    freezeClock();
+    installLongPoll();
+    beatLive();
+
+    const pending = openOrder(post(openBody()));
+    await vi.advanceTimersByTimeAsync(25_000);
+    const response = await pending;
+
+    expect(response.status).toBe(504);
+    expect((await readJson(response)).error?.code).toBe("GATEWAY_TIMEOUT");
+    expect(commands()[0]).toMatchObject({ status: "EXPIRED", error_code: "NOT_SENT" });
+
+    await worker.pollCommandsOnce();
+    await worker.idle();
+    expect(workerAdapter.openTrade).not.toHaveBeenCalled();
   });
 });

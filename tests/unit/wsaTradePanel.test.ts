@@ -1942,8 +1942,9 @@ describe("WsaTradePanel - closing several at once", () => {
     expect(orders()[0].body).toMatchObject({ accountId: A1, scope: "PENDING", symbol: null });
     resultNotice(view.container, "1 pending order deleted.");
     expectNoConfirmation(view.container);
-    // the mocked answer says one was deleted but names no failure: both leave the list at once
-    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (0)");
+    // Only one of two deletions is confirmed and the answer does not identify which.
+    // Keep the old list until the next broker snapshot rather than hiding an unconfirmed order.
+    expect(bookTab(view.container, "Pending").textContent).toContain("Pending (2)");
   });
 
   test("positions that could not be closed are named, and the rest is still reported", async () => {
@@ -2440,6 +2441,10 @@ describe("WsaTradePanel - what the lists show at once", () => {
 
 describe("WsaTradePanel - routes kept warm", () => {
   const warmCalls = () => calls.filter((call) => call.method === "GET" && /\/api\/terminal\/trade\/(open|modify|close|cancel|close-bulk)$/.test(call.url));
+  /** The wake-ups that carry the account: the route reads - as the signed-in person - what an order on it checks. */
+  const accountWarmCalls = () =>
+    calls.filter((call) => call.method === "GET" && /\/api\/terminal\/trade\/(open|modify|close|cancel|close-bulk)\?accountId=/.test(call.url));
+  const routeOf = (call: { url: string }) => call.url.split("?")[0].split("/").pop();
 
   test("the five order routes are woken up once when the panel opens", async () => {
     await mountPanel();
@@ -2451,6 +2456,88 @@ describe("WsaTradePanel - routes kept warm", () => {
     await mountPanel({ active: false });
 
     expect(warmCalls()).toHaveLength(0);
+    expect(accountWarmCalls()).toHaveLength(0);
+  });
+
+  test("once the account is known the routes also read what an order on it checks", async () => {
+    await mountPanel();
+
+    expect(accountWarmCalls().map((call) => call.url).sort()).toEqual(
+      ["cancel", "close", "close-bulk", "modify", "open"].map((route) => `/api/terminal/trade/${route}?accountId=${A1}`).sort(),
+    );
+  });
+
+  test("another account is warmed for itself", async () => {
+    installFetch({ accounts: accountsResponse([tradeAccount(A1, "Alpha"), tradeAccount(A2, "Beta")]) });
+    const view = await mountPanel();
+    expect(accountWarmCalls().every((call) => call.url.endsWith(`accountId=${A1}`))).toBe(true);
+
+    setValue(view.container.querySelector("select"), A2);
+    await settle(6);
+
+    expect(accountWarmCalls().filter((call) => call.url.endsWith(`accountId=${A2}`)).map(routeOf).sort()).toEqual([
+      "cancel",
+      "close",
+      "close-bulk",
+      "modify",
+      "open",
+    ]);
+  });
+
+  test("a hand reaching for the panel renews the three routes that run orders - at most once every eight seconds", async () => {
+    let clock = 1_000_000;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    try {
+      const view = await mountPanel();
+      const panel = view.container.querySelector("section[aria-label='WSA Trade']");
+      expect(panel).not.toBeNull();
+      const afterOpening = accountWarmCalls().length;
+      expect(afterOpening).toBe(5);
+
+      // the routes were just warmed: a pointer over the panel changes nothing
+      act(() => {
+        panel?.dispatchEvent(new Event("pointermove", { bubbles: true }));
+      });
+      expect(accountWarmCalls()).toHaveLength(afterOpening);
+
+      // eight seconds on, the next hand renews open / close / modify - only those, only for this account
+      clock += 8_100;
+      act(() => {
+        panel?.dispatchEvent(new Event("pointermove", { bubbles: true }));
+      });
+      const renewed = accountWarmCalls().slice(afterOpening);
+      expect(renewed.map(routeOf).sort()).toEqual(["close", "modify", "open"]);
+      expect(renewed.every((call) => call.url.endsWith(`?accountId=${A1}`))).toBe(true);
+
+      // and a key, a focus or a press right after it: nothing more
+      keyDown(panel, "Shift");
+      act(() => {
+        panel?.dispatchEvent(new Event("focusin", { bubbles: true }));
+        panel?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      });
+      expect(accountWarmCalls()).toHaveLength(afterOpening + 3);
+
+      // a key is as good as a pointer once the time has passed
+      clock += 8_100;
+      keyDown(panel, "Shift");
+      expect(accountWarmCalls()).toHaveLength(afterOpening + 6);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  test("with no account to trade with a hand on the panel wakes nothing", async () => {
+    installFetch({ accounts: accountsResponse([]) });
+    const view = await mountPanel({ suggested: null });
+    const before = calls.length;
+    const panel = view.container.querySelector("section[aria-label='WSA Trade']");
+
+    act(() => {
+      panel?.dispatchEvent(new Event("pointermove", { bubbles: true }));
+    });
+
+    expect(accountWarmCalls()).toHaveLength(0);
+    expect(calls).toHaveLength(before);
   });
 });
 

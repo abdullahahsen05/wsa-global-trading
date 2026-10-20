@@ -73,11 +73,46 @@ function brokerText(timing: WebTradeTiming, runMs: number): string {
   return parts.length > 0 ? `${formatDuration(runMs)} (${parts.join(" · ")})` : formatDuration(runMs);
 }
 
+/** " (sign-in 40 ms · checks 12 ms)": what the web server's own time was spent on (empty when it is not reported). */
+function serverDetail(timing: WebTradeTiming): string {
+  const parts: string[] = [];
+  if (isMs(timing.signInMs)) parts.push(`sign-in ${formatDuration(timing.signInMs)}`);
+  if (isMs(timing.checksMs)) parts.push(`checks ${formatDuration(timing.checksMs)}`);
+  return parts.length > 0 ? ` (${parts.join(" · ")})` : "";
+}
+
+/** A busy worker is worth a word from this lag on. */
+const NOTABLE_LOOP_LAG_MS = 20;
+
+/**
+ * The facts behind the parts, as sentences: how far the database is from the web server and from the AWS worker (the
+ * floor of "queue" and "relay"), whether the AWS worker is busy, and how the command and its answer found each other.
+ * Empty when the report carries none of it.
+ */
+function factsText(timing: WebTradeTiming): string {
+  const sentences: string[] = [];
+  const trips: string[] = [];
+  if (isMs(timing.insertMs)) trips.push(`web ${formatDuration(timing.insertMs)}`);
+  if (isMs(timing.awsDbMs)) trips.push(`AWS ${formatDuration(timing.awsDbMs)}`);
+  if (trips.length > 0) sentences.push(`Database round trip: ${trips.join(" · ")}.`);
+  if (isMs(timing.awsLoopMs) && timing.awsLoopMs >= NOTABLE_LOOP_LAG_MS) {
+    sentences.push(`The AWS worker is busy: its loop ran ${formatDuration(timing.awsLoopMs)} late.`);
+  }
+  if (timing.wake === "live") sentences.push("Wake-up: live.");
+  else if (timing.wake === "web-poll") {
+    sentences.push("Wake-up: the web server still asks the database again and again - apply migration 062.");
+  } else if (timing.wake === "aws-poll") {
+    sentences.push("Wake-up: the AWS worker still asks the database again and again - apply migration 062 and update the worker.");
+  }
+  return sentences.length > 0 ? ` ${sentences.join(" ")}` : "";
+}
+
 /**
  * The time report of an order.
  *
  *  - the whole picture (the browser measured the total and the web server reported its part):
- *    "640 ms in total: network 120 ms · server 90 ms · queue 60 ms · broker 330 ms (send 310 ms) · relay 40 ms"
+ *    "640 ms in total: network 120 ms · server 90 ms (sign-in 40 ms · checks 12 ms) · queue 60 ms · broker 330 ms (send 310 ms) · relay 40 ms"
+ *    followed, when the report has them, by the facts behind it: "Database round trip: web 96 ms · AWS 14 ms. Wake-up: live."
  *  - only what the trading system reports: "183 ms (queue 120 ms · broker 63 ms)"
  *  - nothing to report: ""
  */
@@ -90,7 +125,7 @@ export function timingText(timing: WebTradeTiming | null | undefined): string {
     const network = Math.max(0, totalMs - serverMs);
     const server = Math.max(0, serverMs - waitMs);
     const relay = Math.max(0, waitMs - queueMs - runMs);
-    return `${formatDuration(totalMs)} in total: network ${formatDuration(network)} · server ${formatDuration(server)} · queue ${formatDuration(queueMs)} · broker ${broker} · relay ${formatDuration(relay)}`;
+    return `${formatDuration(totalMs)} in total: network ${formatDuration(network)} · server ${formatDuration(server)}${serverDetail(timing)} · queue ${formatDuration(queueMs)} · broker ${broker} · relay ${formatDuration(relay)}${factsText(timing)}`;
   }
   return `${formatDuration(queueMs + runMs)} (queue ${formatDuration(queueMs)} · broker ${broker})`;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   isUncertainTradeCode,
   WEB_TRADE_BURST_MS,
@@ -178,14 +178,23 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
 }
 
 const WARM_EVERY_MS = 4 * 60_000;
+/** A hand on the panel renews what the routes keep for an order (sign-in, account, risk, subscription) at most this often. */
+const WARM_AGAIN_AFTER_MS = 8_000;
+/** The routes that run orders all day; the other two (delete a pending order, close several) are warmed once, plainly. */
+const HOT_ACTIONS: readonly WebTradeAction[] = ["open", "close", "modify"];
 
-/** Wakes the five order routes up (a plain GET each - no data, no sign-in, no database), ignoring any failure. */
-export function warmWebTradeRoutes(): void {
+/**
+ * Wakes order routes up, ignoring any failure. A plain GET only starts the route; with an account it also makes the
+ * route read - as the signed-in person - what an order on that account checks, and keep it in memory for a few
+ * seconds, so the order itself finds it all ready. Nothing comes back but `{ warm: true }`.
+ */
+export function warmWebTradeRoutes(accountId: string | null = null, actions: readonly WebTradeAction[] = WEB_TRADE_ACTIONS): void {
   if (typeof fetch !== "function") return;
-  for (const action of WEB_TRADE_ACTIONS) {
+  const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
+  for (const action of actions) {
     try {
       void Promise.resolve(
-        fetch(`/api/terminal/trade/${action}`, { method: "GET", cache: "no-store", credentials: "same-origin" }),
+        fetch(`/api/terminal/trade/${action}${query}`, { method: "GET", cache: "no-store", credentials: "same-origin" }),
       ).catch(() => undefined);
     } catch {
       // A warm-up is a courtesy; it must never get in the way of the panel.
@@ -194,19 +203,35 @@ export function warmWebTradeRoutes(): void {
 }
 
 /**
- * Keeps the order routes warm while the panel is on screen: once when it opens and then every few
- * minutes while the browser tab is visible. Each route is its own serverless function, and the first
- * request to a cold one pays for its start-up - this makes sure that is never an order.
+ * Keeps the order routes warm while the panel is on screen: once when it opens (and when the account changes), then
+ * every few minutes while the browser tab is visible. Each route is its own serverless function, and the first
+ * request to a cold one pays for its start-up and for every check from scratch - this makes sure that is never an order.
+ *
+ * Returns `warmNow`: call it when a hand reaches for the panel (the pointer moves over it, a key is pressed) and the
+ * three routes that run orders renew what they keep for an order - at most once every few seconds, however often it is called.
  */
-export function useWarmWebTradeRoutes(enabled: boolean): void {
+export function useWarmWebTradeRoutes(enabled: boolean, accountId: string | null = null): () => void {
+  const lastWarmAt = useRef(0);
+
   useEffect(() => {
     if (!enabled) return;
-    warmWebTradeRoutes();
+    lastWarmAt.current = Date.now();
+    warmWebTradeRoutes(accountId);
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") warmWebTradeRoutes();
+      if (document.visibilityState !== "visible") return;
+      lastWarmAt.current = Date.now();
+      warmWebTradeRoutes(accountId);
     }, WARM_EVERY_MS);
     return () => window.clearInterval(timer);
-  }, [enabled]);
+  }, [enabled, accountId]);
+
+  return useCallback(() => {
+    if (!enabled || accountId === null) return;
+    const now = Date.now();
+    if (now - lastWarmAt.current < WARM_AGAIN_AFTER_MS) return;
+    lastWarmAt.current = now;
+    warmWebTradeRoutes(accountId, HOT_ACTIONS);
+  }, [enabled, accountId]);
 }
 
 /** One id per click on "Send order" - the server never places two orders for the same id. */

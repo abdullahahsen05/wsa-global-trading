@@ -13,7 +13,7 @@ import { listWebTradeAccounts, webTradeErrorResponse } from "@/lib/services/webT
  */
 export async function GET() {
   try {
-    const user = await requireTrader();
+    const user = await requireTrader({ cached: true });
     return jsonOk(await listWebTradeAccounts(user), {
       headers: { "Cache-Control": "private, no-store, max-age=0" },
     });

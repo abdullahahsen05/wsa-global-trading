@@ -231,10 +231,16 @@ export interface WebTradeBulkFailure {
  *   total   = network + server + queue + broker + relay
  *   network : browser <-> web server (also a cold start of the function)        totalMs - serverMs
  *   server  : the web server's own work: sign-in check, gates, audit            serverMs - waitMs
+ *             (of which `signInMs` + `checksMs`)
  *   queue   : the command waited for the AWS worker                             queueMs
  *   broker  : the AWS worker's work, from taking the command to the broker's    runMs
  *             answer (of which `readMs` + `sessionMs` + `sendMs`)
  *   relay   : the database round trips between the web server and the worker    waitMs - queueMs - runMs
+ *
+ * Next to the parts, three facts say WHY a part is what it is: `insertMs` (one round trip web server <->
+ * database, measured on this very order) and `awsDbMs` (the same for the AWS worker) are the distance to the
+ * database - queue and relay cannot be shorter than about those; `wake` says whether the command and its answer
+ * found each other at once (inside the database, migration 062) or by asking again and again.
  */
 export interface WebTradeTiming {
   queueMs?: number;
@@ -251,6 +257,21 @@ export interface WebTradeTiming {
   serverMs?: number;
   /** web server: from writing the command to seeing its answer */
   waitMs?: number;
+  /** web server: the sign-in check (session and profile; 0 when this server had just verified the same session) */
+  signInMs?: number;
+  /** web server: the gates (route, subscription, account, risk) and reading the order */
+  checksMs?: number;
+  /** web server: writing the command to the database - one round trip between this server and the database */
+  insertMs?: number;
+  /** AWS worker: its own round trip to the database (the middle of its latest heartbeat writes) */
+  awsDbMs?: number;
+  /** AWS worker: how late its event loop ran lately (a busy worker picks commands up late) */
+  awsLoopMs?: number;
+  /**
+   * How the command and its answer found each other: "live" = inside the database the moment the row changed
+   * (migration 062, on both sides); "web-poll" = the web server asked again and again; "aws-poll" = the AWS worker did.
+   */
+  wake?: "live" | "web-poll" | "aws-poll";
   /** browser: from the click to the answer (added by the panel's request helper) */
   totalMs?: number;
 }

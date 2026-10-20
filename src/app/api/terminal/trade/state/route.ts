@@ -17,7 +17,8 @@ export const maxDuration = 30;
  */
 export async function GET(request: Request) {
   try {
-    const user = await requireTrader();
+    // (polled every second or two: the same session verified a few seconds ago is not verified again)
+    const user = await requireTrader({ cached: true });
     const params = new URL(request.url).searchParams;
     const parsed = webTradeStateQuerySchema.safeParse({
       accountId: params.get("accountId") || undefined,

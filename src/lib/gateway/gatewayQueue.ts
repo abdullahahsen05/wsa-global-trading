@@ -13,13 +13,19 @@
 
 import type { BrokerSymbolInfo } from "@/lib/broker/BrokerAdapter";
 import {
+  AWAIT_FUNCTION,
   COMMANDS_TABLE,
   gatewayKnownMissing,
   GatewayNotInstalledError,
   HEARTBEAT_FRESH_MS,
   HEARTBEAT_TABLE,
   isMissingGatewayObject,
+  isMissingLongPoll,
+  LONG_POLL_TROUBLE_PAUSE_MS,
+  longPollKnownOff,
+  LongPollUnavailableError,
   markGatewayMissing,
+  markLongPollOff,
   STATE_TABLE,
   SYMBOLS_TABLE,
   WATCH_MS,
@@ -39,13 +45,26 @@ import {
 // ── is anybody there? ────────────────────────────────────────────────────────
 
 export type GatewayAvailability =
-  | { state: "online"; workers: number; executionEnabled: boolean }
+  | {
+      state: "online";
+      workers: number;
+      executionEnabled: boolean;
+      /** the newest worker's own measurements (absent for an older worker): the AWS <-> database round trip ... */
+      awsDbMs?: number;
+      /** ... how late its event loop ran (a busy worker answers late) ... */
+      awsLoopMs?: number;
+      /** ... and whether it waits for commands inside the database (migration 062) instead of asking again and again */
+      awsLongPoll?: boolean;
+    }
   /** the tables exist, but no worker has written a heartbeat lately */
   | { state: "offline" }
   /** migration 060 is not applied */
   | { state: "not_installed" };
 
+/** While nobody is there the heartbeat is asked again soon, so a worker that has just started is noticed at once. */
 const AVAILABILITY_TTL_MS = 2_000;
+/** While a worker reports in, a younger answer than this is served as it is (the heartbeat is fresh for 20 s). */
+const AVAILABILITY_ONLINE_TTL_MS = 6_000;
 let availabilityCache: { at: number; value: GatewayAvailability; db: AdminDb } | null = null;
 
 /** Test helper. */
@@ -53,14 +72,38 @@ export function resetGatewayAvailability(): void {
   availabilityCache = null;
 }
 
-/** Reads the heartbeat table (kept for two seconds, so a busy panel does not ask on every poll). */
-export async function gatewayAvailability(db: AdminDb, now: number = Date.now()): Promise<GatewayAvailability> {
+interface HeartbeatInfo {
+  executionAvailable?: unknown;
+  dbRttMs?: unknown;
+  loopLagMs?: unknown;
+  longPoll?: unknown;
+}
+
+function finiteMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined;
+}
+
+/**
+ * Reads the heartbeat table (kept for a few seconds, so a busy panel does not ask on every poll).
+ * `maxAgeMs` asks for a younger answer than the usual keep time: the panel's own polls pass half of it, so
+ * the answer is renewed in the background of a poll and an order never meets an expired one.
+ */
+export async function gatewayAvailability(
+  db: AdminDb,
+  now: number = Date.now(),
+  maxAgeMs?: number,
+): Promise<GatewayAvailability> {
   if (gatewayKnownMissing(now)) return { state: "not_installed" };
-  if (availabilityCache && availabilityCache.db === db && now - availabilityCache.at < AVAILABILITY_TTL_MS) {
-    return availabilityCache.value;
+  if (availabilityCache && availabilityCache.db === db) {
+    const ttl = availabilityCache.value.state === "online" ? AVAILABILITY_ONLINE_TTL_MS : AVAILABILITY_TTL_MS;
+    if (now - availabilityCache.at < Math.min(ttl, maxAgeMs ?? ttl)) return availabilityCache.value;
   }
   const since = new Date(now - HEARTBEAT_FRESH_MS).toISOString();
-  const { data, error } = await db.from(HEARTBEAT_TABLE).select("worker, info").gte("updated_at", since).limit(10);
+  const { data, error } = await db
+    .from(HEARTBEAT_TABLE)
+    .select("worker, info, updated_at")
+    .gte("updated_at", since)
+    .limit(10);
   let value: GatewayAvailability;
   if (error) {
     if (isMissingGatewayObject(error)) {
@@ -70,16 +113,24 @@ export async function gatewayAvailability(db: AdminDb, now: number = Date.now())
     // The database could not be asked: treat the gateway as not there for this moment.
     value = { state: "offline" };
   } else {
-    const rows = (data ?? []) as Array<{ worker: string; info: { executionAvailable?: unknown } | null }>;
-    value =
-      rows.length === 0
-        ? { state: "offline" }
-        : {
-            state: "online",
-            workers: rows.length,
-            // an older worker that does not report the switch is taken as enabled (it refuses to start otherwise)
-            executionEnabled: rows.some((row) => row.info?.executionAvailable !== false),
-          };
+    const rows = (data ?? []) as Array<{ worker: string; info: HeartbeatInfo | null; updated_at?: string }>;
+    if (rows.length === 0) {
+      value = { state: "offline" };
+    } else {
+      // the newest worker speaks for the measurements (several workers are rare)
+      const newest = [...rows].sort((left, right) => String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? "")))[0];
+      const awsDbMs = finiteMs(newest.info?.dbRttMs);
+      const awsLoopMs = finiteMs(newest.info?.loopLagMs);
+      value = {
+        state: "online",
+        workers: rows.length,
+        // an older worker that does not report the switch is taken as enabled (it refuses to start otherwise)
+        executionEnabled: rows.some((row) => row.info?.executionAvailable !== false),
+        ...(awsDbMs !== undefined ? { awsDbMs } : {}),
+        ...(awsLoopMs !== undefined ? { awsLoopMs } : {}),
+        ...(typeof newest.info?.longPoll === "boolean" ? { awsLongPoll: newest.info.longPoll } : {}),
+      };
+    }
   }
   availabilityCache = { at: now, value, db };
   return value;
@@ -176,6 +227,71 @@ export async function waitForCommand(
       return data as CommandRow;
     }
     if (now() >= deadline) return null;
+  }
+}
+
+/** How long one call of the long wait lasts; a longer wait is several calls one after the other. */
+export const AWAIT_CHUNK_MS = 2_500;
+
+export interface AwaitInput {
+  userId: string;
+  clientRequestId: string;
+  /** give up (return null) after this long */
+  timeoutMs: number;
+  /** set when the caller no longer needs the answer (the command could not be written) */
+  signal?: AbortSignal;
+}
+
+/**
+ * Waits for the answer to a command INSIDE the database (migration 062): one call that returns the
+ * moment the row is DONE / FAILED / EXPIRED, instead of asking again and again. The command is found
+ * by its request id, so the wait can start together with the write (the row is simply not there yet
+ * for the first few milliseconds). Returns null when the command was not finished within `timeoutMs`.
+ *
+ * Throws `LongPollUnavailableError` when the database cannot do this (the functions are missing or a
+ * long statement was refused) - the caller then falls back to `waitForCommand` - and
+ * `GatewayNotInstalledError` when the gateway itself is not installed.
+ */
+export async function awaitCommand(db: AdminDb, input: AwaitInput, deps: WaitDeps = {}): Promise<CommandRow | null> {
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? pause;
+  const deadline = now() + input.timeoutMs;
+  for (;;) {
+    if (input.signal?.aborted) return null;
+    if (longPollKnownOff(now())) throw new LongPollUnavailableError("known to be off");
+    const remaining = deadline - now();
+    if (remaining <= 0) return null;
+    const askedAt = now();
+    let reply: { data: unknown; error: { code?: string; message?: string } | null };
+    try {
+      reply = await db.rpc(AWAIT_FUNCTION, {
+        p_user_id: input.userId,
+        p_client_request_id: input.clientRequestId,
+        p_wait_ms: Math.max(50, Math.min(AWAIT_CHUNK_MS, remaining)),
+      });
+    } catch (thrown) {
+      markLongPollOff(now(), LONG_POLL_TROUBLE_PAUSE_MS);
+      throw new LongPollUnavailableError(thrown instanceof Error ? thrown.message : "the call failed");
+    }
+    const { data, error } = reply;
+    if (error) {
+      if (isMissingLongPoll(error)) {
+        markLongPollOff(now());
+        throw new LongPollUnavailableError("migration 062 is not applied");
+      }
+      if (isMissingGatewayObject(error)) {
+        markGatewayMissing(now());
+        throw new GatewayNotInstalledError();
+      }
+      // a time-out, a refused long statement, a dropped connection: the plain way is used for a little while
+      markLongPollOff(now(), LONG_POLL_TROUBLE_PAUSE_MS);
+      throw new LongPollUnavailableError(error.message ?? "the call failed");
+    }
+    const row = (Array.isArray(data) ? (data[0] as CommandRow | undefined) : undefined) ?? null;
+    if (row && isFinished(row.status)) return row;
+    // The window ended with the command still running (or not yet written): look again until the deadline.
+    // A call that came back at once without an answer did not wait (it should have): do not hammer the database.
+    if (now() - askedAt < 20) await sleep(Math.max(0, Math.min(30, deadline - now())));
   }
 }
 

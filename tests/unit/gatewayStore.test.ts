@@ -4,9 +4,11 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 
 import {
   CLAIM_FUNCTION,
+  CLAIM_WAIT_FUNCTION,
   COMMANDS_TABLE,
   GatewayNotInstalledError,
   HEARTBEAT_TABLE,
+  LongPollUnavailableError,
   STATE_TABLE,
   SYMBOLS_TABLE,
 } from "@/lib/gateway/gatewayDb";
@@ -94,6 +96,64 @@ describe("claiming commands", () => {
 
     expect(failure).toBeInstanceOf(Error);
     expect(failure).not.toBeInstanceOf(GatewayNotInstalledError);
+    expect(failure.message).toContain("statement timeout");
+  });
+});
+
+describe("claiming commands by waiting inside the database (migration 062)", () => {
+  test("asks the wait function with the worker, the batch size and how long it may wait - and maps the rows like a plain claim", async () => {
+    const asked: Row[] = [];
+    db.rpcHandlers[CLAIM_WAIT_FUNCTION] = (args) => {
+      asked.push(args);
+      return { data: [commandRow()], error: null };
+    };
+
+    const claimed = await store.claimWait?.("worker-1", 10, 1_000);
+
+    expect(asked).toEqual([{ p_worker: "worker-1", p_limit: 10, p_wait_ms: 1_000 }]);
+    expect(claimed).toHaveLength(1);
+    expect(claimed?.[0]).toMatchObject({
+      id: "cccccccc-0000-4000-8000-000000000001",
+      userId: USER,
+      accountId: ACCOUNT,
+      kind: "OPEN",
+      clientRequestId: "request-1",
+    });
+  });
+
+  test("a wait that ends with nothing is an empty list", async () => {
+    db.rpcHandlers[CLAIM_WAIT_FUNCTION] = () => ({ data: null, error: null });
+    expect(await store.claimWait?.("worker-1", 10, 1_000)).toEqual([]);
+
+    db.rpcHandlers[CLAIM_WAIT_FUNCTION] = () => ({ data: [], error: null });
+    expect(await store.claimWait?.("worker-1", 10, 1_000)).toEqual([]);
+  });
+
+  test("without 062 only the wait function is missing: the caller is told so and can go on with the plain claim", async () => {
+    // the in-memory client answers an unknown function like PostgREST does (PGRST202, naming the function)
+    await expect(store.claimWait?.("worker-1", 10, 1_000)).rejects.toBeInstanceOf(LongPollUnavailableError);
+    await expect(store.claimWait?.("worker-1", 10, 1_000)).rejects.not.toBeInstanceOf(GatewayNotInstalledError);
+
+    db.rpcHandlers[CLAIM_FUNCTION] = () => ({ data: [commandRow()], error: null });
+    expect(await store.claim("worker-1", 10)).toHaveLength(1);
+  });
+
+  test("a missing gateway (migration 060) is still the gateway's error", async () => {
+    db.rpcHandlers[CLAIM_WAIT_FUNCTION] = () => ({
+      data: null,
+      error: { code: "42P01", message: 'relation "trade_commands" does not exist' },
+    });
+
+    await expect(store.claimWait?.("worker-1", 10, 1_000)).rejects.toBeInstanceOf(GatewayNotInstalledError);
+  });
+
+  test("any other database error is an ordinary error with its sentence", async () => {
+    db.rpcHandlers[CLAIM_WAIT_FUNCTION] = () => ({ data: null, error: { code: "57014", message: "statement timeout" } });
+    const failure = await store.claimWait?.("worker-1", 10, 1_000).catch((error) => error);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(GatewayNotInstalledError);
+    expect(failure).not.toBeInstanceOf(LongPollUnavailableError);
     expect(failure.message).toContain("statement timeout");
   });
 });

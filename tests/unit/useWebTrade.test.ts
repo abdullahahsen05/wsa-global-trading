@@ -152,6 +152,37 @@ describe("waking the order routes up", () => {
     }
   });
 
+  test("with an account every route also reads what an order on that account checks (the id is in the address, nothing else)", () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { warm: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    warmWebTradeRoutes("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1");
+
+    const calls = fetchMock.mock.calls.map((call) => call as unknown as [string, RequestInit]);
+    expect(calls.map(([url]) => url).sort()).toEqual([
+      "/api/terminal/trade/cancel?accountId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      "/api/terminal/trade/close-bulk?accountId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      "/api/terminal/trade/close?accountId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      "/api/terminal/trade/modify?accountId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      "/api/terminal/trade/open?accountId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+    ]);
+    for (const [, init] of calls) {
+      expect(init.method).toBe("GET");
+      expect(init.credentials).toBe("same-origin"); // as the signed-in person - that is what the route checks
+      expect(init.body).toBeUndefined();
+    }
+  });
+
+  test("only the routes asked for are woken, and the account id is encoded", () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, data: { warm: true } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    warmWebTradeRoutes("a b&c", ["open", "close"]);
+
+    const urls = fetchMock.mock.calls.map((call) => (call as unknown as [string, RequestInit])[0]).sort();
+    expect(urls).toEqual(["/api/terminal/trade/close?accountId=a%20b%26c", "/api/terminal/trade/open?accountId=a%20b%26c"]);
+  });
+
   test("a failure is nobody's business: a rejected request or a fetch that throws changes nothing", () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("offline"))));
     expect(() => warmWebTradeRoutes()).not.toThrow();

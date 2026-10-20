@@ -17,7 +17,7 @@ export const maxDuration = 30;
  */
 export async function GET(request: Request) {
   try {
-    const user = await requireTrader();
+    const user = await requireTrader({ cached: true });
     const params = new URL(request.url).searchParams;
     const parsed = webTradeSymbolsQuerySchema.safeParse({ accountId: params.get("accountId") || undefined });
     if (!parsed.success) return jsonFail("VALIDATION_ERROR", issuesText(parsed.error), 400);

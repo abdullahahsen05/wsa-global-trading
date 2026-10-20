@@ -15,10 +15,13 @@ import type { BrokerSymbolInfo } from "@/lib/broker/BrokerAdapter";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   CLAIM_FUNCTION,
+  CLAIM_WAIT_FUNCTION,
   COMMANDS_TABLE,
   GatewayNotInstalledError,
   HEARTBEAT_TABLE,
   isMissingGatewayObject,
+  isMissingLongPoll,
+  LongPollUnavailableError,
   STATE_TABLE,
   SYMBOLS_TABLE,
   type AdminDb,
@@ -60,6 +63,12 @@ export interface SweepResult {
 export interface GatewayStore {
   /** Takes up to `limit` pending commands (several workers never get the same one). Throws `GatewayNotInstalledError`. */
   claim(worker: string, limit: number): Promise<ClaimedCommand[]>;
+  /**
+   * Like `claim`, but when nothing is pending it WAITS inside the database for up to `waitMs` and returns
+   * the moment a command arrives (migration 062). Absent in a store that cannot do it. Throws
+   * `LongPollUnavailableError` when the database has no such function (the caller then uses `claim`).
+   */
+  claimWait?(worker: string, limit: number, waitMs: number): Promise<ClaimedCommand[]>;
   /** Who owns the account (null = no such account). */
   owner(accountId: string): Promise<AccountOwner | null>;
   complete(id: string, outcome: TradeCommandOutcome): Promise<void>;
@@ -110,6 +119,16 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
     async claim(worker, limit) {
       const { data, error } = await db.rpc(CLAIM_FUNCTION, { p_worker: worker, p_limit: limit });
       failOnError(error, "claim commands");
+      return ((data ?? []) as CommandRow[]).map(toClaimed);
+    },
+
+    async claimWait(worker, limit, waitMs) {
+      const { data, error } = await db.rpc(CLAIM_WAIT_FUNCTION, { p_worker: worker, p_limit: limit, p_wait_ms: waitMs });
+      if (error) {
+        // only the wait function is missing (062 not applied): the gateway itself is fine
+        if (isMissingLongPoll(error)) throw new LongPollUnavailableError("migration 062 is not applied");
+        failOnError(error, "claim commands");
+      }
       return ((data ?? []) as CommandRow[]).map(toClaimed);
     },
 

@@ -17,6 +17,9 @@ export const STATE_TABLE = "terminal_account_state";
 export const SYMBOLS_TABLE = "terminal_account_symbols";
 export const HEARTBEAT_TABLE = "gateway_heartbeat";
 export const CLAIM_FUNCTION = "claim_trade_commands";
+/** Migration 062: the claim / the wait for an answer that waits INSIDE the database instead of being asked again and again. */
+export const CLAIM_WAIT_FUNCTION = "claim_trade_commands_wait";
+export const AWAIT_FUNCTION = "await_trade_command";
 
 export type CommandStatus = "PENDING" | "RUNNING" | "DONE" | "FAILED" | "EXPIRED";
 
@@ -76,7 +79,41 @@ export function markGatewayMissing(now: number = Date.now()): void {
   notInstalledUntil = now + RECHECK_MS;
 }
 
+// ── the wake-up without polling (migration 062, optional) ────────────────────
+
+/**
+ * Migration 062 is not applied here (the wait functions do not exist), or the database refused
+ * a long wait. The caller falls back to asking again and again, as before 062.
+ */
+export class LongPollUnavailableError extends Error {
+  constructor(reason: string) {
+    super(`The gateway's wait inside the database is not available (${reason}).`);
+    this.name = "LongPollUnavailableError";
+  }
+}
+
+/** The error says one of the two wait functions of migration 062 is missing (not that the gateway is). */
+export function isMissingLongPoll(error: { code?: string; message?: string } | null | undefined): boolean {
+  return isMissingGatewayObject(error) && /claim_trade_commands_wait|await_trade_command/i.test(error?.message ?? "");
+}
+
+/** A function that is missing is looked for again after this long. */
+const LONG_POLL_MISSING_RECHECK_MS = 10 * 60_000;
+/** After a failure that is not "missing" (a time-out, a refused long statement) the plain way is used for this long. */
+export const LONG_POLL_TROUBLE_PAUSE_MS = 20_000;
+let longPollOffUntil = 0;
+
+/** True while the wait inside the database is known not to work here. */
+export function longPollKnownOff(now: number = Date.now()): boolean {
+  return now < longPollOffUntil;
+}
+
+export function markLongPollOff(now: number = Date.now(), forMs: number = LONG_POLL_MISSING_RECHECK_MS): void {
+  longPollOffUntil = Math.max(longPollOffUntil, now + forMs);
+}
+
 /** Test helper: forget what was learned about the database. */
 export function resetGatewayState(): void {
   notInstalledUntil = 0;
+  longPollOffUntil = 0;
 }
