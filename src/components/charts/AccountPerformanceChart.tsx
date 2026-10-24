@@ -16,24 +16,26 @@ import {
   deriveSeries,
   formatSignedPercent,
   formatTooltipTime,
-  lastIndexAtOrBefore,
   nearestIndexByTime,
   timeAxisLabels,
   timeTicks,
+  withLiveEquity,
   type PerformanceRange,
   type PerformanceSeriesDto,
 } from "@/lib/charts/performanceSeries";
 import {
   CHART_TABS,
   buildChartSpec,
+  lineValueAt,
   tooltipAt,
   type ChartEmptyReason,
+  type ChartLegendItem,
   type ChartLine,
   type ChartMarker,
   type ChartSpec,
   type ChartTab,
 } from "@/lib/charts/performanceChartSpec";
-import { toLinearAreaPath, toLinearPath, toStepAreaPath, toStepPath } from "@/lib/charts/svgCurve";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 import { formatMoney } from "@/lib/utils/format";
 
 /**
@@ -41,8 +43,13 @@ import { formatMoney } from "@/lib/utils/format";
  *
  * One component for every place that shows an account curve (trader dashboard,
  * analytics, account detail). All numbers come from `/api/analytics/performance`
- * (recorded snapshots + closed trades); nothing on the chart is invented. Parts
- * rebuilt from closed trades are drawn dotted and labelled as estimates.
+ * (recorded snapshots + closed trades); nothing on the chart is invented.
+ *
+ * The picture is deliberately plain, like Myfxbook's: ONE smooth curve on two axes (time along the bottom, a single
+ * value axis on the left), faint horizontal grid lines and nothing else. The closed-P&L line, the volume bars and the
+ * dots of single trades are extras the person can switch on under the chart. While the recording is live the curve
+ * ends at the account's current equity (`liveEquity`), so it moves as the account does instead of stopping at the last
+ * stored snapshot. Parts rebuilt from closed trades are drawn dotted and labelled as estimates.
  */
 
 export interface AccountPerformanceChartProps {
@@ -73,13 +80,20 @@ const MARKER_COLORS: Record<ChartMarker["kind"], string> = {
   mixed: "#ffcf00",
 };
 const EMPTY_HIDDEN: Record<string, boolean> = {};
-const PAD_TOP = 40;
+/** room for the axis title above the plot */
+const PAD_TOP = 26;
 /** room for the tick label and, under it, the day or year it belongs to */
-const PAD_BOTTOM = 50;
+const PAD_BOTTOM = 44;
+const PAD_RIGHT = 20;
 /** the stretch before an account's first data is only marked when it is at least this much of the axis */
 const MIN_BAND_SHARE = 0.01;
 /** ...and only explained in words when it is this much */
 const HINT_BAND_SHARE = 0.08;
+/** about one drawn point per this many pixels of plot width: a curve, not a hairy line */
+const PIXELS_PER_POINT = 4;
+
+const GRID = "rgba(255,255,255,0.07)";
+const GRID_ZERO = "rgba(255,255,255,0.22)";
 
 /** The chosen period in words, for the notice that explains a stretch without data. */
 const RANGE_WORDS: Record<PerformanceRange, string> = {
@@ -90,14 +104,6 @@ const RANGE_WORDS: Record<PerformanceRange, string> = {
   "6M": "last 6 months",
   "1Y": "last year",
   ALL: "whole history",
-};
-
-const LEGEND_GRID: Record<number, string> = {
-  1: "sm:grid-cols-1",
-  2: "sm:grid-cols-2",
-  3: "sm:grid-cols-3",
-  4: "sm:grid-cols-4",
-  5: "sm:grid-cols-2 lg:grid-cols-5",
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +144,20 @@ interface PixelPoint {
 interface PixelRun {
   estimated: boolean;
   points: PixelPoint[];
+}
+
+/**
+ * The smooth path needs strictly increasing x. Two readings that land on the same pixel column (or the same instant) are
+ * one reading to the eye: the later one stays. (Nothing is moved or invented.)
+ */
+function dedupeX(points: PixelPoint[]): PixelPoint[] {
+  const result: PixelPoint[] = [];
+  for (const point of points) {
+    const last = result[result.length - 1];
+    if (last && point.x <= last.x) result[result.length - 1] = point;
+    else result.push(point);
+  }
+  return result;
 }
 
 /**
@@ -234,13 +254,22 @@ export function AccountPerformanceChart({
 
   const query = usePerformanceSeries(accountId, range);
   const dto = query.data ?? null;
-  const derived = useMemo(() => (dto ? deriveSeries(dto) : null), [dto]);
+  const recorded = useMemo(() => (dto ? deriveSeries(dto) : null), [dto]);
+  // The curve reaches "now" while the recording is live: the account's current equity is its last point. (Not for the
+  // combined curve of several accounts - the host's live figure is not the sum that curve is drawn from.)
+  const liveAllowed = dto !== null && !dto.coverage.stale && !dto.coverage.aggregate && accountId !== "ALL";
+  const derived = useMemo(
+    () => (recorded ? withLiveEquity(recorded, liveAllowed ? liveEquity : null, !liveAllowed) : null),
+    [recorded, liveEquity, liveAllowed],
+  );
+  const liveShown = derived !== null && recorded !== null && derived !== recorded;
   const currency = safeCurrency(dto?.currency ?? currencyProp);
   const hidden = hiddenByTab[tab] ?? EMPTY_HIDDEN;
 
   const compact = width > 0 && width < 560;
-  const height = compact ? 300 : 390;
+  const height = compact ? 280 : 360;
   const barCount = Math.max(8, Math.floor((width || 800) / 16));
+  const pointBudget = clamp(Math.round((width || 800) / PIXELS_PER_POINT), 60, 240);
 
   const spec = useMemo<ChartSpec | null>(() => {
     if (!dto || !derived) return null;
@@ -254,8 +283,9 @@ export function AccountPerformanceChart({
       barCount,
       currentDrawdownPct: currentDrawdownPercent,
       equityPeak: dto.coverage.equityPeak,
+      pointBudget,
     });
-  }, [dto, derived, tab, hidden, currency, barCount, currentDrawdownPercent]);
+  }, [dto, derived, tab, hidden, currency, barCount, currentDrawdownPercent, pointBudget]);
 
   const emptyInfo = dto && spec ? describeEmpty(spec.emptyReason, dto) : null;
   const message: { title: string; text: ReactNode } | null = !accountId
@@ -285,43 +315,25 @@ export function AccountPerformanceChart({
   const layout = useMemo(() => {
     if (!spec || !derived || width <= 0 || hasMessage) return null;
     const longest = (labels: string[]) => labels.reduce((max, label) => Math.max(max, label.length), 0);
+    // ONE value axis (on the left) plus the time axis
     const leftLabels = spec.ticks.map((tick) => spec.formatY(tick));
-    const right = spec.right;
-    const rightLabels = right ? right.ticks.map((tick) => right.formatY(tick)) : [];
     // the axis text is 11 px (12 px from a tablet up): a digit is about 7 / 7.8 px wide
     const charWidth = compact ? 7 : 7.8;
-    const padLeft = clamp(longest(leftLabels) * charWidth + 18, 52, 124);
-    const padRight = right ? clamp(longest(rightLabels) * charWidth + 18, 52, 124) : 34;
-    const plotW = Math.max(60, width - padLeft - padRight);
+    const padLeft = clamp(longest(leftLabels) * charWidth + 16, 44, 112);
+    const plotW = Math.max(60, width - padLeft - PAD_RIGHT);
     const plotH = height - PAD_TOP - PAD_BOTTOM;
     const span = Math.max(1, derived.end - derived.start);
     const ySpan = Math.max(1e-9, spec.yMax - spec.yMin);
     const xOf = (time: number) => padLeft + clamp((time - derived.start) / span, 0, 1) * plotW;
     const yOf = (value: number) => PAD_TOP + (1 - clamp((value - spec.yMin) / ySpan, 0, 1)) * plotH;
-    const baselineY =
-      spec.zeroValue !== null ? yOf(spec.zeroValue) : PAD_TOP + plotH;
+    const baselineY = spec.zeroValue !== null ? yOf(spec.zeroValue) : PAD_TOP + plotH;
     // about one tick per 96 px: room for "Oct 12" / "14:05" at 12 px with air around them
     const timeTickValues = timeTicks(derived.start, derived.end, clamp(Math.floor(plotW / 96), 2, 10));
     const timeLabels = timeAxisLabels(timeTickValues, span);
     // the stretch before the account's first data: marked, never drawn into
     const historyX = xOf(derived.historyStart);
-    const bandW =
-      derived.historyStart - derived.start >= span * MIN_BAND_SHARE ? historyX - padLeft : 0;
-    return {
-      padLeft,
-      padRight,
-      plotW,
-      plotH,
-      span,
-      xOf,
-      yOf,
-      baselineY,
-      timeLabels,
-      historyX,
-      bandW,
-      leftLabels,
-      rightLabels,
-    };
+    const bandW = derived.historyStart - derived.start >= span * MIN_BAND_SHARE ? historyX - padLeft : 0;
+    return { padLeft, plotW, plotH, span, xOf, yOf, baselineY, timeLabels, historyX, bandW, leftLabels };
   }, [spec, derived, width, height, hasMessage, compact]);
 
   // ── interaction ────────────────────────────────────────────────────────────
@@ -342,16 +354,16 @@ export function AccountPerformanceChart({
     setHoverTime((current) => (current === snapped ? current : snapped));
   };
 
-  const toggleSeries = (key: string) => {
+  const toggleSeries = (item: ChartLegendItem) => {
     if (!spec) return;
     setHiddenByTab((current) => {
       const forTab = { ...(current[tab] ?? {}) };
-      forTab[key] = !forTab[key];
-      const toggleKeys = spec.legend
-        .filter((item) => item.toggleable && item.key !== "markers")
-        .map((item) => item.key);
-      // never switch off the last visible series
-      if (toggleKeys.every((candidate) => forTab[candidate] === true)) return current;
+      // (what is on is switched off, what is off is switched on)
+      forTab[item.key] = item.active;
+      // the last curve of a tab stays: only the extras may all be off
+      const curves = spec.legend.filter((entry) => entry.toggleable && !entry.overlay);
+      const stays = (entry: ChartLegendItem) => (entry.key === item.key ? !item.active : entry.active);
+      if (curves.length > 0 && !curves.some(stays)) return current;
       return { ...current, [tab]: forTab };
     });
   };
@@ -394,23 +406,21 @@ export function AccountPerformanceChart({
     },
   ];
 
-  // ── notices ────────────────────────────────────────────────────────────────
-  const notices: string[] = [];
+  // ── notices: one warning when the recording stopped, the rest folded away under "Notes" ──
+  const accountWords = dto?.coverage.aggregate ? "these accounts" : "this account";
+  let warning: string | null = null;
+  const notes: string[] = [];
   if (dto && !message) {
     const last = dto.coverage.lastSnapshotAt;
     const lastData = dto.coverage.lastDataAt;
     if (dto.coverage.stale && lastData !== null) {
-      notices.push(
-        `Recording stopped ${formatAge(dto.generatedAt - lastData)} ago (last data: ${formatTooltipTime(lastData)}). The chart is calibrated to the period that has data and ends there. It grows again once the risk worker and the broker connection record new snapshots for ${dto.coverage.aggregate ? "these accounts" : "this account"}.`,
-      );
+      warning = `Recording stopped ${formatAge(dto.generatedAt - lastData)} ago (last data: ${formatTooltipTime(lastData)}). The chart ends there and grows again once the risk worker and the broker connection record new snapshots for ${accountWords}.`;
     } else if (last !== null && dto.generatedAt - last > PERFORMANCE_STALE_AFTER_MS) {
-      notices.push(
-        `Last balance snapshot: ${formatTooltipTime(last)} (${formatAge(dto.generatedAt - last)} ago). The curve only grows while the platform keeps recording snapshots for ${dto.coverage.aggregate ? "these accounts" : "this account"} — if the risk worker or the broker connection is stopped, it ends at the last snapshot.`,
-      );
+      warning = `Last balance snapshot: ${formatTooltipTime(last)} (${formatAge(dto.generatedAt - last)} ago). The curve only grows while snapshots are recorded for ${accountWords}.`;
     }
     if (derived?.hasEstimated) {
       const gaps = dto.coverage.gapCount;
-      notices.push(
+      notes.push(
         gaps > 0
           ? `Dotted segments are estimates: ${gaps} stretch${gaps === 1 ? "" : "es"} without recorded snapshots ${gaps === 1 ? "was" : "were"} bridged using the closed trades of that period.`
           : "Dotted segments are estimated from closed trades because no snapshot was recorded for that period.",
@@ -419,47 +429,47 @@ export function AccountPerformanceChart({
     const flowCount = dto.coverage.cashFlowCount ?? 0;
     if (flowCount > 0 && derived) {
       const plural = flowCount === 1 ? "" : "s";
-      notices.push(
+      notes.push(
         derived.cashFlowCount > 0
-          ? `Growth and drawdown leave out ${flowCount} deposit${plural} / withdrawal${plural} (net ${formatMoney({ amount: derived.netCashFlow, currency })}): paying money in or out is not counted as profit or loss.`
+          ? `Growth and drawdown leave out ${flowCount} deposit${plural} / withdrawal${plural} (net ${formatMoney({ amount: derived.netCashFlow, currency })}): paying money in or out is not profit or loss.`
           : `${flowCount} deposit${plural} / withdrawal${plural} fall outside the drawn curve and do not change growth or drawdown.`,
       );
     }
     if (derived && derived.joinedAccounts > 0) {
       const count = derived.joinedAccounts;
-      notices.push(
+      notes.push(
         `${count} account${count === 1 ? " was" : "s were"} connected during this period (${formatMoney({ amount: derived.joinedAmount, currency })} in total): the combined curve steps up when each one joins, and growth and drawdown leave that out.`,
       );
     }
     const droppedReadings = dto.coverage.glitchSamplesDropped ?? 0;
     if (droppedReadings > 0) {
-      notices.push(
+      notes.push(
         `${droppedReadings} stored reading${droppedReadings === 1 ? "" : "s"} that cannot be real (for example equity 0 next to a positive balance) ${droppedReadings === 1 ? "was" : "were"} left out of the curve.`,
       );
     }
     if (derived && derived.points.length === 1 && tab !== "PROFIT") {
-      notices.push("Only one balance snapshot exists in this range so far — the line appears as soon as a second one is recorded.");
+      notes.push("Only one balance snapshot exists in this range so far — the line appears as soon as a second one is recorded.");
     }
     if (spec?.missingSnapshots) {
-      notices.push("No balance snapshots in this range: only the closed-trade curve can be drawn.");
+      notes.push("No balance snapshots in this range: only the closed-trade curve can be drawn.");
     }
     if (derived && derived.points.length > 0 && dto.stats.tradeCount === 0) {
-      notices.push("No closed trades in this range — the curve follows balance and equity only.");
+      notes.push("No closed trades in this range — the curve follows balance and equity only.");
     }
     if (dto.coverage.tradesTruncated) {
-      notices.push("This account has more closed trades than the chart can load; the oldest ones are used and the newest may be missing.");
+      notes.push("This account has more closed trades than the chart can load; the oldest ones are used and the newest may be missing.");
     }
     if (dto.coverage.aggregate && dto.coverage.aggregateLimitedToDays) {
-      notices.push(
+      notes.push(
         `The combined curve of all connected accounts covers the last ${dto.coverage.aggregateLimitedToDays} days; the part of this period before that is left empty.`,
       );
     }
     if (query.isError) {
-      notices.push("The last refresh failed; showing the most recently loaded history.");
+      notes.push("The last refresh failed; showing the most recently loaded history.");
     }
   }
 
-  // The period is longer than the history: say so, and offer the view that fits.
+  // The period is longer than the history: say so in one line, and offer the view that fits.
   const firstDataAt = dto?.coverage.firstDataAt ?? null;
   const showHistoryHint =
     dto !== null &&
@@ -471,7 +481,7 @@ export function AccountPerformanceChart({
   const displayName = accountName?.trim() || (accountId === "ALL" ? "all connected accounts" : "this account");
   const subtitle =
     description ??
-    `Broker-synced equity growth, closed P&L and traded volume from ${displayName}, drawn from stored account snapshots and closed trades.`;
+    `Equity growth of ${displayName}, drawn from stored account snapshots and closed trades.`;
 
   // ── hover content ──────────────────────────────────────────────────────────
   const hover =
@@ -482,11 +492,13 @@ export function AccountPerformanceChart({
 
   const renderLine = (line: ChartLine, lineIndex: number) => {
     if (!layout || !spec) return null;
-    const pixels: PixelPoint[] = line.points.map((point) => ({
-      x: layout.xOf(point.t),
-      y: layout.yOf(point.v),
-      estimated: point.estimated === true,
-    }));
+    const pixels: PixelPoint[] = dedupeX(
+      line.points.map((point) => ({
+        x: layout.xOf(point.t),
+        y: layout.yOf(point.v),
+        estimated: point.estimated === true,
+      })),
+    );
     const runs = splitRuns(pixels);
     const belowBaseline = line.points.length > 0 && line.points.every((point) => point.v <= (spec.zeroValue ?? 0));
     const gradientId = `${uid}fill${lineIndex}`;
@@ -496,30 +508,28 @@ export function AccountPerformanceChart({
           <>
             <defs>
               <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={line.color} stopOpacity="0.3" />
+                <stop offset="0%" stopColor={line.color} stopOpacity="0.22" />
                 <stop offset="100%" stopColor={line.color} stopOpacity="0" />
               </linearGradient>
             </defs>
             {runs
               .filter((run) => !run.estimated)
               .map((run, runIndex) => {
-                const d = line.step
-                  ? toStepAreaPath(run.points, layout.baselineY)
-                  : toLinearAreaPath(run.points, layout.baselineY);
+                const d = toSmoothAreaPath(run.points, layout.baselineY);
                 if (!d) return null;
                 return (
                   <path
                     key={`area-${runIndex}`}
                     d={d}
                     fill={belowBaseline && spec.zeroValue !== null ? line.color : `url(#${gradientId})`}
-                    fillOpacity={belowBaseline && spec.zeroValue !== null ? 0.16 : 1}
+                    fillOpacity={belowBaseline && spec.zeroValue !== null ? 0.14 : 1}
                   />
                 );
               })}
           </>
         ) : null}
         {runs.map((run, runIndex) => {
-          const d = line.step ? toStepPath(run.points) : toLinearPath(run.points);
+          const d = toSmoothPath(run.points);
           if (!d) return null;
           return (
             <path
@@ -527,10 +537,10 @@ export function AccountPerformanceChart({
               d={d}
               fill="none"
               stroke={line.color}
-              strokeWidth={run.estimated ? Math.max(2, line.width - 1) : line.width}
+              strokeWidth={run.estimated ? Math.max(1.5, line.width - 0.5) : line.width}
               strokeLinecap="round"
               strokeLinejoin="round"
-              strokeDasharray={run.estimated ? "2 7" : line.dashed ? "9 9" : undefined}
+              strokeDasharray={run.estimated ? "1 5" : undefined}
               opacity={run.estimated ? 0.85 : 1}
             />
           );
@@ -538,6 +548,8 @@ export function AccountPerformanceChart({
       </g>
     );
   };
+
+  const axisText = `fill-muted ${compact ? "text-[11px]" : "text-xs"} tabular-nums`;
 
   return (
     <Panel className={`overflow-hidden p-0 ${className}`}>
@@ -557,7 +569,7 @@ export function AccountPerformanceChart({
         </div>
       </div>
 
-      <div className="px-4 pb-5 pt-4 sm:px-5">
+      <div className="px-4 pb-4 pt-4 sm:px-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1 rounded-[4px] border border-line bg-background p-1">
             {CHART_TABS.map((entry) => (
@@ -566,7 +578,7 @@ export function AccountPerformanceChart({
                 type="button"
                 onClick={() => selectTab(entry.id)}
                 aria-pressed={tab === entry.id}
-                className={`rounded-[3px] px-3 py-2 text-xs font-semibold transition ${
+                className={`rounded-[3px] px-3 py-1.5 text-xs font-semibold transition ${
                   tab === entry.id
                     ? "bg-accent text-background"
                     : "text-muted hover:bg-panel hover:text-foreground"
@@ -585,7 +597,7 @@ export function AccountPerformanceChart({
                   onClick={() => selectRange(option.id)}
                   aria-pressed={range === option.id}
                   title={option.id === "ALL" ? "Whole history" : `Last ${RANGE_WORDS[option.id].replace("last ", "")}`}
-                  className={`rounded-[3px] px-3 py-2 text-xs font-semibold transition ${
+                  className={`rounded-[3px] px-3 py-1.5 text-xs font-semibold transition ${
                     range === option.id
                       ? "bg-accent text-background"
                       : "text-muted hover:bg-panel hover:text-foreground"
@@ -598,36 +610,30 @@ export function AccountPerformanceChart({
           ) : null}
         </div>
 
-        {notices.length > 0 || (showHistoryHint && derived && firstDataAt !== null) ? (
-          <div className="mb-3 space-y-2">
-            {showHistoryHint && derived && firstDataAt !== null ? (
-              <p className="rounded-[4px] border border-line border-l-accent bg-panel px-3 py-2 text-xs leading-5 text-muted [border-left-width:3px]">
-                The axis shows the {RANGE_WORDS[range]}, but {dto?.coverage.aggregate ? "these accounts have" : "this account has"} data only since{" "}
-                <span className="font-semibold text-foreground">{formatRangeDate(derived.historyStart)}</span> (
-                {formatAge(derived.end - derived.historyStart)}). The shaded stretch before it has none.
-                {range !== "ALL" ? (
-                  <>
-                    {" "}
-                    <button
-                      type="button"
-                      onClick={() => selectRange("ALL")}
-                      className="font-semibold text-accent underline-offset-2 hover:underline"
-                    >
-                      Show the whole history
-                    </button>
-                  </>
-                ) : null}
-              </p>
+        {warning ? (
+          <p className="mb-3 rounded-[4px] border border-line border-l-accent bg-panel px-3 py-2 text-xs leading-5 text-muted [border-left-width:3px]">
+            {warning}
+          </p>
+        ) : null}
+
+        {showHistoryHint && derived && firstDataAt !== null ? (
+          <p className="mb-3 text-xs text-muted">
+            Data starts{" "}
+            <span className="font-semibold text-foreground">{formatRangeDate(derived.historyStart)}</span> — the{" "}
+            {RANGE_WORDS[range]} is longer than the history.
+            {range !== "ALL" ? (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  onClick={() => selectRange("ALL")}
+                  className="font-semibold text-accent underline-offset-2 hover:underline"
+                >
+                  Show the whole history
+                </button>
+              </>
             ) : null}
-            {notices.map((notice) => (
-              <p
-                key={notice}
-                className="rounded-[4px] border border-line border-l-accent bg-panel px-3 py-2 text-xs leading-5 text-muted [border-left-width:3px]"
-              >
-                {notice}
-              </p>
-            ))}
-          </div>
+          </p>
         ) : null}
 
         <div
@@ -641,8 +647,6 @@ export function AccountPerformanceChart({
           onPointerDown={handlePointer}
           onPointerLeave={() => setHoverTime(null)}
         >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,207,0,0.12),transparent_34%),radial-gradient(circle_at_75%_70%,rgba(33,209,159,0.12),transparent_30%)]" />
-
           {message ? (
             <div className="relative flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
               <p className="text-sm font-semibold text-foreground">{message.title}</p>
@@ -661,52 +665,38 @@ export function AccountPerformanceChart({
                   <clipPath id={`${uid}clip`}>
                     <rect x={layout.padLeft} y={PAD_TOP} width={layout.plotW} height={layout.plotH} />
                   </clipPath>
-                  <pattern
-                    id={`${uid}nodata`}
-                    width="9"
-                    height="9"
-                    patternUnits="userSpaceOnUse"
-                    patternTransform="rotate(45)"
-                  >
-                    <rect width="9" height="9" fill="rgba(255,255,255,0.02)" />
-                    <line x1="0" y1="0" x2="0" y2="9" stroke="rgba(255,255,255,0.07)" strokeWidth="3" />
-                  </pattern>
                 </defs>
 
-                {/* frame */}
-                <line x1={layout.padLeft} x2={layout.padLeft} y1={PAD_TOP} y2={PAD_TOP + layout.plotH} stroke="rgba(255,255,255,0.12)" />
-                <line x1={layout.padLeft + layout.plotW} x2={layout.padLeft + layout.plotW} y1={PAD_TOP} y2={PAD_TOP + layout.plotH} stroke="rgba(255,255,255,0.12)" />
-                <line x1={layout.padLeft} x2={layout.padLeft + layout.plotW} y1={PAD_TOP + layout.plotH} y2={PAD_TOP + layout.plotH} stroke="rgba(255,255,255,0.12)" />
-
-                {/* horizontal grid + value axes */}
+                {/* the value axis: faint solid lines, the zero line a little stronger, the labels on the left */}
                 {spec.ticks.map((tick, index) => {
                   const y = layout.yOf(tick);
+                  const isZero = spec.zeroValue !== null && Math.abs(tick - spec.zeroValue) < 1e-9;
                   return (
                     <g key={`y-${tick}`}>
-                      <line x1={layout.padLeft} x2={layout.padLeft + layout.plotW} y1={y} y2={y} stroke="rgba(255,255,255,0.08)" strokeDasharray="7 10" />
-                      <text x={layout.padLeft - 10} y={y + 4} textAnchor="end" className={`fill-muted ${compact ? "text-[11px]" : "text-xs"} font-semibold tabular-nums`}>
+                      <line
+                        x1={layout.padLeft}
+                        x2={layout.padLeft + layout.plotW}
+                        y1={y}
+                        y2={y}
+                        stroke={isZero ? GRID_ZERO : GRID}
+                      />
+                      <text x={layout.padLeft - 8} y={y + 4} textAnchor="end" className={`${axisText} font-medium`}>
                         {layout.leftLabels[index]}
                       </text>
-                      {spec.right ? (
-                        <text x={layout.padLeft + layout.plotW + 10} y={y + 4} textAnchor="start" className={`fill-muted ${compact ? "text-[11px]" : "text-xs"} font-semibold tabular-nums`}>
-                          {layout.rightLabels[index]}
-                        </text>
-                      ) : null}
                     </g>
                   );
                 })}
 
-                {/* time axis: the label, and under it the day or year it belongs to */}
+                {/* the time axis: the label, and under it the day or year it belongs to */}
                 {layout.timeLabels.map((tick) => {
                   const x = layout.xOf(tick.time);
                   return (
                     <g key={`x-${tick.time}`}>
-                      <line x1={x} x2={x} y1={PAD_TOP} y2={PAD_TOP + layout.plotH + 4} stroke="rgba(255,255,255,0.06)" />
-                      <text x={x} y={PAD_TOP + layout.plotH + 19} textAnchor="middle" className={`fill-muted ${compact ? "text-[11px]" : "text-xs"} font-semibold tabular-nums`}>
+                      <text x={x} y={PAD_TOP + layout.plotH + 18} textAnchor="middle" className={`${axisText} font-medium`}>
                         {tick.label}
                       </text>
                       {tick.sub ? (
-                        <text x={x} y={PAD_TOP + layout.plotH + 34} textAnchor="middle" className="fill-muted/70 text-[10px] font-medium tabular-nums">
+                        <text x={x} y={PAD_TOP + layout.plotH + 32} textAnchor="middle" className="fill-muted/70 text-[10px] tabular-nums">
                           {tick.sub}
                         </text>
                       ) : null}
@@ -714,12 +704,12 @@ export function AccountPerformanceChart({
                   );
                 })}
 
-                <text x={layout.padLeft} y={22} textAnchor="start" className="fill-accent-2 text-[11px] font-bold uppercase tracking-[0.16em]">
+                <text x={layout.padLeft} y={14} textAnchor="start" className="fill-muted text-[10px] font-semibold uppercase tracking-[0.14em]">
                   {spec.axisTitle}
                 </text>
-                {spec.right ? (
-                  <text x={layout.padLeft + layout.plotW} y={22} textAnchor="end" className="fill-accent text-[11px] font-bold uppercase tracking-[0.16em]">
-                    {spec.right.title}
+                {liveShown ? (
+                  <text x={layout.padLeft + layout.plotW} y={14} textAnchor="end" className="fill-accent-2 text-[10px] font-semibold uppercase tracking-[0.14em]">
+                    ● Live
                   </text>
                 ) : null}
 
@@ -727,26 +717,13 @@ export function AccountPerformanceChart({
                 <g clipPath={`url(#${uid}clip)`}>
                   {layout.bandW > 0 && derived ? (
                     <g pointerEvents="none">
-                      <rect x={layout.padLeft} y={PAD_TOP} width={layout.bandW} height={layout.plotH} fill={`url(#${uid}nodata)`}>
+                      <rect x={layout.padLeft} y={PAD_TOP} width={layout.bandW} height={layout.plotH} fill="rgba(255,255,255,0.03)">
                         <title>{`No data before ${formatTooltipTime(derived.historyStart)}`}</title>
                       </rect>
-                      <line
-                        x1={layout.historyX}
-                        x2={layout.historyX}
-                        y1={PAD_TOP}
-                        y2={PAD_TOP + layout.plotH}
-                        stroke="rgba(255,207,0,0.5)"
-                        strokeDasharray="3 5"
-                      />
                       {layout.bandW >= 104 ? (
-                        <>
-                          <text x={layout.padLeft + layout.bandW / 2} y={PAD_TOP + layout.plotH / 2 - 4} textAnchor="middle" className="fill-muted text-[11px] font-semibold">
-                            No data before
-                          </text>
-                          <text x={layout.padLeft + layout.bandW / 2} y={PAD_TOP + layout.plotH / 2 + 12} textAnchor="middle" className="fill-muted text-[11px] font-semibold">
-                            {formatRangeDate(derived.historyStart)}
-                          </text>
-                        </>
+                        <text x={layout.padLeft + layout.bandW / 2} y={PAD_TOP + layout.plotH / 2 + 4} textAnchor="middle" className="fill-muted/80 text-[11px]">
+                          No data before {formatRangeDate(derived.historyStart)}
+                        </text>
                       ) : null}
                     </g>
                   ) : null}
@@ -760,71 +737,57 @@ export function AccountPerformanceChart({
                         y={PAD_TOP + layout.plotH - barHeight}
                         width={barWidth}
                         height={barHeight}
-                        rx="3"
+                        rx="2"
                         fill={spec.barColor}
                       />
                     );
                   })}
-                  {spec.zeroValue !== null ? (
-                    <line
-                      x1={layout.padLeft}
-                      x2={layout.padLeft + layout.plotW}
-                      y1={layout.yOf(spec.zeroValue)}
-                      y2={layout.yOf(spec.zeroValue)}
-                      stroke="rgba(255,255,255,0.18)"
-                    />
-                  ) : null}
                   {spec.lines.map((line, index) => renderLine(line, index))}
                   {spec.markers.map((marker) => (
                     <circle
                       key={`marker-${marker.t}`}
                       cx={layout.xOf(marker.t)}
                       cy={layout.yOf(marker.v)}
-                      r={marker.count > 1 ? 3.6 : 3}
+                      r={marker.count > 1 ? 3.4 : 2.8}
                       fill={MARKER_COLORS[marker.kind]}
                       stroke="#050505"
-                      strokeWidth={1.2}
+                      strokeWidth={1}
                       opacity={0.92}
                       pointerEvents="none"
                     />
                   ))}
                 </g>
 
-                {/* latest point of every line */}
+                {/* where the main curve ends: the account's latest value */}
                 {spec.lines.map((line) => {
                   const last = line.points[line.points.length - 1];
-                  if (!last) return null;
+                  if (!line.primary || !last) return null;
                   return (
                     <circle
                       key={`last-${line.key}`}
                       cx={layout.xOf(last.t)}
                       cy={layout.yOf(last.v)}
-                      r={5}
+                      r={4}
                       fill="#050505"
                       stroke={line.color}
-                      strokeWidth={3}
+                      strokeWidth={2.5}
                     />
                   );
                 })}
 
-                {/* crosshair + hover markers */}
+                {/* crosshair + hover markers (on the drawn curve) */}
                 {hover && hoverX !== null && hoverTime !== null ? (
                   <g pointerEvents="none">
-                    <line x1={hoverX} x2={hoverX} y1={PAD_TOP} y2={PAD_TOP + layout.plotH} stroke="rgba(255,255,255,0.35)" strokeDasharray="4 4" />
+                    <line x1={hoverX} x2={hoverX} y1={PAD_TOP} y2={PAD_TOP + layout.plotH} stroke="rgba(255,255,255,0.28)" />
                     {spec.lines.map((line) => {
-                      if (line.points.length === 0) return null;
-                      const lineTimes = line.points.map((point) => point.t);
-                      const index = line.step
-                        ? lastIndexAtOrBefore(lineTimes, hoverTime)
-                        : nearestIndexByTime(lineTimes, hoverTime);
-                      const point = index >= 0 ? line.points[index] : null;
-                      if (!point) return null;
+                      const value = lineValueAt(line.points, hoverTime);
+                      if (value === null) return null;
                       return (
                         <circle
                           key={`hover-${line.key}`}
-                          cx={layout.xOf(line.step ? hoverTime : point.t)}
-                          cy={layout.yOf(point.v)}
-                          r={4.5}
+                          cx={hoverX}
+                          cy={layout.yOf(value)}
+                          r={4}
                           fill={line.color}
                           stroke="#050505"
                           strokeWidth={2}
@@ -870,46 +833,52 @@ export function AccountPerformanceChart({
         </div>
 
         {spec && !message && spec.legend.length > 0 ? (
-          <div
-            className={`mt-4 grid grid-cols-1 gap-3 text-xs text-muted ${LEGEND_GRID[Math.min(5, spec.legend.length)] ?? "sm:grid-cols-4"}`}
-          >
+          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px]" aria-label="Chart series">
             {spec.legend.map((item) => {
-              const badge = !item.active ? "Hidden" : (item.value ?? (item.toggleable ? "Shown" : ""));
               const body = (
                 <>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${item.active ? item.color : "bg-muted/40"}`} />
-                      <span className="font-semibold text-foreground">{item.label}</span>
-                    </span>
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted tabular-nums">
-                      {badge}
-                    </span>
-                  </div>
-                  <p className="mt-1">{item.helper}</p>
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${item.active ? item.color : "border border-muted/60"}`}
+                    aria-hidden="true"
+                  />
+                  <span className={`font-semibold ${item.active ? "text-foreground" : "text-muted"}`}>{item.label}</span>
+                  {item.value && item.active ? <span className="tabular-nums text-muted">{item.value}</span> : null}
                 </>
               );
+              const chip = "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1";
               return item.toggleable ? (
                 <button
                   key={item.key}
                   type="button"
-                  onClick={() => toggleSeries(item.key)}
+                  onClick={() => toggleSeries(item)}
                   aria-pressed={item.active}
-                  className={`rounded-[4px] border px-3 py-3 text-left transition ${
-                    item.active
-                      ? "border-line bg-panel text-muted"
-                      : "border-line/60 bg-background text-muted/60 opacity-70"
+                  title={`${item.helper} - click to ${item.active ? "hide" : "show"}`}
+                  className={`${chip} transition ${
+                    item.active ? "border-line bg-panel" : "border-line/50 bg-background opacity-70 hover:opacity-100"
                   }`}
                 >
                   {body}
                 </button>
               ) : (
-                <div key={item.key} className="rounded-[4px] border border-line bg-panel px-3 py-3">
+                <span key={item.key} title={item.helper} className={`${chip} border-line/50 bg-background`}>
                   {body}
-                </div>
+                </span>
               );
             })}
           </div>
+        ) : null}
+
+        {notes.length > 0 ? (
+          <details className="mt-3 text-xs text-muted">
+            <summary className="cursor-pointer select-none font-semibold text-muted hover:text-foreground">
+              Notes ({notes.length})
+            </summary>
+            <ul className="mt-2 space-y-1.5 leading-5">
+              {notes.map((note) => (
+                <li key={note}>{note}</li>
+              ))}
+            </ul>
+          </details>
         ) : null}
 
         {dto && !message ? (

@@ -42,6 +42,32 @@ export interface ClaimedCommand {
   expiresAt: string;
 }
 
+/**
+ * The answer to a previously reserved DIRECT LANE (`directLane.ts`) order. Exactly one of `outcome` / `error` is set.
+ */
+export interface DirectRecord {
+  id: string;
+  userId: string;
+  accountId: string;
+  kind: string;
+  payload: unknown;
+  clientRequestId: string;
+  /** ISO times: the request arrived / it would have expired / the worker began / it was answered */
+  receivedAt: string;
+  expiresAt: string;
+  startedAt: string;
+  completedAt: string;
+  workerId: string;
+  outcome?: TradeCommandOutcome;
+  error?: StoredCommandError;
+}
+
+/** A durable claim made before a direct-lane order may reach the broker. */
+export type DirectReservation = Omit<DirectRecord, "completedAt" | "outcome" | "error">;
+
+/** The command stored for a (user, request id): enough to answer a repeated request. */
+export type StoredCommandRow = Pick<CommandRow, "status" | "result" | "error_code" | "error_message">;
+
 export interface AccountOwner {
   userId: string;
   providerAccountId: string | null;
@@ -73,6 +99,15 @@ export interface GatewayStore {
   owner(accountId: string): Promise<AccountOwner | null>;
   complete(id: string, outcome: TradeCommandOutcome): Promise<void>;
   fail(id: string, error: StoredCommandError): Promise<void>;
+  /** Atomically reserve (user, request id) before broker execution. False means it already exists. */
+  reserveDirect?(entry: DirectReservation): Promise<boolean>;
+  /**
+   * Direct lane (write-behind): finishes its pre-execution RUNNING reservation after the broker answers.
+   * Absent = the lane does not execute an order.
+   */
+  recordDirect?(entry: DirectRecord): Promise<void>;
+  /** Direct lane: the command stored for this (user, request id), or null. Used when a reservation conflicts. */
+  findByRequest?(userId: string, clientRequestId: string): Promise<StoredCommandRow | null>;
   /** Housekeeping: expire what nobody picked up, fail what a dead worker left running, delete old rows. */
   sweep(now: Date): Promise<SweepResult>;
   watched(now: Date): Promise<WatchedAccount[]>;
@@ -166,6 +201,51 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
         .eq("id", id)
         .eq("status", "RUNNING");
       failOnError(dbError, "store the failure of a command");
+    },
+
+    async reserveDirect(entry) {
+      const { error } = await db.from(COMMANDS_TABLE).insert({
+        id: entry.id,
+        user_id: entry.userId,
+        account_id: entry.accountId,
+        kind: entry.kind,
+        payload: entry.payload ?? {},
+        client_request_id: entry.clientRequestId,
+        status: "RUNNING",
+        created_at: entry.receivedAt,
+        expires_at: entry.expiresAt,
+        claimed_at: entry.startedAt,
+        claimed_by: entry.workerId,
+      });
+      if (error?.code === "23505") return false;
+      failOnError(error, "reserve a direct command");
+      return true;
+    },
+
+    async recordDirect(entry) {
+      const failed = entry.error !== undefined;
+      const { error } = await db.from(COMMANDS_TABLE)
+        .update({
+          status: failed ? "FAILED" : "DONE",
+          result: entry.error ? { statusCode: entry.error.statusCode } : (entry.outcome ?? {}),
+          error_code: entry.error ? entry.error.code : null,
+          error_message: entry.error ? entry.error.message.slice(0, 500) : null,
+          completed_at: entry.completedAt,
+        })
+        .eq("id", entry.id)
+        .eq("status", "RUNNING");
+      failOnError(error, "record a direct command");
+    },
+
+    async findByRequest(userId, clientRequestId) {
+      const { data, error } = await db
+        .from(COMMANDS_TABLE)
+        .select("status, result, error_code, error_message")
+        .eq("user_id", userId)
+        .eq("client_request_id", clientRequestId)
+        .maybeSingle();
+      failOnError(error, "look up a command");
+      return (data as StoredCommandRow | null) ?? null;
     },
 
     async sweep(now) {

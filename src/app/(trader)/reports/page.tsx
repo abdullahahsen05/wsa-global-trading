@@ -12,12 +12,10 @@ import {
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
 import type { AnalyticsSummary, TradeDto, TraderAccountSummary } from "@/lib/domain/types";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 import { formatMoney, formatPrice } from "@/lib/utils/format";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
-import {
-  EMPTY_PLATFORM_SUBSCRIPTION_ACCESS,
-  useTraderAccessSummary,
-} from "@/hooks/useTraderAccessSummary";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
 
 type ReportRow = {
   name: string;
@@ -32,10 +30,9 @@ type ReportRow = {
 };
 
 export default function ReportsPage() {
-  const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
-  const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
+  const { access, checking } = usePlatformGate();
 
-  if (accessLoading && !summary) {
+  if (checking) {
     return (
       <WorkspacePage
         eyebrow="Reporting"
@@ -70,16 +67,11 @@ export default function ReportsPage() {
 function ReportsContent() {
   const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
   const { data: accounts = [] } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts", "TRADER"],
-    queryFn: async () => {
-      const res = await fetch("/api/trading-accounts", { cache: "no-store" });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
-      return json.data;
-    },
-    staleTime: 1_000,
-    refetchInterval: 3_000,
-    refetchIntervalInBackground: true,
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
@@ -103,9 +95,9 @@ function ReportsContent() {
       return json.data;
     },
     enabled: Boolean(effectiveAccountId),
-    staleTime: 1_000,
-    refetchInterval: 3_000,
-    refetchIntervalInBackground: true,
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
@@ -123,9 +115,9 @@ function ReportsContent() {
       return json.data;
     },
     enabled: Boolean(effectiveAccountId),
-    staleTime: 3_000,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });

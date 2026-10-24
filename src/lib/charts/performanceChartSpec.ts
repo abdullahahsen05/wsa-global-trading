@@ -1,3 +1,4 @@
+import { downsampleLttb } from "./downsample";
 import {
   bucketLedgerForBars,
   formatAxisMoney,
@@ -15,6 +16,11 @@ import {
  * Turns derived account data into a drawable chart description for each tab
  * (Chart / Growth / Balance / Profit / Drawdown / Margin). Pure - no React and
  * no DOM - so the axis logic can be unit tested.
+ *
+ * The look is Myfxbook's: ONE clean smooth curve on two axes (time and a single value axis), nothing else by
+ * default. The extras - closed-P&L line, volume bars, one dot per trade - exist but are switched off until the person
+ * switches them on (`DEFAULT_OFF`). Lines are thinned to what the width can show (`pointBudget`, Largest-Triangle-
+ * Three-Buckets: real points only) so a long recording is a curve, not a hairy line.
  */
 
 export type ChartTab = "CHART" | "GROWTH" | "BALANCE" | "PROFIT" | "DRAWDOWN" | "MARGIN";
@@ -48,9 +54,11 @@ export interface ChartLine {
   points: ChartPoint[];
   area: boolean;
   dashed: boolean;
-  /** hold the value until the next point (cumulative closed P&L) */
+  /** hold the value until the next point (no tab uses it any more: every curve is smooth) */
   step: boolean;
   width: number;
+  /** the line the chart is about: it gets the filled area and the dot on its latest value */
+  primary: boolean;
 }
 
 export interface ChartBar {
@@ -76,8 +84,10 @@ export interface ChartLegendItem {
   color: string;
   toggleable: boolean;
   active: boolean;
-  /** shown on the right of the card instead of the Shown/Hidden badge */
+  /** shown next to the label */
   value?: string;
+  /** an extra on top of the curve (closed P&L line, volume bars, trade dots): the last curve of a tab can not be switched off, an extra can */
+  overlay?: boolean;
 }
 
 export type ChartEmptyReason = "NO_DATA" | "NO_SNAPSHOTS" | "NO_MARGIN" | null;
@@ -90,11 +100,9 @@ export interface ChartSpec {
   step: number;
   axisTitle: string;
   formatY: (value: number) => string;
-  right: null | {
-    title: string;
-    ticks: number[];
-    formatY: (value: number) => string;
-  };
+  // One value axis only (plus the time axis): the % axis on the Chart / Growth / Drawdown views, money on the
+  // views that are explicitly in money. There is no second, right-hand money axis any more - it made the Chart
+  // view read as three axes and pushed the plot narrower.
   lines: ChartLine[];
   bars: ChartBar[];
   /** closed trades on the curve (empty when switched off or nothing to attach them to) */
@@ -113,13 +121,23 @@ export interface BuildSpecInput {
   ledger: PerformanceLedgerPoint[];
   tradeCount: number;
   tab: ChartTab;
-  /** series keys the user switched off */
+  /**
+   * What the person chose per series key: `true` = switched off, `false` = switched on. A key that is not here
+   * has its default (everything on, except the extras in `DEFAULT_OFF`).
+   */
   hidden: Record<string, boolean>;
   currency: string;
   barCount: number;
   currentDrawdownPct: number | null;
   equityPeak: number | null;
+  /** at most this many points per line are drawn (the width of the plot / 4 is a good value); default 240 */
+  pointBudget?: number;
 }
+
+/** Extras that stay off until the person asks for them. (The closed-P&L line is only an extra on the Chart tab: it IS the Profit tab.) */
+export const DEFAULT_OFF_KEYS: ReadonlyArray<string> = ["volume", "markers"];
+export const DEFAULT_POINT_BUDGET = 240;
+const MIN_POINT_BUDGET = 40;
 
 function range(values: number[]): { min: number; max: number } {
   if (values.length === 0) return { min: 0, max: 0 };
@@ -137,7 +155,7 @@ function line(
   label: string,
   color: string,
   points: ChartPoint[],
-  options: { area?: boolean; dashed?: boolean; step?: boolean; width?: number } = {},
+  options: { area?: boolean; dashed?: boolean; step?: boolean; width?: number; primary?: boolean } = {},
 ): ChartLine {
   return {
     key,
@@ -147,7 +165,8 @@ function line(
     area: options.area ?? false,
     dashed: options.dashed ?? false,
     step: options.step ?? false,
-    width: options.width ?? 3,
+    width: options.width ?? 2.25,
+    primary: options.primary ?? false,
   };
 }
 
@@ -178,7 +197,13 @@ function thinEvenly<T>(items: T[], max: number): T[] {
 
 export function buildChartSpec(input: BuildSpecInput): ChartSpec {
   const { derived, ledger, tab, hidden, currency } = input;
-  const on = (key: string) => hidden[key] !== true;
+  // what the person chose wins; otherwise a series is on - except the extras
+  const defaultOff = (key: string): boolean => DEFAULT_OFF_KEYS.includes(key) || (tab === "CHART" && key === "pnl");
+  const on = (key: string): boolean => (hidden[key] === undefined ? !defaultOff(key) : hidden[key] !== true);
+  // (only real points are kept; the shape of each line decides which)
+  const budget = Math.max(MIN_POINT_BUDGET, Math.floor(input.pointBudget ?? DEFAULT_POINT_BUDGET));
+  const thin = (items: ChartPoint[]): ChartPoint[] =>
+    downsampleLttb(items, budget, (item) => item.t, (item) => item.v);
   const points = derived.points;
   const hasPoints = points.length > 0;
   const hasTrades = input.tradeCount > 0;
@@ -191,7 +216,6 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
     step: 0.5,
     axisTitle: "",
     formatY: (value) => String(value),
-    right: null,
     lines: [],
     bars: [],
     markers: [],
@@ -261,6 +285,7 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
             toggleable: true,
             active: on("markers"),
             value: String(input.tradeCount),
+            overlay: true,
           },
         ]
       : [];
@@ -282,7 +307,9 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
   // range (without a first balance there is no base to express growth in %).
   const profitSpec = (): ChartSpec => {
     const pnl = derived.pnl.map((point) => ({ t: point.t, v: point.cum }));
-    const values: number[] = on("pnl") ? pnl.map((point) => point.v) : [0];
+    // (here the P&L curve IS the chart, also when it stands in for the Chart tab: only an explicit "off" hides it)
+    const pnlOn = hidden["pnl"] !== true;
+    const values: number[] = pnlOn ? pnl.map((point) => point.v) : [0];
     const { min, max } = range(values);
     const reference = Math.max(Math.abs(min), Math.abs(max));
     const scale = niceScale(min, max, { includeZero: true, minSpan: Math.max(reference * 0.1, 10) });
@@ -294,11 +321,11 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
       step: scale.step,
       axisTitle: "Closed P&L",
       formatY: (value) => formatAxisMoney(value, currency, scale.step),
-      lines: on("pnl")
-        ? [line("pnl", "Closed P&L", CHART_COLORS.gold, pnl, { area: true, step: true, width: 3 })]
+      lines: pnlOn
+        ? [line("pnl", "Closed P&L", CHART_COLORS.gold, thin(pnl), { area: true, width: 2.5, primary: true })]
         : [],
       bars: on("volume") ? volumeBars(true) : [],
-      markers: buildMarkers(on("pnl") ? onPnl((index) => derived.pnl[index].cum) : null),
+      markers: buildMarkers(pnlOn ? onPnl((index) => derived.pnl[index].cum) : null),
       zeroValue: 0,
       legend: [
         {
@@ -307,23 +334,25 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
           helper: "Cumulative closed-trade profit",
           color: "bg-accent",
           toggleable: true,
-          active: on("pnl"),
+          active: pnlOn,
           value: money(derived.closedPnl, currency),
         },
         {
           key: "volume",
-          label: "Volume bars",
+          label: "Volume",
           helper: "Traded lot volume",
           color: "bg-accent/50",
           toggleable: true,
           active: on("volume"),
+          overlay: true,
         },
         ...markersLegend(),
       ],
     };
   };
 
-  // ── CHART: equity growth % + closed P&L (dual axis) + volume bars ─────────
+  // ── CHART: ONE smooth equity-growth curve (%), the way Myfxbook draws it; the closed-P&L line, the volume bars and
+  //    the trade dots are extras that stay off until switched on ──
   if (tab === "CHART") {
     if (!hasPoints) return { ...profitSpec(), missingSnapshots: true };
     const equity = points.map((point) => ({
@@ -337,16 +366,15 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
     if (on("pnl")) values.push(...pnl.map((point) => point.v));
     const { min, max } = range(values);
     const scale = niceScale(min, max, { includeZero: true, minSpan: 0.2 });
-    // The money axis on the right is the % axis times what closed P&L is measured against.
-    const base = derived.pnlBase;
+    // Closed P&L (when switched on) is drawn as % of what it is measured against (`derived.pnlBase`), on the same axis
+    // as the equity growth; its money amount is in the legend and in the hover read-out, not on a second axis.
     const lines: ChartLine[] = [];
-    if (on("equity") && equity.length > 0) {
-      lines.push(line("equity", "Equity growth", CHART_COLORS.equity, equity, { area: true, width: 3.5 }));
+    const equityDrawn = on("equity") && equity.length > 0;
+    if (equityDrawn) {
+      lines.push(line("equity", "Equity growth", CHART_COLORS.equity, thin(equity), { area: true, width: 2.5, primary: true }));
     }
     if (on("pnl")) {
-      lines.push(
-        line("pnl", "Closed P&L", CHART_COLORS.gold, pnl, { dashed: true, step: true, width: 3 }),
-      );
+      lines.push(line("pnl", "Closed P&L", CHART_COLORS.gold, thin(pnl), { width: 1.75, primary: !equityDrawn }));
     }
     return {
       ...empty,
@@ -356,14 +384,6 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
       step: scale.step,
       axisTitle: "Growth %",
       formatY: (value) => formatAxisPercent(value, scale.step),
-      right: base
-        ? {
-            title: "Closed P&L",
-            ticks: scale.ticks.map((tick) => (tick / 100) * base),
-            formatY: (value) =>
-              formatAxisMoney(value, currency, Math.abs((scale.step / 100) * base)),
-          }
-        : null,
       lines,
       bars: on("volume") ? volumeBars(true) : [],
       markers: buildMarkers(
@@ -377,36 +397,41 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
       legend: [
         {
           key: "equity",
-          label: "Equity curve",
-          helper: "Recorded balance/equity snapshots",
+          label: "Equity growth",
+          helper: "Recorded balance/equity snapshots, without deposits / withdrawals",
           color: "bg-accent-2",
           toggleable: true,
           active: on("equity"),
+          value: formatSignedPercent(derived.equityGrowthPct),
         },
         {
           key: "pnl",
-          label: "Closed P&L curve",
-          helper: "Cumulative closed-trade profit",
+          label: "Closed P&L",
+          helper: "Cumulative closed-trade profit, as % of the starting balance",
           color: "bg-accent",
           toggleable: true,
           active: on("pnl"),
+          value: money(derived.closedPnl, currency),
+          overlay: true,
         },
         {
           key: "volume",
-          label: "Volume bars",
+          label: "Volume",
           helper: "Traded lot volume",
           color: "bg-accent/50",
           toggleable: true,
           active: on("volume"),
+          overlay: true,
         },
         ...markersLegend(),
         {
           key: "drawdown",
           label: "Drawdown",
-          helper: percent(drawdownCurrent, 1),
+          helper: "Current drawdown vs the highest equity",
           color: drawdownCurrent > 0 ? "bg-danger" : "bg-muted",
           toggleable: false,
           active: true,
+          value: percent(drawdownCurrent, 1),
         },
       ],
     };
@@ -432,10 +457,10 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
     const scale = niceScale(min, max, { includeZero: true, minSpan: 0.2 });
     const lines: ChartLine[] = [];
     if (on("balance")) {
-      lines.push(line("balance", "Balance growth", CHART_COLORS.gold, balance, { width: 2.5 }));
+      lines.push(line("balance", "Balance growth", CHART_COLORS.gold, thin(balance), { width: 1.75, primary: !on("equity") }));
     }
     if (on("equity")) {
-      lines.push(line("equity", "Equity growth", CHART_COLORS.equity, equity, { area: true, width: 3.5 }));
+      lines.push(line("equity", "Equity growth", CHART_COLORS.equity, thin(equity), { area: true, width: 2.5, primary: true }));
     }
     return {
       ...empty,
@@ -491,10 +516,10 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
     const scale = niceScale(min, max, { minSpan: Math.max(reference * 0.004, 1) });
     const lines: ChartLine[] = [];
     if (on("equity")) {
-      lines.push(line("equity", "Equity", CHART_COLORS.equity, equity, { area: true, width: 3 }));
+      lines.push(line("equity", "Equity", CHART_COLORS.equity, thin(equity), { area: true, width: 2.5, primary: true }));
     }
     if (on("balance")) {
-      lines.push(line("balance", "Balance", CHART_COLORS.gold, balance, { width: 2.5 }));
+      lines.push(line("balance", "Balance", CHART_COLORS.gold, thin(balance), { width: 1.75, primary: !on("equity") }));
     }
     const latest = derived.latest;
     return {
@@ -562,7 +587,7 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
       step: scale.step,
       axisTitle: "Drawdown %",
       formatY: (value) => formatAxisPercent(value, scale.step),
-      lines: [line("drawdown", "Drawdown", CHART_COLORS.danger, drawdown, { area: true, width: 3 })],
+      lines: [line("drawdown", "Drawdown", CHART_COLORS.danger, thin(drawdown), { area: true, width: 2.5, primary: true })],
       zeroValue: 0,
       legend: [
         {
@@ -621,10 +646,10 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
     formatY: (value) => formatAxisMoney(value, currency, scale.step),
     lines: [
       ...(on("free") && free.length > 0
-        ? [line("free", "Free margin", CHART_COLORS.equity, free, { area: true, width: 3 })]
+        ? [line("free", "Free margin", CHART_COLORS.equity, thin(free), { area: true, width: 2.5, primary: true })]
         : []),
       ...(on("used") && used.length > 0
-        ? [line("used", "Used margin", CHART_COLORS.gold, used, { width: 2.5 })]
+        ? [line("used", "Used margin", CHART_COLORS.gold, thin(used), { width: 1.75, primary: !(on("free") && free.length > 0) })]
         : []),
     ],
     zeroValue: 0,
@@ -658,6 +683,26 @@ export function buildChartSpec(input: BuildSpecInput): ChartSpec {
       },
     ],
   };
+}
+
+/**
+ * The value of a drawn line at `time`: the point's own value, or the straight-line value between its two neighbours.
+ * Null outside the line (before its first or after its last point). The hover marker sits on the drawn curve with this.
+ */
+export function lineValueAt(points: ReadonlyArray<ChartPoint>, time: number): number | null {
+  if (points.length === 0) return null;
+  if (time < points[0].t || time > points[points.length - 1].t) return null;
+  let low = 0;
+  let high = points.length - 1;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (points[middle].t <= time) low = middle;
+    else high = middle - 1;
+  }
+  const before = points[low];
+  const after = points[low + 1];
+  if (!after || after.t === before.t) return before.v;
+  return before.v + ((after.v - before.v) * (time - before.t)) / (after.t - before.t);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

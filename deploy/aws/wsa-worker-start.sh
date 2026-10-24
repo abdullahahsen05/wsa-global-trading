@@ -35,6 +35,17 @@ export API2TRADE_EVENTS_URL="$(read_optional_parameter /wsa/test/API2TRADE_EVENT
 export API2TRADE_API_KEY="$(read_optional_parameter /wsa/test/API2TRADE_API_KEY)"
 export API2TRADE_USERNAME="$(read_optional_parameter /wsa/test/API2TRADE_USERNAME)"
 export API2TRADE_PASSWORD="$(read_optional_parameter /wsa/test/API2TRADE_PASSWORD)"
+# WSA Trade DIRECT LANE (optional, copy worker only): a port the web server sends WSA Trade orders to, so an order
+# skips the database queue (the worker still durably reserves each order before execution). It stays OFF unless this
+# parameter holds a random secret of at least 32 characters
+# (put the same value in the web app's WSA_TRADE_DIRECT_SECRET) and the port is open in the security group.
+# The port serves HTTPS by itself: the key and the self-signed certificate are worked out from that same secret on both
+# sides (nothing to install or copy; the web address is https://<public IP or name>:8787). WSA_TRADE_DIRECT_TLS=off serves
+# plain HTTP instead - only for a port that a local TLS proxy reaches (then also WSA_TRADE_DIRECT_HOST=127.0.0.1).
+export WSA_TRADE_DIRECT_SECRET="$(read_optional_parameter /wsa/test/WSA_TRADE_DIRECT_SECRET)"
+export WSA_TRADE_DIRECT_PORT="${WSA_TRADE_DIRECT_PORT:-8787}"
+export WSA_TRADE_DIRECT_HOST="${WSA_TRADE_DIRECT_HOST:-0.0.0.0}"
+export WSA_TRADE_DIRECT_TLS="${WSA_TRADE_DIRECT_TLS:-on}"
 
 export NODE_ENV=production
 if [[ -n "${API2TRADE_BASE_URL}" && ( -n "${API2TRADE_API_KEY}" || ( -n "${API2TRADE_USERNAME}" && -n "${API2TRADE_PASSWORD}" ) ) ]]; then

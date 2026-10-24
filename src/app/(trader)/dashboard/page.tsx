@@ -1,12 +1,12 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BillingCheckoutModal } from "@/components/app/BillingCheckoutModal";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
-import type { UserBillingSummaryDto } from "@/lib/services/billingService";
-import { DashboardModeOverlay } from "@/components/dashboard/DashboardModeOverlay";
+import { DashboardSkeleton } from "@/components/dashboard/DashboardSkeleton";
 import { DashboardKpiStrip, MarketSentimentStrip } from "@/components/dashboard/DashboardKpiStrip";
 import { PerformanceRings, type PerformanceRingItem } from "@/components/dashboard/PerformanceRings";
 import { Panel, PageActionGroup, WorkspacePage } from "@/components/app/WorkspaceUI";
@@ -31,15 +31,25 @@ import type {
   TradeDto,
   RiskRuleDto,
 } from "@/lib/domain/types";
-import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
 import { usePerformanceSeries } from "@/hooks/usePerformanceSeries";
+import { useSessionUser } from "@/hooks/useSessionUser";
+import { useShellHint } from "@/hooks/useShellHint";
 import { AccountPerformanceChart } from "@/components/charts/AccountPerformanceChart";
 import { normalizeSamples, type PerformanceRange } from "@/lib/charts/performanceSeries";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 import { getAccountDisplayIdentity } from "@/lib/domain/accountIdentity";
-import { isLiveConnectedAccount } from "@/lib/accounts/lifecycle";
+import { readLastAccount, rememberLastAccount } from "@/lib/shell/lastAccount";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 
-type SessionUser = { id: string; name: string; email: string };
+// The detail overlay (limits, profit summary, the trade calendar with its 42 day cells) is only needed once a tab is
+// pressed, so its code is not part of the dashboard's first download. It is fetched in the background a moment after
+// the page is up and when a hand reaches for a tab - by the time anyone clicks it is normally already here.
+const loadOverlay = () => import("@/components/dashboard/DashboardModeOverlay");
+const DashboardModeOverlay = dynamic(
+  () => import("@/components/dashboard/DashboardModeOverlay").then((mod) => mod.DashboardModeOverlay),
+  { ssr: false },
+);
 
 const dashboardTabs: Array<{ id: DashboardView; label: string }> = [
   { id: "CURRENT_EQUITY", label: "Current Equity" },
@@ -60,42 +70,6 @@ function formatSyncTime(value: string | null | undefined): string {
 }
 
 export default function TraderDashboardPage() {
-  const { data: summary, isLoading } = useTraderAccessSummary();
-  const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
-
-  if (isLoading && !summary) {
-    return (
-      <WorkspacePage
-        eyebrow="Workspace"
-        title="Trading Dashboard"
-        description="Loading your platform access status."
-      >
-        <Panel>
-          <p className="text-sm text-muted">Loading…</p>
-        </Panel>
-      </WorkspacePage>
-    );
-  }
-
-  if (access.status !== "ACTIVE") {
-    return (
-      <WorkspacePage
-        eyebrow="Workspace"
-        title="Trading Dashboard"
-        description="Activate your platform subscription to unlock the live trader dashboard."
-      >
-        <PlatformSubscriptionLocked
-          access={access}
-          description="Activate the WSA Global platform subscription to unlock live dashboard metrics, MT5 account tracking, and the full trading workspace."
-        />
-      </WorkspacePage>
-    );
-  }
-
-  return <TraderDashboardContent />;
-}
-
-function TraderDashboardContent() {
   const [selectedPeriod, setSelectedPeriod] = useState<Period>("MONTHLY");
   const [selectedView, setSelectedView] = useState<DashboardView>("CURRENT_EQUITY");
   const [activeOverlay, setActiveOverlay] = useState<DashboardView | null>(null);
@@ -104,26 +78,23 @@ function TraderDashboardContent() {
   const [chartRange, setChartRange] = useState<PerformanceRange>("ALL");
   const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
 
-  const { data: sessionUser } = useQuery<SessionUser>({
-    queryKey: ["session"],
-    queryFn: async () => {
-      const res = await fetch("/api/auth/session");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load profile");
-      return json.data;
-    },
-  });
+  // The platform-access check and every data request below start TOGETHER. They used to wait for each other (access ->
+  // accounts -> trades / risk / statistics / chart): four round trips in a row before the first figure. Now the access
+  // check only decides what is SHOWN (locked page or dashboard); it is also the one `/api/billing/me` request of the page.
+  // For somebody this browser remembers as active the dashboard is drawn from the first paint (`access` is then the
+  // remembered guess) and the answer, when it comes, only confirms it - or switches the page to the locked view.
+  const { summary: billingSummary, access, checking: accessChecking } = usePlatformGate();
+  // (until the answer is in the data is asked for; once it says "not active" the polling stops)
+  const dataEnabled = !billingSummary || access.status === "ACTIVE";
 
-  const { data: billingSummary } = useQuery<UserBillingSummaryDto>({
-    queryKey: ["billing-me"],
-    queryFn: async () => {
-      const res = await fetch("/api/billing/me");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load billing");
-      return json.data;
-    },
-    staleTime: 30_000,
-  });
+  const { data: sessionUser } = useSessionUser();
+  const hint = useShellHint();
+  const knownUserId = sessionUser?.id ?? hint?.id ?? null;
+  // The account this person looked at last in this browser: its requests are sent at once with the account list.
+  const rememberedAccountId = useMemo(
+    () => (knownUserId ? readLastAccount(knownUserId) : null),
+    [knownUserId],
+  );
 
   const subStatus = billingSummary?.platformSubscription?.status;
   const subEnd = billingSummary?.platformSubscription?.currentPeriodEnd;
@@ -132,29 +103,31 @@ function TraderDashboardContent() {
     subStatus !== "ACTIVE" &&
     subStatus !== "PENDING_APPROVAL";
 
-  // Fetch trading accounts
+  // Fetch trading accounts (the same key as the top bar's account picker: one request and one poll for both). Supabase
+  // Realtime refreshes it within seconds of a change; the poll is the fallback if the socket drops, and it only runs
+  // while the browser tab is on screen.
   const { data: accounts = [], isLoading } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts", "TRADER"],
-    queryFn: async () => {
-      const res = await fetch("/api/trading-accounts", { cache: "no-store" });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
-      return json.data;
-    },
-    staleTime: 1_000,
-    refetchInterval: 3_000,
-    refetchIntervalInBackground: true,
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
+    enabled: dataEnabled,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
 
   const connectedAccounts = useMemo(
-    () => accounts.filter(isLiveConnectedAccount),
+    () => accounts.filter((account) => account.status === "CONNECTED"),
     [accounts],
   );
   const baseAccount =
     connectedAccounts.find((account) => account.accountId === selectedAccountId) ??
     connectedAccounts[0];
+  // The account the data below is asked for: the real one once the list is in, the one this person looked at last until
+  // then - so trades, rules, statistics and the chart travel at the same time as the list instead of after it. A wrong
+  // guess (the account is gone) costs only those requests; the list always wins.
+  const dataAccountId = baseAccount?.accountId ?? (isLoading ? rememberedAccountId : null);
 
   useEffect(() => {
     const effectiveAccountId = baseAccount?.accountId ?? null;
@@ -163,13 +136,17 @@ function TraderDashboardContent() {
     }
   }, [baseAccount?.accountId, selectedAccountId, setSelectedAccountId]);
 
+  useEffect(() => {
+    if (sessionUser?.id && baseAccount?.accountId) rememberLastAccount(sessionUser.id, baseAccount.accountId);
+  }, [sessionUser?.id, baseAccount?.accountId]);
+
   // Keep the selected account's ledger current. Supabase Realtime invalidates
-  // this query immediately; polling is the fallback if a realtime socket drops.
+  // this query within seconds; polling is the (slow) fallback if a realtime socket drops.
   const { data: trades = [] } = useQuery<TradeDto[]>({
-    queryKey: ["trades", baseAccount?.accountId],
+    queryKey: ["trades", dataAccountId],
     queryFn: async () => {
       const params = new URLSearchParams({
-        accountId: baseAccount!.accountId,
+        accountId: dataAccountId!,
         limit: "500",
       });
       const res = await fetch(`/api/trades?${params.toString()}`, { cache: "no-store" });
@@ -177,19 +154,19 @@ function TraderDashboardContent() {
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load trades");
       return json.data;
     },
-    enabled: Boolean(baseAccount?.accountId),
-    staleTime: 1_000,
-    refetchInterval: 3_000,
-    refetchIntervalInBackground: true,
+    enabled: dataEnabled && Boolean(dataAccountId),
+    staleTime: 3_000,
+    refetchInterval: 10_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
 
   const { data: calendarTrades = trades } = useQuery<TradeDto[]>({
-    queryKey: ["trades", "calendar", baseAccount?.accountId],
+    queryKey: ["trades", "calendar", dataAccountId],
     queryFn: async () => {
       const params = new URLSearchParams({
-        accountId: baseAccount!.accountId,
+        accountId: dataAccountId!,
         status: "CLOSED",
         limit: "10000",
       });
@@ -199,19 +176,19 @@ function TraderDashboardContent() {
       return json.data;
     },
     enabled:
-      Boolean(baseAccount?.accountId) && activeOverlay === "CALENDAR_TRACKER",
+      dataEnabled && Boolean(dataAccountId) && activeOverlay === "CALENDAR_TRACKER",
     staleTime: 5_000,
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: 15_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
 
   // Fetch risk rules
   const { data: riskRules = [] } = useQuery<RiskRuleDto[]>({
-    queryKey: ["risk-rules", baseAccount?.accountId],
+    queryKey: ["risk-rules", dataAccountId],
     queryFn: async () => {
-      const params = new URLSearchParams({ accountId: baseAccount!.accountId });
+      const params = new URLSearchParams({ accountId: dataAccountId! });
       const res = await fetch(`/api/risk/rules?${params.toString()}`, {
         cache: "no-store",
       });
@@ -219,18 +196,20 @@ function TraderDashboardContent() {
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load risk rules");
       return json.data;
     },
-    enabled: Boolean(baseAccount?.accountId),
+    enabled: dataEnabled && Boolean(dataAccountId),
     staleTime: 60_000,
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
   });
 
+  // The statistics read every snapshot and closed trade of the period: refreshed by Realtime (at most every 8 s) and by
+  // a slow poll, not every few seconds.
   const { data: analyticsSummary } = useQuery<AnalyticsSummary>({
-    queryKey: ["analytics-summary", baseAccount?.accountId, selectedPeriod],
+    queryKey: ["analytics-summary", dataAccountId, selectedPeriod],
     queryFn: async () => {
       const params = new URLSearchParams({
-        accountId: baseAccount!.accountId,
+        accountId: dataAccountId!,
         period: selectedPeriod,
       });
       const res = await fetch(`/api/analytics/summary?${params.toString()}`, {
@@ -240,19 +219,19 @@ function TraderDashboardContent() {
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load performance summary");
       return json.data;
     },
-    enabled: Boolean(baseAccount?.accountId),
-    staleTime: 3_000,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    enabled: dataEnabled && Boolean(dataAccountId),
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
 
   const { data: dailyAnalyticsSummary } = useQuery<AnalyticsSummary>({
-    queryKey: ["analytics-summary", baseAccount?.accountId, "DAILY"],
+    queryKey: ["analytics-summary", dataAccountId, "DAILY"],
     queryFn: async () => {
       const params = new URLSearchParams({
-        accountId: baseAccount!.accountId,
+        accountId: dataAccountId!,
         period: "DAILY",
       });
       const res = await fetch(`/api/analytics/summary?${params.toString()}`, {
@@ -262,10 +241,10 @@ function TraderDashboardContent() {
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load daily performance");
       return json.data;
     },
-    enabled: Boolean(baseAccount?.accountId) && selectedPeriod !== "DAILY",
-    staleTime: 3_000,
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    enabled: dataEnabled && Boolean(dataAccountId) && selectedPeriod !== "DAILY",
+    staleTime: 10_000,
+    refetchInterval: 20_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: "always",
     refetchOnReconnect: "always",
   });
@@ -273,7 +252,7 @@ function TraderDashboardContent() {
   // Sampled balance/equity history of the selected account. The chart below
   // reads the very same query (same key), so this costs no extra request; the
   // KPI sparklines are drawn from the recorded samples of the same range.
-  const { data: performanceSeries } = usePerformanceSeries(baseAccount?.accountId, chartRange);
+  const { data: performanceSeries } = usePerformanceSeries(dataAccountId, chartRange, { enabled: dataEnabled });
   const kpiSparklines = useMemo(() => {
     const samples = performanceSeries ? normalizeSamples(performanceSeries.samples) : [];
     return {
@@ -288,6 +267,13 @@ function TraderDashboardContent() {
   useEffect(() => {
     const timer = window.setInterval(() => setStatsNow(new Date()), 60_000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadOverlay().catch(() => undefined);
+    }, 2_500);
+    return () => window.clearTimeout(timer);
   }, []);
 
   const live = useMemo(
@@ -493,6 +479,35 @@ function TraderDashboardContent() {
     },
   ];
 
+  // (every hook is above: the access answer only chooses what is shown, it never delays what is fetched)
+  if (accessChecking) {
+    // The page's own header and the shape of the finished dashboard from the first paint - not a bare "Loading…".
+    return (
+      <WorkspacePage
+        eyebrow="Trader workspace"
+        title={`Welcome, ${sessionUser?.name?.trim() || "Trader"}`}
+        description="Equity, risk, and performance across your connected accounts."
+      >
+        <DashboardSkeleton />
+      </WorkspacePage>
+    );
+  }
+
+  if (access.status !== "ACTIVE") {
+    return (
+      <WorkspacePage
+        eyebrow="Workspace"
+        title="Trading Dashboard"
+        description="Activate your platform subscription to unlock the live trader dashboard."
+      >
+        <PlatformSubscriptionLocked
+          access={access}
+          description="Activate the WSA Global platform subscription to unlock live dashboard metrics, MT5 account tracking, and the full trading workspace."
+        />
+      </WorkspacePage>
+    );
+  }
+
   return (
     <>
     <WorkspacePage
@@ -507,11 +522,14 @@ function TraderDashboardContent() {
               <button
                 key={tab.id}
                 type="button"
+                disabled={!baseAccount}
+                onPointerEnter={() => void loadOverlay().catch(() => undefined)}
+                onFocus={() => void loadOverlay().catch(() => undefined)}
                 onClick={() => {
                   setSelectedView(tab.id);
                   setActiveOverlay(tab.id);
                 }}
-                className={`btn-dark h-9 px-4 text-xs ${active ? "btn-active" : ""}`}
+                className={`btn-dark h-9 px-4 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${active ? "btn-active" : ""}`}
               >
                 {tab.label}
               </button>
@@ -548,8 +566,10 @@ function TraderDashboardContent() {
         </div>
       )}
 
-      {/* Empty state for traders with no connected accounts */}
-      {!isLoading && connectedAccounts.length === 0 ? (
+      {/* Empty state for traders with no connected accounts; the finished page's shape while the account list is on its way */}
+      {isLoading && !baseAccount ? (
+        <DashboardSkeleton />
+      ) : !isLoading && connectedAccounts.length === 0 ? (
         <div className="mt-10 flex flex-col items-center justify-center gap-5 text-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-full border border-line bg-panel">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -624,7 +644,7 @@ function TraderDashboardContent() {
           </Panel>
           <AccountPerformanceChart
             className="mt-4"
-            accountId={baseAccount?.accountId}
+            accountId={dataAccountId}
             accountName={baseAccount?.accountName ?? "your selected account"}
             currency={accountCurrency}
             range={chartRange}
@@ -632,31 +652,35 @@ function TraderDashboardContent() {
             liveEquity={baseAccount ? live.equity : null}
             currentDrawdownPercent={baseAccount ? accountDrawdown : null}
           />
-          <DashboardModeOverlay
-            open={activeOverlay !== null}
-            view={activeOverlay}
-            onOpenChange={(open) => {
-              if (!open) setActiveOverlay(null);
-            }}
-            selectedPeriod={selectedPeriod}
-            onPeriodChange={setSelectedPeriod}
-            live={live}
-            openTrades={openTrades}
-            calendarTrades={calendarTrades}
-            summary={overlayPeriodStats}
-            currency={accountCurrency}
-            dailyClosedPnl={dailyClosedPnl}
-            dailyLossLimit={riskLimits.dailyLoss}
-            maxDrawdownLimit={riskLimits.maxDrawdown}
-            openTradeLimit={riskLimits.openTrades}
-            openTradeCount={accountOpenTradeCount}
-            riskState={riskState}
-            profitFactor={periodProfitFactor}
-            avgWinLoss={periodAvgWinLoss}
-          />
         </>
       )}
     </WorkspacePage>
+
+    {/* mounted only while a tab is open: its code (and the calendar's) is fetched on demand, see `loadOverlay` */}
+    {activeOverlay !== null && baseAccount ? (
+      <DashboardModeOverlay
+        open
+        view={activeOverlay}
+        onOpenChange={(open) => {
+          if (!open) setActiveOverlay(null);
+        }}
+        selectedPeriod={selectedPeriod}
+        onPeriodChange={setSelectedPeriod}
+        live={live}
+        openTrades={openTrades}
+        calendarTrades={calendarTrades}
+        summary={overlayPeriodStats}
+        currency={accountCurrency}
+        dailyClosedPnl={dailyClosedPnl}
+        dailyLossLimit={riskLimits.dailyLoss}
+        maxDrawdownLimit={riskLimits.maxDrawdown}
+        openTradeLimit={riskLimits.openTrades}
+        openTradeCount={accountOpenTradeCount}
+        riskState={riskState}
+        profitFactor={periodProfitFactor}
+        avgWinLoss={periodAvgWinLoss}
+      />
+    ) : null}
 
     <BillingCheckoutModal
       open={subModalOpen}

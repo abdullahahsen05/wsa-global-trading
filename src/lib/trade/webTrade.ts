@@ -40,6 +40,11 @@ export const WEB_TRADE_BURST_POLL_MS = 400;
 export const WEB_TRADE_BURST_MS = 3500;
 /** Order comment seen in the broker's history. It must NOT start with `wsa:` (the copy engine's own marker). */
 export const WEB_TRADE_COMMENT = "WSA Trade";
+/**
+ * The header the panel sends with an order: the "pass" the last state poll brought (`WebTradeState.pass`). It is signed by
+ * the server and says "this session, this account, was checked a moment ago", so the order route does not have to check it all again.
+ */
+export const WEB_TRADE_PASS_HEADER = "x-wsa-pass";
 
 export const TRADE_SYMBOL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._#@!$&+-]{0,31}$/;
 export const TICKET_PATTERN = /^[0-9]{1,20}$/;
@@ -156,6 +161,9 @@ export type WebTradeGateReason =
  */
 export type WebTradeRoute = "gateway" | "direct" | "none";
 
+/** Which way an order takes to the trading system: straight over HTTPS ("direct") or through the database queue ("database"). */
+export type WebTradeLane = "direct" | "database";
+
 /** Why an account cannot trade right now. `canManage` (change SL / TP, close) is on whenever the account can be reached. */
 export interface WebTradeGate {
   canOpen: boolean;
@@ -213,8 +221,22 @@ export interface WebTradeState {
   fetchedAt: string;
   /** where this picture came from */
   route: WebTradeRoute;
+  /**
+   * How an order of this account travels right now: "direct" = the web server hands it to the trading system on AWS in one
+   * signed HTTPS request (no database in between); "database" = through the command queue (the usual way, and what happens
+   * while the direct lane is not set up or is paused). Absent when the picture did not come through the trading system.
+   */
+  lane?: WebTradeLane;
+  /** why the direct lane is not in use although it was meant to be (null = nothing to say) */
+  laneNote?: string | null;
   /** the picture is older than it should be (the trading system is slow or busy) */
   delayed: boolean;
+  /**
+   * A signed pass for the next few seconds: the sign-in, the platform subscription, the account, the risk verdict and the
+   * route of THIS account were just checked. The panel sends it back with an order (`WEB_TRADE_PASS_HEADER`); a pass that is
+   * missing, old, for another session or another account is simply ignored and the order is checked the long way.
+   */
+  pass?: string;
 }
 
 /** One position or order a bulk command could not handle. */
@@ -269,9 +291,10 @@ export interface WebTradeTiming {
   awsLoopMs?: number;
   /**
    * How the command and its answer found each other: "live" = inside the database the moment the row changed
-   * (migration 062, on both sides); "web-poll" = the web server asked again and again; "aws-poll" = the AWS worker did.
+   * (migration 062, on both sides); "web-poll" = the web server asked again and again; "aws-poll" = the AWS worker did;
+   * "direct" = the order went straight to the AWS worker over HTTP, with no database in between.
    */
-  wake?: "live" | "web-poll" | "aws-poll";
+  wake?: "live" | "web-poll" | "aws-poll" | "direct";
   /** browser: from the click to the answer (added by the panel's request helper) */
   totalMs?: number;
 }

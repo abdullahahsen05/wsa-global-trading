@@ -19,6 +19,7 @@ import {
   WEB_TRADE_ORDER_KINDS,
   WEB_TRADE_SIDES,
 } from "@/lib/trade/webTrade";
+import { WEB_TRADE_HISTORY_MAX } from "@/lib/trade/webTradeHistory";
 
 const accountIdSchema = z.string().uuid("Account is not valid.");
 const symbolSchema = z.string().trim().regex(TRADE_SYMBOL_PATTERN, "Symbol is not valid.");
@@ -117,6 +118,13 @@ export const webTradeStateQuerySchema = z.object({
 
 export const webTradeSymbolsQuerySchema = z.object({
   accountId: accountIdSchema,
+});
+
+/** The History tab: closed trades of one account, optionally only those closed at or after `since`. */
+export const webTradeHistoryQuerySchema = z.object({
+  accountId: accountIdSchema,
+  since: z.string().datetime({ offset: true, message: "Start of the period is not valid." }).optional(),
+  limit: z.coerce.number().int().min(1).max(WEB_TRADE_HISTORY_MAX).optional(),
 });
 
 /** The messages of a failed validation as one text (no duplicates). */

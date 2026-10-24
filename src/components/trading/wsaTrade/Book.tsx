@@ -31,7 +31,7 @@ const SHARES: ReadonlyArray<{ share: number; label: string }> = [
   { share: 1, label: "All" },
 ];
 
-function SideBadge({ side, text }: { side: "BUY" | "SELL"; text: string }) {
+export function SideBadge({ side, text }: { side: "BUY" | "SELL"; text: string }) {
   const color = side === "BUY" ? "bg-accent-2/15 text-accent-2" : "bg-danger/15 text-danger";
   return (
     <span className={`rounded-[3px] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${color}`}>{text}</span>

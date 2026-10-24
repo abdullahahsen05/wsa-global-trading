@@ -12,9 +12,9 @@ import {
   WorkspacePage,
 } from "@/components/app/WorkspaceUI";
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
-import { queryKeys } from "@/lib/data/queryKeys";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 import type { TraderAccountSummary } from "@/lib/domain/types";
-import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 import {
   isLiveConnectedAccount,
@@ -42,10 +42,9 @@ function uid() {
 }
 
 export default function AiAssistantPage() {
-  const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
-  const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
+  const { access, checking } = usePlatformGate();
 
-  if (accessLoading && !summary) {
+  if (checking) {
     return (
       <WorkspacePage eyebrow="Assistant" title="WSA Assistant" description="Loading your platform access status.">
         <Panel>
@@ -78,13 +77,9 @@ function AiAssistantContent() {
 
   // ── Account context (for the selector + context cards) ─────────────────────
   const { data: accounts = [] } = useQuery<TraderAccountSummary[]>({
-    queryKey: queryKeys.accounts,
-    queryFn: async () => {
-      const res = await fetch("/api/trading-accounts");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
-      return json.data;
-    },
+    // (the same key and request as the top bar's account picker: one request, not two)
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
   });
 
   const connectedAccounts = useMemo(

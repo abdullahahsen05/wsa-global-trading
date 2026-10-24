@@ -90,6 +90,50 @@ function tokenClaims(token: string): { sub?: string; exp?: number } {
   }
 }
 
+/** A short, stable name for a session token (never the token itself): the key of the sign-in cache and of the order pass. */
+function tokenKeyOf(token: string): string {
+  return createHash('sha256').update(token).digest('base64url')
+}
+
+/**
+ * Whose token this is, as the token says (UNVERIFIED), read from the session cookie without any network call.
+ * Only used to start the profile read early: the answer counts only if Supabase confirms the very same user.
+ */
+async function hintedUserId(supabase: ServerClient): Promise<string | null> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    return token ? (tokenClaims(token).sub ?? null) : null
+  } catch {
+    return null
+  }
+}
+
+/** What the current session token is called and says about itself (unverified) - for binding a signed pass to the session. */
+export interface TokenFacts {
+  key: string
+  sub: string | null
+  expiresAtMs: number | null
+}
+
+/** The current session's token facts, or null when there is no session. Reads the cookie; makes no network call. */
+export async function currentTokenFacts(): Promise<TokenFacts | null> {
+  try {
+    const supabase = await createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) return null
+    const claims = tokenClaims(token)
+    return {
+      key: tokenKeyOf(token),
+      sub: claims.sub ?? null,
+      expiresAtMs: claims.exp !== undefined ? claims.exp * 1000 : null,
+    }
+  } catch {
+    return null
+  }
+}
+
 function holdSignIn(key: string, user: SessionUser, expiresAtSeconds: number | undefined): void {
   const now = Date.now()
   const until = Math.min(now + SIGN_IN_HOLD_MS, expiresAtSeconds !== undefined ? expiresAtSeconds * 1000 : Number.POSITIVE_INFINITY)
@@ -105,7 +149,7 @@ async function heldSignInFor(supabase: ServerClient): Promise<SessionUser | null
   const token = session?.access_token
   if (!token) return null
 
-  const key = createHash('sha256').update(token).digest('base64url')
+  const key = tokenKeyOf(token)
   const held = heldSignIns.get(key)
   if (held && held.until > Date.now()) return { ...held.user }
 
@@ -135,7 +179,10 @@ async function heldSignInFor(supabase: ServerClient): Promise<SessionUser | null
 export async function getCurrentUser(options: SignInOptions = {}): Promise<SessionUser | null> {
   try {
     const supabase = await createClient()
-    return options.cached ? await heldSignInFor(supabase) : await verifiedSignIn(supabase, null)
+    if (options.cached) return await heldSignInFor(supabase)
+    // Every other route: the token says whose it is, so the profile is read WHILE Supabase verifies the token - one
+    // round trip to the database instead of two in a row (on a far database that is the difference of 200+ ms per request).
+    return await verifiedSignIn(supabase, await hintedUserId(supabase))
   } catch {
     return null
   }

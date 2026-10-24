@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import type { TradeDto } from "@/lib/domain/types";
 import { formatMoney } from "@/lib/utils/format";
 import { Panel, StatusPill } from "@/components/app/WorkspaceUI";
@@ -374,7 +373,7 @@ export function CalendarTracker({
                 : "";
 
               return (
-                <motion.button
+                <button
                   key={cell.key}
                   type="button"
                   onClick={() => {
@@ -414,7 +413,7 @@ export function CalendarTracker({
                       <p className="hidden text-xs text-muted/60 sm:block">No closed trades</p>
                     )}
                   </div>
-                </motion.button>
+                </button>
               );
             })}
           </div>
@@ -488,7 +487,7 @@ export function CalendarTracker({
                   : "border-red-500/35 bg-red-500/10 shadow-[0_0_0_1px_rgba(239,68,68,0.12),0_0_20px_rgba(239,68,68,0.1)] hover:border-red-400/45";
 
               return (
-                <motion.button
+                <button
                   key={monthName}
                   type="button"
                   onClick={() => {
@@ -517,7 +516,7 @@ export function CalendarTracker({
                     <span>{percent(winRate)} win rate</span>
                     <span>{selected ? "Selected" : "Browse"}</span>
                   </div>
-                </motion.button>
+                </button>
               );
             })}
           </div>

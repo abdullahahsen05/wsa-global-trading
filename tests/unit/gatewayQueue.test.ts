@@ -79,6 +79,26 @@ describe("is the AWS system there?", () => {
     expect(await gatewayAvailability(client, NOW)).toMatchObject({ state: "online", executionEnabled: true });
   });
 
+  test("the direct lane: listening only when EVERY worker says so, and whether the newest one's port serves HTTPS", async () => {
+    db.tables.gateway_heartbeat = [{ worker: "w1", updated_at: iso(-1_000), info: { direct: true, directTls: true } }];
+    expect(await gatewayAvailability(client, NOW)).toMatchObject({ state: "online", awsDirect: true, awsDirectTls: true });
+
+    resetGatewayAvailability();
+    db.tables.gateway_heartbeat = [
+      { worker: "w1", updated_at: iso(-1_000), info: { direct: true, directTls: false } },
+      { worker: "w2", updated_at: iso(-2_000), info: { direct: false } },
+    ];
+    const mixed = await gatewayAvailability(client, NOW);
+    expect(mixed).not.toHaveProperty("awsDirect");
+    expect(mixed).toMatchObject({ awsDirectTls: false });
+
+    resetGatewayAvailability();
+    db.tables.gateway_heartbeat = [{ worker: "w1", updated_at: iso(-1_000), info: { direct: true } }];
+    const unknown = await gatewayAvailability(client, NOW);
+    expect(unknown).toMatchObject({ awsDirect: true });
+    expect(unknown).not.toHaveProperty("awsDirectTls");
+  });
+
   test("a missing table means 'not installed' - remembered, so the database is not asked again", async () => {
     db.errors.gateway_heartbeat = { code: "42P01", message: 'relation "gateway_heartbeat" does not exist' };
     expect(await gatewayAvailability(client, NOW)).toEqual({ state: "not_installed" });

@@ -10,13 +10,14 @@ import {
   timeAxisLabels,
   timeTicks,
 } from "@/lib/charts/performanceSeries";
-import { toLinearAreaPath, toLinearPath } from "@/lib/charts/svgCurve";
+import { downsampleLttb } from "@/lib/charts/downsample";
+import { toSmoothAreaPath, toSmoothPath } from "@/lib/charts/svgCurve";
 
 /**
  * Plain money-over-time chart for places that only have a list of timestamped
  * values (admin overview, equity panels). Real time axis, round axis values,
- * hover read-out. It draws exactly the points it is given - no smoothing
- * between them, no generated points.
+ * hover read-out. The curve is smooth (it passes through every point it draws and never overshoots) and long series
+ * are thinned to what the width can show - a subset of the given points, none moved or generated.
  */
 
 export interface TimeSeriesPoint {
@@ -102,7 +103,23 @@ export function TimeSeriesAreaChart({
     return { start, end, scale, pointCount: all.length };
   }, [cleaned]);
 
-  const primaryTimes = useMemo(() => (cleaned[0] ? cleaned[0].points.map((point) => point.t) : []), [cleaned]);
+  // about one drawn point per 4 px of width: a curve, not a hairy line (the scale above still comes from every point)
+  const budget = clamp(Math.round((width || 800) / 4), 60, 240);
+  const drawn = useMemo(
+    () =>
+      cleaned.map((entry) => ({
+        ...entry,
+        points: downsampleLttb(
+          entry.points,
+          budget,
+          (point) => point.t,
+          (point) => point.value,
+        ),
+      })),
+    [cleaned, budget],
+  );
+
+  const primaryTimes = useMemo(() => (drawn[0] ? drawn[0].points.map((point) => point.t) : []), [drawn]);
 
   const money = (value: number) =>
     new Intl.NumberFormat("en-US", {
@@ -149,23 +166,23 @@ export function TimeSeriesAreaChart({
     const hoverRows =
       hoverTime === null
         ? []
-        : cleaned
+        : drawn
             .map((entry) => {
               const times = entry.points.map((point) => point.t);
               const index = nearestIndexByTime(times, hoverTime);
               const point = index >= 0 ? entry.points[index] : null;
               return point ? { entry, point } : null;
             })
-            .filter((row): row is { entry: (typeof cleaned)[number]; point: TimeSeriesPoint } => row !== null);
+            .filter((row): row is { entry: (typeof drawn)[number]; point: TimeSeriesPoint } => row !== null);
     const hoverX = hoverTime === null ? null : xOf(hoverTime);
 
     content = (
       <>
         <svg width={width} height={height} className="block" role="img" aria-label={ariaLabel}>
           <defs>
-            {cleaned.map((entry, index) => (
+            {drawn.map((entry, index) => (
               <linearGradient key={entry.key} id={`${uid}fill${index}`} x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={entry.color} stopOpacity="0.28" />
+                <stop offset="0%" stopColor={entry.color} stopOpacity="0.22" />
                 <stop offset="100%" stopColor={entry.color} stopOpacity="0" />
               </linearGradient>
             ))}
@@ -178,14 +195,13 @@ export function TimeSeriesAreaChart({
                 x2={padLeft + plotW}
                 y1={yOf(tick)}
                 y2={yOf(tick)}
-                stroke="rgba(255,255,255,0.08)"
-                strokeDasharray="4 8"
+                stroke="rgba(255,255,255,0.07)"
               />
               <text
-                x={padLeft - 10}
+                x={padLeft - 8}
                 y={yOf(tick) + 4}
                 textAnchor="end"
-                className="fill-muted text-[11px] font-semibold tabular-nums"
+                className="fill-muted text-[11px] font-medium tabular-nums"
               >
                 {labels[index]}
               </text>
@@ -216,10 +232,17 @@ export function TimeSeriesAreaChart({
             </g>
           ))}
 
-          {cleaned.map((entry, index) => {
-            const pixels = entry.points.map((point) => ({ x: xOf(point.t), y: yOf(point.value) }));
-            const line = toLinearPath(pixels);
-            const area = entry.area ? toLinearAreaPath(pixels, baselineY) : "";
+          {drawn.map((entry, index) => {
+            // (one reading per pixel column: the smooth path needs x to increase)
+            const pixels: Array<{ x: number; y: number }> = [];
+            for (const point of entry.points) {
+              const x = xOf(point.t);
+              const y = yOf(point.value);
+              if (pixels.length > 0 && x <= pixels[pixels.length - 1].x) pixels[pixels.length - 1] = { x, y };
+              else pixels.push({ x, y });
+            }
+            const line = toSmoothPath(pixels);
+            const area = entry.area ? toSmoothAreaPath(pixels, baselineY) : "";
             return (
               <g key={entry.key}>
                 {area ? <path d={area} fill={`url(#${uid}fill${index})`} /> : null}
@@ -228,7 +251,7 @@ export function TimeSeriesAreaChart({
                     d={line}
                     fill="none"
                     stroke={entry.color}
-                    strokeWidth={entry.width ?? 3}
+                    strokeWidth={entry.width ?? 2.5}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
@@ -237,7 +260,7 @@ export function TimeSeriesAreaChart({
             );
           })}
 
-          {cleaned.map((entry) => {
+          {drawn.map((entry) => {
             const last = entry.points[entry.points.length - 1];
             if (!last) return null;
             return (
@@ -245,10 +268,10 @@ export function TimeSeriesAreaChart({
                 key={`last-${entry.key}`}
                 cx={xOf(last.t)}
                 cy={yOf(last.value)}
-                r={5}
+                r={4}
                 fill="#050505"
                 stroke={entry.color}
-                strokeWidth={3}
+                strokeWidth={2.5}
               />
             );
           })}
@@ -271,8 +294,7 @@ export function TimeSeriesAreaChart({
                 x2={hoverX}
                 y1={PAD_TOP}
                 y2={baselineY}
-                stroke="rgba(255,255,255,0.35)"
-                strokeDasharray="4 4"
+                stroke="rgba(255,255,255,0.28)"
               />
               {hoverRows.map((row) => (
                 <circle

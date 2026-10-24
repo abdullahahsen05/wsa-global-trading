@@ -55,6 +55,10 @@ export type GatewayAvailability =
       awsLoopMs?: number;
       /** ... and whether it waits for commands inside the database (migration 062) instead of asking again and again */
       awsLongPoll?: boolean;
+      /** ... and whether its direct lane (an HTTP port the web server may send orders to, `directLane.ts`) is listening */
+      awsDirect?: boolean;
+      /** ... and whether that port serves HTTPS (absent for a worker that does not report it) */
+      awsDirectTls?: boolean;
     }
   /** the tables exist, but no worker has written a heartbeat lately */
   | { state: "offline" }
@@ -77,6 +81,8 @@ interface HeartbeatInfo {
   dbRttMs?: unknown;
   loopLagMs?: unknown;
   longPoll?: unknown;
+  direct?: unknown;
+  directTls?: unknown;
 }
 
 function finiteMs(value: unknown): number | undefined {
@@ -129,6 +135,10 @@ export async function gatewayAvailability(
         ...(awsDbMs !== undefined ? { awsDbMs } : {}),
         ...(awsLoopMs !== undefined ? { awsLoopMs } : {}),
         ...(typeof newest.info?.longPoll === "boolean" ? { awsLongPoll: newest.info.longPoll } : {}),
+        // the lane is only offered when EVERY worker listening on the heartbeat says so (an order must not be sent to one that does not)
+        ...(rows.every((row) => row.info?.direct === true) ? { awsDirect: true } : {}),
+        // (the newest worker speaks for it; a worker that does not say leaves it unknown)
+        ...(typeof newest.info?.directTls === "boolean" ? { awsDirectTls: newest.info.directTls } : {}),
       };
     }
   }
@@ -292,6 +302,44 @@ export async function awaitCommand(db: AdminDb, input: AwaitInput, deps: WaitDep
     // The window ended with the command still running (or not yet written): look again until the deadline.
     // A call that came back at once without an answer did not wait (it should have): do not hammer the database.
     if (now() - askedAt < 20) await sleep(Math.max(0, Math.min(30, deadline - now())));
+  }
+}
+
+/** How long to wait before the 1st, 2nd ... look for a command by its request id; the last value repeats. */
+export const LOOKUP_DELAYS_MS = [120, 200, 300, 450, 650];
+
+/**
+ * Looks for the command of a request WITHOUT writing anything: the direct lane stores an order a moment after it has
+ * answered it, so when an answer got lost on the way the finished command shows up here shortly afterwards. Returns the
+ * finished command (DONE / FAILED / EXPIRED) or null when none is there within `timeoutMs`. A failed look is not an
+ * answer - the next one may work.
+ */
+export async function lookupCommandByRequest(
+  db: AdminDb,
+  input: { userId: string; clientRequestId: string; timeoutMs: number },
+  deps: WaitDeps = {},
+): Promise<CommandRow | null> {
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? pause;
+  const deadline = now() + input.timeoutMs;
+  for (let look = 0; ; look += 1) {
+    const wanted = LOOKUP_DELAYS_MS[Math.min(look, LOOKUP_DELAYS_MS.length - 1)];
+    await sleep(Math.max(0, Math.min(wanted, deadline - now())));
+    const { data, error } = await db
+      .from(COMMANDS_TABLE)
+      .select(RESULT_COLUMNS)
+      .eq("user_id", input.userId)
+      .eq("client_request_id", input.clientRequestId)
+      .maybeSingle();
+    if (error) {
+      if (isMissingGatewayObject(error)) {
+        markGatewayMissing(now());
+        throw new GatewayNotInstalledError();
+      }
+    } else if (data && isFinished((data as CommandRow).status)) {
+      return data as CommandRow;
+    }
+    if (now() >= deadline) return null;
   }
 }
 

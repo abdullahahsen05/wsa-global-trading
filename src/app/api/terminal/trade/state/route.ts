@@ -1,5 +1,5 @@
 import { jsonFail, jsonOk } from "@/lib/api/envelope";
-import { requireTrader } from "@/lib/auth/session";
+import { currentTokenFacts, requireTrader } from "@/lib/auth/session";
 import { getWebTradeState, webTradeErrorResponse } from "@/lib/services/webTradeService";
 import { issuesText, webTradeStateQuerySchema } from "@/lib/trade/webTradeSchemas";
 
@@ -25,9 +25,12 @@ export async function GET(request: Request) {
       symbol: params.get("symbol") || undefined,
     });
     if (!parsed.success) return jsonFail("VALIDATION_ERROR", issuesText(parsed.error), 400);
-    return jsonOk(await getWebTradeState(user, parsed.data), {
-      headers: { "Cache-Control": "private, no-store, max-age=0" },
-    });
+    // (the session's token key binds the order pass the state carries to this very session)
+    const token = await currentTokenFacts();
+    return jsonOk(
+      await getWebTradeState(user, parsed.data, { token: token ? { key: token.key, expiresAtMs: token.expiresAtMs } : null }),
+      { headers: { "Cache-Control": "private, no-store, max-age=0" } },
+    );
   } catch (error) {
     return webTradeErrorResponse(error);
   }

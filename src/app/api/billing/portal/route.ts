@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
 
     const origin = req.headers.get("origin") ?? process.env.NEXT_PUBLIC_APP_URL ?? "";
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const session = await stripe.billingPortal.sessions.create({
       customer: profile.stripe_customer_id as string,
       return_url: `${origin}/billing`,

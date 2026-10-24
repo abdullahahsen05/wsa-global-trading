@@ -1,5 +1,5 @@
 import { jsonFail, jsonOk } from "@/lib/api/envelope";
-import { requireTrader } from "@/lib/auth/session";
+import { signInForOrder } from "@/lib/services/webTradePass";
 import { placeWebTradeOrder, webTradeErrorResponse } from "@/lib/services/webTradeService";
 import { answerWebTradeWarmUp } from "@/lib/services/webTradeWarmUp";
 import { issuesText, webTradeOpenSchema } from "@/lib/trade/webTradeSchemas";
@@ -31,14 +31,14 @@ export function GET(request?: Request) {
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
-    // (the cheap sign-in: the same session verified a few seconds ago is not verified again)
-    const user = await requireTrader({ cached: true });
-    const signedInAt = Date.now();
+    // (the cheap sign-in: the order pass of the last state poll, else the same session verified a few seconds ago)
+    const signedIn = await signInForOrder(request);
     const parsed = webTradeOpenSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return jsonFail("VALIDATION_ERROR", issuesText(parsed.error), 400);
-    return jsonOk(await placeWebTradeOrder(user, parsed.data, { startedAt, signedInAt }), {
-      headers: { "Cache-Control": "private, no-store, max-age=0" },
-    });
+    return jsonOk(
+      await placeWebTradeOrder(signedIn.user, parsed.data, { startedAt, signedInAt: signedIn.at, pass: signedIn.pass }),
+      { headers: { "Cache-Control": "private, no-store, max-age=0" } },
+    );
   } catch (error) {
     return webTradeErrorResponse(error);
   }

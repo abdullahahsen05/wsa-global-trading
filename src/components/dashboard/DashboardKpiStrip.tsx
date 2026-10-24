@@ -1,7 +1,6 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { itemMotion } from "@/components/app/WorkspaceUI";
+import { RISE_CLASS } from "@/components/app/WorkspaceUI";
 import { toSmoothPath } from "@/lib/charts/svgCurve";
 
 type KpiTone = "accent" | "lime" | "danger" | "muted";
@@ -126,10 +125,7 @@ export function DashboardKpiStrip({ items }: { items: DashboardKpiItem[] }) {
 
 export function MarketSentimentStrip({ items }: { items: SentimentItem[] }) {
   return (
-    <motion.section
-      variants={itemMotion}
-      className="section-surface p-3"
-    >
+    <section className={`${RISE_CLASS} section-surface p-3`}>
       <div className="grid gap-0 xl:grid-cols-4">
         {items.map((item, index) => (
           <div
@@ -157,6 +153,6 @@ export function MarketSentimentStrip({ items }: { items: SentimentItem[] }) {
           </div>
         ))}
       </div>
-    </motion.section>
+    </section>
   );
 }

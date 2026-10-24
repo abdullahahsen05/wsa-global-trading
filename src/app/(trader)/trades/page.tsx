@@ -7,14 +7,12 @@ import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptio
 import { EmptyState, GhostButton, InlineStatusStrip, Panel, PageActionGroup, PrimaryButton, StatusPill, WorkspacePage } from "@/components/app/WorkspaceUI";
 import { formatMoney, formatPrice } from "@/lib/utils/format";
 import type { TradeDto } from "@/lib/domain/types";
-import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
-import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
 
 export default function TradesPage() {
-  const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
-  const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
+  const { access, checking } = usePlatformGate();
 
-  if (accessLoading && !summary) {
+  if (checking) {
     return (
       <WorkspacePage eyebrow="Trade ledger" title="Trade history" description="Loading your platform access status.">
         <Panel>
@@ -44,7 +42,6 @@ export default function TradesPage() {
 
 function TradesContent() {
   const queryClient = useQueryClient();
-  const { selectedAccountId } = useTradingAccountSelection();
   const [searchOpen, setSearchOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -52,32 +49,23 @@ function TradesContent() {
   const [syncResult, setSyncResult] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const { data: tradeList = [], isLoading, isError } = useQuery<TradeDto[]>({
-    queryKey: ["trades", selectedAccountId],
+    queryKey: ["trades"],
     staleTime: 5_000,
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
     queryFn: async () => {
-      const params = new URLSearchParams({ accountId: selectedAccountId! });
-      const res = await fetch(`/api/trades?${params.toString()}`, { cache: "no-store" });
+      const res = await fetch("/api/trades");
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load trades");
       return json.data;
     },
-    enabled: Boolean(selectedAccountId),
   });
 
   const handleSyncTrades = useCallback(async () => {
     setSyncing(true);
     setSyncResult(null);
     try {
-      if (!selectedAccountId) {
-        throw new Error("Select a connected trading account before syncing trades.");
-      }
-      const res = await fetch("/api/trader/sync-trades", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: selectedAccountId }),
-      });
+      const res = await fetch("/api/trader/sync-trades", { method: "POST" });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Sync failed");
 
@@ -93,22 +81,19 @@ function TradesContent() {
           ? `${queued} account${queued === 1 ? "" : "s"} queued for broker synchronization. This ledger updates automatically.`
           : "Live trade synchronization is active. The latest ledger data has been loaded.",
       });
-      await queryClient.invalidateQueries({ queryKey: ["trades", selectedAccountId] });
+      await queryClient.invalidateQueries({ queryKey: ["trades"] });
     } catch (err) {
       setSyncResult({ type: "error", text: err instanceof Error ? err.message : "Sync failed" });
     } finally {
       setSyncing(false);
     }
-  }, [queryClient, selectedAccountId]);
+  }, [queryClient]);
 
   const handleExportCsv = useCallback(async () => {
     setExporting(true);
     setSyncResult(null);
     try {
-      if (!selectedAccountId) {
-        throw new Error("Select a connected trading account before exporting trades.");
-      }
-      const res = await fetch(`/api/reports/trades?accountId=${encodeURIComponent(selectedAccountId)}`);
+      const res = await fetch("/api/reports/trades");
       if (!res.ok) {
         const payload = await res.json().catch(() => null);
         throw new Error(payload?.error?.message ?? "CSV export failed");
@@ -127,7 +112,7 @@ function TradesContent() {
     } finally {
       setExporting(false);
     }
-  }, [selectedAccountId]);
+  }, []);
 
   const recentTrades = useMemo(
     () => [...tradeList].sort((a, b) => {
@@ -162,7 +147,7 @@ function TradesContent() {
     <WorkspacePage
       eyebrow="Trade ledger"
       title="Trade history"
-      description="Review recent open and closed trades for the account selected in the top bar, search its ledger, or export it to CSV."
+      description="Review recent open and closed trades, search the full ledger, or export it to CSV."
       action={
         <PageActionGroup>
           <GhostButton type="button" onClick={() => setSearchOpen(true)}>
@@ -179,12 +164,12 @@ function TradesContent() {
     >
       <InlineStatusStrip
         items={[
-          { label: "Open trades", value: openTrades.length, helper: "Selected account", tone: "accent" },
-          { label: "Closed trades", value: closedTrades.length, helper: "Selected account" },
+          { label: "Open trades", value: openTrades.length, helper: "Across connected accounts", tone: "accent" },
+          { label: "Closed trades", value: closedTrades.length, helper: "Current review period" },
           {
             label: "Net PnL",
             value: netProfitValue,
-            helper: "Selected account ledger",
+            helper: "Ledger total",
             tone: netProfit >= 0 ? "lime" : "danger",
           },
           {
@@ -220,8 +205,8 @@ function TradesContent() {
           </div>
         ) : !recentTrades.length ? (
           <EmptyState
-            title="No executed trades"
-            description="There are no executed broker trades for the selected account. Deposits and withdrawals are account funding and are not listed as trades."
+            title="No trades yet"
+            description="Trades will appear here after your account syncs with your broker."
           />
         ) : (
           <Panel className="overflow-hidden p-0">

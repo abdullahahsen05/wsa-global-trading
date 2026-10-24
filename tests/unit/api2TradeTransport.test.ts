@@ -362,6 +362,8 @@ describe("when undici cannot be used", () => {
 
   it("a module that fails to load is handled the same way", async () => {
     vi.resetModules();
+    // The prior case installed a different runtime mock; clear it before replacing the import factory.
+    vi.doUnmock("undici");
     vi.doMock("undici", () => {
       throw new Error("Cannot find package 'undici'");
     });

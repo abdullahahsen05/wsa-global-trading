@@ -3,6 +3,7 @@
  * subscriptions, copy_account_entitlements, and partner commission ledger.
  * Server-only (do not import in client components).
  */
+import { after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildMockCheckoutUrl, getBillingRuntimeMode } from "@/lib/payments/runtime";
 import { getStripe, ensureStripeCustomer } from "@/lib/stripe/stripeClient";
@@ -864,7 +865,7 @@ export async function resumePendingCheckoutSession(params: {
   }
 
   try {
-    const session = await getStripe().checkout.sessions.retrieve(stripeSessionId);
+    const session = await (await getStripe()).checkout.sessions.retrieve(stripeSessionId);
     if (session.status === "open") {
       return { orderId: order.id, checkoutUrl: session.url ?? checkoutUrl };
     }
@@ -1272,7 +1273,7 @@ export async function createCheckoutSession(params: CreateCheckoutParams): Promi
   }
 
   // STRIPE MODE: create a hosted Checkout Session.
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const stripeCustomerId = await ensureStripeCustomer(params.userId, params.userEmail, params.userName);
   const checkoutMode = getStripeCheckoutMode(product.billingInterval);
   const origin = new URL(params.returnUrl).origin;
@@ -1755,7 +1756,7 @@ async function maybeCreatePartnerCommission(
  * A PAID payment order is server-verified, so its platform subscription can be
  * activated safely and idempotently when the trader next loads billing access.
  */
-async function activateVerifiedPaidPlatformSubscriptions(userId: string): Promise<void> {
+async function activateVerifiedPaidPlatformSubscriptions(userId: string): Promise<boolean> {
   const supabase = createAdminClient();
   const { data: pending } = await supabase
     .from("subscriptions")
@@ -1768,14 +1769,14 @@ async function activateVerifiedPaidPlatformSubscriptions(userId: string): Promis
   const orderIds = pendingRows
     .map((row) => row.payment_order_id)
     .filter((value): value is string => Boolean(value));
-  if (orderIds.length === 0) return;
+  if (orderIds.length === 0) return false;
 
   const { data: platformProduct } = await supabase
     .from("billing_products")
     .select("id")
     .eq("code", "PLATFORM_MONTHLY")
     .maybeSingle();
-  if (!platformProduct) return;
+  if (!platformProduct) return false;
 
   const { data: paidOrders } = await supabase
     .from("payment_orders")
@@ -1787,7 +1788,7 @@ async function activateVerifiedPaidPlatformSubscriptions(userId: string): Promis
   const subscriptionIds = pendingRows
     .filter((row) => row.payment_order_id && paidOrderIds.has(row.payment_order_id))
     .map((row) => row.id);
-  if (subscriptionIds.length === 0) return;
+  if (subscriptionIds.length === 0) return false;
 
   const activatedAt = new Date().toISOString();
   await supabase
@@ -1799,13 +1800,14 @@ async function activateVerifiedPaidPlatformSubscriptions(userId: string): Promis
     })
     .in("id", subscriptionIds)
     .eq("status", "PENDING_APPROVAL");
+  return true;
 }
 
 /**
  * Repairs Bot/EA purchases created under the previous manual-approval policy.
  * Only access records backed by a server-recorded PAID Bot/EA order qualify.
  */
-async function activateVerifiedPaidBotAccess(userId: string): Promise<void> {
+async function activateVerifiedPaidBotAccess(userId: string): Promise<boolean> {
   const supabase = createAdminClient();
   const { data: requested } = await supabase
     .from("bot_access_records")
@@ -1816,14 +1818,14 @@ async function activateVerifiedPaidBotAccess(userId: string): Promise<void> {
 
   const requestedRows = requested ?? [];
   const productIds = requestedRows.map((row) => row.product_id);
-  if (productIds.length === 0) return;
+  if (productIds.length === 0) return false;
 
   const { data: botBillingProduct } = await supabase
     .from("billing_products")
     .select("id")
     .eq("code", "BOT_EA")
     .maybeSingle();
-  if (!botBillingProduct) return;
+  if (!botBillingProduct) return false;
 
   const { data: paidOrders } = await supabase
     .from("payment_orders")
@@ -1841,7 +1843,7 @@ async function activateVerifiedPaidBotAccess(userId: string): Promise<void> {
   const accessIds = requestedRows
     .filter((row) => paidProductIds.has(row.product_id))
     .map((row) => row.id);
-  if (accessIds.length === 0) return;
+  if (accessIds.length === 0) return false;
 
   await supabase
     .from("bot_access_records")
@@ -1852,17 +1854,48 @@ async function activateVerifiedPaidBotAccess(userId: string): Promise<void> {
     })
     .in("id", accessIds)
     .eq("status", "REQUESTED");
+  return true;
 }
 
-export async function getTraderAccessSummary(userId: string): Promise<UserBillingSummaryDto> {
-  await Promise.all([
-    activateVerifiedPaidPlatformSubscriptions(userId),
-    activateVerifiedPaidBotAccess(userId),
-    activateVerifiedPaidCopyFollowers(userId),
-  ]);
-  const supabase = createAdminClient();
+/** A person's paid copy orders are re-checked at most this often (per server instance). */
+const COPY_FOLLOWER_REPAIR_EVERY_MS = 60_000;
+const copyFollowerRepairAt = new Map<string, number>();
 
-  const [{ data: subs }, { data: entitlements }, { data: orders }, { data: botRecs }] = await Promise.all([
+/**
+ * The copy-follower repair (a PAID strategy order whose follower row is missing or switched off) used to run INSIDE every
+ * access summary: for each paid copy order, in a row, one to three database round trips - and a write - before the
+ * summary could answer. The summary does not read follower rows (subscriptions, entitlements, orders, bot access), so the
+ * repair cannot change what it returns: it now runs after the answer has left, and at most once a minute per person. Where
+ * there is no request to hang it on (a script, a unit test) it simply runs in the background.
+ */
+function repairCopyFollowersAfterResponse(userId: string): void {
+  const now = Date.now();
+  const last = copyFollowerRepairAt.get(userId);
+  if (last !== undefined && now - last < COPY_FOLLOWER_REPAIR_EVERY_MS) return;
+  if (copyFollowerRepairAt.size >= 1_000) {
+    for (const [key, at] of copyFollowerRepairAt) {
+      if (now - at >= COPY_FOLLOWER_REPAIR_EVERY_MS) copyFollowerRepairAt.delete(key);
+    }
+  }
+  copyFollowerRepairAt.set(userId, now);
+  const run = async () => {
+    try {
+      await activateVerifiedPaidCopyFollowers(userId);
+    } catch (error) {
+      console.warn(`[billing] copy follower repair failed: ${error instanceof Error ? error.message : "unknown error"}`);
+    }
+  };
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
+}
+
+/** The four reads the access summary is built from, side by side (one round trip). */
+function readAccessRows(userId: string) {
+  const supabase = createAdminClient();
+  return Promise.all([
     supabase
       .from("subscriptions")
       .select("id, status, current_period_end, approved_at, created_at, billing_products(code, name)")
@@ -1890,6 +1923,19 @@ export async function getTraderAccessSummary(userId: string): Promise<UserBillin
       .eq("user_id", userId)
       .limit(20),
   ]);
+}
+
+export async function getTraderAccessSummary(userId: string): Promise<UserBillingSummaryDto> {
+  repairCopyFollowersAfterResponse(userId);
+  // The two repairs that change what the summary shows run TOGETHER with its reads (one round trip instead of two); only
+  // when one of them really changed something - rare - are the rows read once more.
+  const [repairs, firstRead] = await Promise.all([
+    Promise.all([activateVerifiedPaidPlatformSubscriptions(userId), activateVerifiedPaidBotAccess(userId)]),
+    readAccessRows(userId),
+  ]);
+  const [{ data: subs }, { data: entitlements }, { data: orders }, { data: botRecs }] = repairs.some(Boolean)
+    ? await readAccessRows(userId)
+    : firstRead;
 
   type SubRow = {
     id: string;
@@ -2194,7 +2240,7 @@ export async function getBillingReturnStatus(
     storedOrder.stripe_checkout_session_id
   ) {
     try {
-      const session = (await getStripe().checkout.sessions.retrieve(stripeSessionId)) as StripeCheckoutReturnSession;
+      const session = (await (await getStripe()).checkout.sessions.retrieve(stripeSessionId)) as StripeCheckoutReturnSession;
       if (canReconcileStripeCheckoutReturn(orderId, storedOrder.stripe_checkout_session_id, session)) {
         await handleStripeCheckoutCompleted({
           id: session.id,

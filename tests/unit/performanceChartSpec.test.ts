@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import {
   deriveSeries,
   summarizeTrades,
+  withLiveEquity,
   type PerformanceLedgerPoint,
   type PerformanceSample,
   type PerformanceSeriesDto,
@@ -10,10 +11,12 @@ import {
   CHART_TABS,
   MAX_MARKERS,
   buildChartSpec,
+  lineValueAt,
   tooltipAt,
   type ChartSpec,
   type ChartTab,
 } from "@/lib/charts/performanceChartSpec";
+import { downsampleLttb } from "@/lib/charts/downsample";
 
 function sample(
   t: number,
@@ -59,7 +62,7 @@ function dtoOf(samples: PerformanceSample[], ledger: PerformanceLedgerPoint[] = 
 function specFor(
   dto: PerformanceSeriesDto,
   tab: ChartTab,
-  options: { hidden?: Record<string, boolean>; equityPeak?: number | null } = {},
+  options: { hidden?: Record<string, boolean>; equityPeak?: number | null; pointBudget?: number } = {},
 ): ChartSpec {
   return buildChartSpec({
     derived: deriveSeries(dto),
@@ -71,6 +74,7 @@ function specFor(
     barCount: 10,
     currentDrawdownPct: null,
     equityPeak: options.equityPeak ?? null,
+    pointBudget: options.pointBudget,
   });
 }
 
@@ -133,40 +137,53 @@ describe("every tab covers its data with a readable axis", () => {
 
 describe("CHART tab", () => {
   const spec = specFor(grown, "CHART");
+  const withExtras = specFor(grown, "CHART", { hidden: { pnl: false, volume: false, markers: false } });
 
-  test("equity growth in % and closed P&L as a stepped line, both on the same % axis", () => {
-    expect(lineKeys(spec)).toEqual(["equity", "pnl"]);
+  test("ONE smooth equity-growth curve in % - the closed-P&L line, volume bars and trade dots are extras that start off", () => {
+    expect(lineKeys(spec)).toEqual(["equity"]);
     expect(values(spec, "equity")).toEqual([0, 10, -1, 20]);
-    expect(values(spec, "pnl")).toEqual([0, 5, 5]);
-    expect(spec.lines.find((entry) => entry.key === "pnl")).toMatchObject({ step: true, dashed: true });
-    expect(spec.lines.find((entry) => entry.key === "equity")).toMatchObject({ step: false, area: true });
+    expect(spec.lines[0]).toMatchObject({ step: false, dashed: false, area: true, primary: true });
+    expect(spec.bars).toEqual([]);
+    expect(spec.markers).toEqual([]);
   });
 
-  test("the axis is round and the money axis on the right is the same scale times the base", () => {
+  test("the extras can be switched on: closed P&L (a smooth line on the same % axis), volume bars, trade dots", () => {
+    expect(lineKeys(withExtras)).toEqual(["equity", "pnl"]);
+    expect(values(withExtras, "pnl")).toEqual([0, 5, 5]);
+    expect(withExtras.lines.find((entry) => entry.key === "pnl")).toMatchObject({ step: false, dashed: false, primary: false });
+    expect(withExtras.bars).toEqual([{ t: 2_400, ratio: 1 }]);
+    expect(withExtras.markers).toHaveLength(1);
+  });
+
+  test("the axis is round and it is the ONLY value axis (percent) - no second money axis on the right", () => {
     expect(spec.ticks).toEqual([-10, 0, 10, 20]);
     expect(spec.ticks.map(spec.formatY)).toEqual(["-10%", "0%", "10%", "20%"]);
-    expect(spec.right?.ticks).toEqual([-100, 0, 100, 200]);
-    expect(spec.right?.ticks.map(spec.right.formatY)).toEqual(["-$100", "$0", "$100", "$200"]);
+    expect(spec.axisTitle).toBe("Growth %");
+    expect(Object.keys(spec)).not.toContain("right");
     expect(spec.zeroValue).toBe(0);
+    // the extra P&L line is drawn in % on that same axis
+    expect(withExtras.ticks).toEqual(spec.ticks);
   });
 
   test("volume bars are scaled to the busiest bucket", () => {
-    expect(spec.bars).toEqual([{ t: 2_400, ratio: 1 }]);
+    expect(withExtras.bars).toEqual([{ t: 2_400, ratio: 1 }]);
   });
 
-  test("the legend carries the toggles", () => {
-    expect(spec.legend.map((item) => [item.key, item.toggleable, item.active])).toEqual([
-      ["equity", true, true],
-      ["pnl", true, true],
-      ["volume", true, true],
-      ["markers", true, true],
-      ["drawdown", false, true],
+  test("the legend carries the toggles; the extras are marked as such and are off", () => {
+    expect(spec.legend.map((item) => [item.key, item.toggleable, item.active, item.overlay === true])).toEqual([
+      ["equity", true, true, false],
+      ["pnl", true, false, true],
+      ["volume", true, false, true],
+      ["markers", true, false, true],
+      ["drawdown", false, true, false],
     ]);
+    expect(withExtras.legend.map((item) => item.active)).toEqual([true, true, true, true, true]);
   });
 
   test("switching a series off removes it and the axis is rebuilt from what is left", () => {
-    const noEquity = specFor(grown, "CHART", { hidden: { equity: true } });
+    const noEquity = specFor(grown, "CHART", { hidden: { equity: true, pnl: false } });
     expect(lineKeys(noEquity)).toEqual(["pnl"]);
+    expect(noEquity.lines[0].primary).toBe(true);
     expect(noEquity.ticks).toEqual([0, 2, 4, 6]);
     expect(noEquity.legend.find((item) => item.key === "equity")?.active).toBe(false);
 
@@ -177,9 +194,9 @@ describe("CHART tab", () => {
     expect(specFor(grown, "CHART", { hidden: { volume: true } }).bars).toEqual([]);
   });
 
-  test("an account that did not move still gets a visible axis and both lines", () => {
+  test("an account that did not move still gets a visible axis and its line", () => {
     const flatSpec = specFor(flat, "CHART");
-    expect(lineKeys(flatSpec)).toEqual(["equity", "pnl"]);
+    expect(lineKeys(flatSpec)).toEqual(["equity"]);
     expect(flatSpec.yMin).toBeLessThan(0);
     expect(flatSpec.yMax).toBeGreaterThan(0);
     expect(values(flatSpec, "equity")).toEqual([0, 0, 0]);
@@ -191,7 +208,7 @@ describe("CHART tab", () => {
     expect(fallback.emptyReason).toBeNull();
     expect(lineKeys(fallback)).toEqual(["pnl"]);
     expect(values(fallback, "pnl")).toEqual([0, 50, 30, 30]);
-    expect(fallback.right).toBeNull();
+    expect(Object.keys(fallback)).not.toContain("right");
     expect(fallback.axisTitle).toBe("Closed P&L");
     expect(fallback.ticks.map(fallback.formatY)[0]).toBe("$0");
   });
@@ -245,11 +262,12 @@ describe("GROWTH and BALANCE tabs", () => {
 });
 
 describe("PROFIT tab", () => {
-  test("cumulative closed P&L is a stepped area with traded volume underneath", () => {
+  test("cumulative closed P&L is a smooth area; the traded volume underneath is an extra that starts off", () => {
     const spec = specFor(grown, "PROFIT");
     expect(values(spec, "pnl")).toEqual([0, 50, 50]);
-    expect(spec.lines[0]).toMatchObject({ step: true, area: true });
-    expect(spec.bars).toEqual([{ t: 2_400, ratio: 1 }]);
+    expect(spec.lines[0]).toMatchObject({ step: false, dashed: false, area: true, primary: true });
+    expect(spec.bars).toEqual([]);
+    expect(specFor(grown, "PROFIT", { hidden: { volume: false } }).bars).toEqual([{ t: 2_400, ratio: 1 }]);
     expect(spec.ticks).toEqual([0, 20, 40, 60]);
     expect(spec.legend[0].value).toBe("$50.00");
   });
@@ -373,8 +391,17 @@ describe("trade markers", () => {
   ): PerformanceLedgerPoint => ({ t, profit, volume: 0.1, count, wins });
   const withTrades = (ledger: PerformanceLedgerPoint[]) => dtoOf([...grown.samples], ledger);
 
-  test("one dot per closed trade, coloured by the result and sitting on the equity curve", () => {
+  // (the dots are an extra: they stay off until the person switches them on)
+  const dotsOn = { markers: false };
+
+  test("the dots start off, and the trade count is still in the legend", () => {
     const spec = specFor(withTrades([trade(2_100, 50), trade(3_100, -20)]), "GROWTH");
+    expect(spec.markers).toEqual([]);
+    expect(spec.legend.find((item) => item.key === "markers")).toMatchObject({ toggleable: true, active: false, value: "2", overlay: true });
+  });
+
+  test("one dot per closed trade, coloured by the result and sitting on the equity curve", () => {
+    const spec = specFor(withTrades([trade(2_100, 50), trade(3_100, -20)]), "GROWTH", { hidden: dotsOn });
     expect(spec.markers.map((marker) => [marker.t, marker.kind, marker.profit, marker.count])).toEqual([
       [2_100, "win", 50, 1],
       [3_100, "loss", -20, 1],
@@ -385,7 +412,9 @@ describe("trade markers", () => {
   });
 
   test("a bucket of several trades is a win, a loss or mixed", () => {
-    const spec = specFor(withTrades([trade(1_900, 30, 3, 3), trade(2_900, -30, 2, 0), trade(3_900, 5, 4, 2)]), "BALANCE");
+    const spec = specFor(withTrades([trade(1_900, 30, 3, 3), trade(2_900, -30, 2, 0), trade(3_900, 5, 4, 2)]), "BALANCE", {
+      hidden: dotsOn,
+    });
     expect(spec.markers.map((marker) => marker.kind)).toEqual(["win", "loss", "mixed"]);
     expect(spec.markers.map((marker) => marker.count)).toEqual([3, 2, 4]);
     // the balance curve at the nearest snapshots
@@ -394,15 +423,15 @@ describe("trade markers", () => {
 
   test("the dots follow the next visible curve and disappear when no curve is left", () => {
     const dto = withTrades([trade(2_100, 50)]);
-    const onEquity = specFor(dto, "BALANCE", { hidden: { balance: true } });
+    const onEquity = specFor(dto, "BALANCE", { hidden: { ...dotsOn, balance: true } });
     expect(onEquity.markers.map((marker) => marker.v)).toEqual([1_100]);
-    expect(specFor(dto, "BALANCE", { hidden: { balance: true, equity: true } }).markers).toEqual([]);
-    expect(specFor(dto, "CHART", { hidden: { equity: true, pnl: true } }).markers).toEqual([]);
+    expect(specFor(dto, "BALANCE", { hidden: { ...dotsOn, balance: true, equity: true } }).markers).toEqual([]);
+    expect(specFor(dto, "CHART", { hidden: { ...dotsOn, equity: true, pnl: true } }).markers).toEqual([]);
   });
 
-  test("the legend toggle switches the dots off and still shows the trade count", () => {
+  test("the legend toggle switches the dots on and off and still shows the trade count", () => {
     const dto = withTrades([trade(2_100, 50), trade(3_100, -20)]);
-    const on = specFor(dto, "BALANCE");
+    const on = specFor(dto, "BALANCE", { hidden: dotsOn });
     expect(on.legend.find((item) => item.key === "markers")).toMatchObject({ toggleable: true, active: true, value: "2" });
     const off = specFor(dto, "BALANCE", { hidden: { markers: true } });
     expect(off.markers).toEqual([]);
@@ -411,26 +440,158 @@ describe("trade markers", () => {
 
   test("long histories are thinned evenly and keep the first and the last trade", () => {
     const many = Array.from({ length: 400 }, (_, index) => trade(1_000 + index * 7, index % 2 === 0 ? 1 : -1));
-    const spec = specFor(withTrades(many), "PROFIT");
+    const spec = specFor(withTrades(many), "PROFIT", { hidden: dotsOn });
     expect(spec.markers).toHaveLength(MAX_MARKERS);
     expect(spec.markers[0].t).toBe(many[0].t);
     expect(spec.markers[spec.markers.length - 1].t).toBe(many[many.length - 1].t);
     for (const marker of spec.markers) expect(Number.isFinite(marker.v)).toBe(true);
   });
 
-  test("on the profit tab the dots sit on the stepped closed-P&L line", () => {
-    const spec = specFor(grown, "PROFIT");
+  test("on the profit tab the dots sit on the closed-P&L line", () => {
+    const spec = specFor(grown, "PROFIT", { hidden: dotsOn });
     expect(spec.markers).toHaveLength(1);
     expect(spec.markers[0]).toMatchObject({ t: 2_500, kind: "win", profit: 50 });
     expect(spec.markers[0].v).toBe(50);
   });
 
   test("no trade, no dot and no legend entry; drawdown and margin never carry dots", () => {
-    const none = specFor(flat, "BALANCE");
+    const none = specFor(flat, "BALANCE", { hidden: dotsOn });
     expect(none.markers).toEqual([]);
     expect(none.legend.some((item) => item.key === "markers")).toBe(false);
-    expect(specFor(grown, "DRAWDOWN").markers).toEqual([]);
-    expect(specFor(grown, "MARGIN").markers).toEqual([]);
+    expect(specFor(grown, "DRAWDOWN", { hidden: dotsOn }).markers).toEqual([]);
+    expect(specFor(grown, "MARGIN", { hidden: dotsOn }).markers).toEqual([]);
+  });
+});
+
+describe("a long recording is drawn as a curve, not a hairy line", () => {
+  // 600 readings, a small wobble on a slow climb and ONE spike
+  const readings = Array.from({ length: 600 }, (_, index) =>
+    sample(1_000 + index * 6, 10_000, 10_000 + index * 0.5 + (index % 5) - (index === 300 ? -400 : 0)),
+  );
+  const long = dtoOf(readings);
+
+  test("each line keeps at most the point budget, the first and the last reading and a subset in time order", () => {
+    const spec = specFor(long, "BALANCE", { pointBudget: 80 });
+    const times = new Set(readings.map((entry) => entry.t));
+    for (const entry of spec.lines) {
+      expect(entry.points.length).toBeLessThanOrEqual(80);
+      expect(entry.points[0].t).toBe(readings[0].t);
+      expect(entry.points[entry.points.length - 1].t).toBe(readings[readings.length - 1].t);
+      for (let index = 0; index < entry.points.length; index += 1) {
+        expect(times.has(entry.points[index].t)).toBe(true);
+        if (index > 0) expect(entry.points[index].t).toBeGreaterThan(entry.points[index - 1].t);
+      }
+    }
+  });
+
+  test("the spike that matters to the shape survives the thinning, and the axis still holds it", () => {
+    const spec = specFor(long, "BALANCE", { pointBudget: 80 });
+    const equity = spec.lines.find((entry) => entry.key === "equity");
+    expect(equity?.points.some((point) => point.t === 1_000 + 300 * 6)).toBe(true);
+    expect(spec.yMax).toBeGreaterThanOrEqual(Math.max(...readings.map((entry) => entry.equity)));
+  });
+
+  test("nothing is thinned when the line is short enough, and a silly budget is raised to a usable minimum", () => {
+    expect(specFor(grown, "BALANCE").lines[0].points).toHaveLength(4);
+    expect(specFor(long, "BALANCE", { pointBudget: 3 }).lines[0].points.length).toBeLessThanOrEqual(40);
+    expect(specFor(long, "BALANCE", { pointBudget: 3 }).lines[0].points.length).toBeGreaterThan(3);
+  });
+});
+
+describe("downsampleLttb", () => {
+  const xOf = (item: { x: number; y: number }) => item.x;
+  const yOf = (item: { x: number; y: number }) => item.y;
+  const series = Array.from({ length: 1_000 }, (_, index) => ({ x: index, y: index === 500 ? 100 : Math.sin(index / 40) }));
+
+  test("short input is returned as it is (a copy), and a budget below three changes nothing", () => {
+    const short = series.slice(0, 10);
+    const result = downsampleLttb(short, 50, xOf, yOf);
+    expect(result).toEqual(short);
+    expect(result).not.toBe(short);
+    expect(downsampleLttb(series, 2, xOf, yOf)).toHaveLength(series.length);
+    expect(downsampleLttb(series, Number.NaN, xOf, yOf)).toHaveLength(series.length);
+  });
+
+  test("keeps the first and the last point, exactly the budget of points, in order, none invented", () => {
+    const result = downsampleLttb(series, 60, xOf, yOf);
+    expect(result).toHaveLength(60);
+    expect(result[0]).toBe(series[0]);
+    expect(result[59]).toBe(series[999]);
+    for (let index = 1; index < result.length; index += 1) expect(result[index].x).toBeGreaterThan(result[index - 1].x);
+    for (const item of result) expect(series[item.x]).toBe(item);
+  });
+
+  test("a lone spike is kept - that is what the triangles are for", () => {
+    expect(downsampleLttb(series, 60, xOf, yOf).some((item) => item.y === 100)).toBe(true);
+  });
+
+  test("bad numbers do not break it", () => {
+    const dirty = Array.from({ length: 200 }, (_, index) => ({ x: index, y: index === 50 ? Number.NaN : index }));
+    expect(downsampleLttb(dirty, 30, xOf, yOf)).toHaveLength(30);
+  });
+});
+
+describe("the live end of the curve", () => {
+  // grown: the last snapshot is at t = 4_000 (equity 1_200 = +20 %), the axis ends at 5_000
+  const base = deriveSeries(grown);
+
+  test("a live reading becomes the last point, at the end of the axis, and growth continues from the last snapshot", () => {
+    const live = withLiveEquity(base, 1_260, false);
+    expect(live).not.toBe(base);
+    expect(live.points).toHaveLength(base.points.length + 1);
+    expect(live.latest).toMatchObject({ t: 5_000, equity: 1_260, balance: 1_050, estimated: false, margin: null });
+    expect(live.equityGrowthPct).toBeCloseTo(26, 6);
+    expect(live.currentDrawdownPct).toBe(0);
+    // the recorded points are untouched
+    expect(live.points.slice(0, base.points.length)).toEqual(base.points);
+    // the original series was not changed
+    expect(base.points).toHaveLength(4);
+  });
+
+  test("below the highest point the drawdown is measured against the peak so far", () => {
+    const live = withLiveEquity(base, 1_100, false);
+    expect(live.equityGrowthPct).toBeCloseTo(10, 6);
+    expect(live.currentDrawdownPct).toBeCloseTo(((1.2 - 1.1) / 1.2) * 100, 6);
+    expect(live.maxDrawdownPct).toBeGreaterThanOrEqual(live.currentDrawdownPct);
+  });
+
+  test("nothing is added while the recording is stale, or for a reading that is not a usable number or not a move", () => {
+    expect(withLiveEquity(base, 1_260, true)).toBe(base);
+    expect(withLiveEquity(base, null, false)).toBe(base);
+    expect(withLiveEquity(base, Number.NaN, false)).toBe(base);
+    expect(withLiveEquity(base, 0, false)).toBe(base);
+    expect(withLiveEquity(base, -5, false)).toBe(base);
+    // more than a doubling / halving against the last snapshot is a different account value, not a move
+    expect(withLiveEquity(base, 3_000, false)).toBe(base);
+    expect(withLiveEquity(base, 500, false)).toBe(base);
+    // nothing to continue from
+    expect(withLiveEquity(deriveSeries(dtoOf([])), 1_000, false)).toEqual(deriveSeries(dtoOf([])));
+  });
+
+  test("a reading within a second of the last snapshot replaces it instead of standing next to it", () => {
+    // (the axis ends 500 ms after the last snapshot)
+    const near = deriveSeries({ ...grown, end: 4_500, generatedAt: 4_500 });
+    const live = withLiveEquity(near, 1_210, false);
+    expect(live.points).toHaveLength(near.points.length);
+    expect(live.latest).toMatchObject({ t: 4_000, equity: 1_210 });
+  });
+});
+
+describe("lineValueAt (where the hover dot sits on the drawn curve)", () => {
+  const line = [
+    { t: 1_000, v: 0 },
+    { t: 2_000, v: 10 },
+    { t: 4_000, v: -10 },
+  ];
+
+  test("a point's own value, the straight-line value between two points, nothing outside the line", () => {
+    expect(lineValueAt(line, 2_000)).toBe(10);
+    expect(lineValueAt(line, 1_500)).toBe(5);
+    expect(lineValueAt(line, 3_000)).toBe(0);
+    expect(lineValueAt(line, 999)).toBeNull();
+    expect(lineValueAt(line, 4_001)).toBeNull();
+    expect(lineValueAt([], 1_000)).toBeNull();
+    expect(lineValueAt([{ t: 5, v: 7 }], 5)).toBe(7);
   });
 });
 

@@ -2,7 +2,6 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, TrendingDown } from "lucide-react";
-import { motion } from "framer-motion";
 import type { Period, DashboardView, getRiskLimitState } from "@/lib/domain/dashboard";
 import type { TradeDto } from "@/lib/domain/types";
 import { CalendarTracker } from "@/components/dashboard/CalendarTracker";
@@ -24,14 +23,6 @@ type PeriodSummary = {
   consistency: number;
   tradeCount: number;
   riskReward: number;
-};
-
-const container = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { duration: 0.2 },
-  },
 };
 
 type DashboardModeOverlayProps = {
@@ -172,13 +163,7 @@ export function DashboardModeOverlay({
           onPointerDownOutside={(event) => event.preventDefault()}
           className="fixed left-1/2 top-1/2 z-50 flex max-h-[90dvh] w-[96vw] max-w-7xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[6px] border border-line bg-panel focus:outline-none"
         >
-          <motion.div
-            variants={container}
-            initial="hidden"
-            animate="show"
-            transition={{ duration: 0.28 }}
-            className="flex min-h-0 w-full flex-col"
-          >
+          <div className="wsa-rise flex min-h-0 w-full flex-col">
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-line px-5 py-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">Dashboard detail</p>
@@ -372,7 +357,7 @@ export function DashboardModeOverlay({
                 <CalendarTracker trades={calendarTrades} currency={currency} />
               ) : null}
             </div>
-          </motion.div>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

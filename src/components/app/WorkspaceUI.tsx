@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { motion, type HTMLMotionProps } from "framer-motion";
 import { type LucideIcon } from "lucide-react";
 
-const ease = [0.22, 1, 0.36, 1] as const;
+// (The page / panel entrance is the CSS class `wsa-rise` in globals.css. It used to be a framer-motion variant that
+// started every page at opacity 0 until the animation library had loaded - the library is no longer part of the shared
+// bundle and the content is on screen from the first paint.)
 
 export const controlClassName =
   "h-12 w-full min-w-0 rounded-[5px] border border-line bg-panel-strong px-4 text-base text-foreground outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 read-only:bg-panel sm:text-sm";
@@ -15,25 +16,8 @@ export const textareaClassName =
 export const selectClassName =
   "h-12 w-full min-w-0 rounded-[5px] border border-line bg-panel-strong px-4 text-base text-foreground outline-none transition-colors duration-150 focus:border-accent focus:ring-2 focus:ring-accent/10 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm";
 
-export const pageMotion = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0,
-      delayChildren: 0,
-    },
-  },
-};
-
-export const itemMotion = {
-  hidden: { opacity: 0, y: 4 },
-  show: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.2, ease },
-  },
-};
+/** The class every entrance uses (see `.wsa-rise` in globals.css). */
+export const RISE_CLASS = "wsa-rise";
 
 export function WorkspacePage({
   title,
@@ -49,22 +33,17 @@ export function WorkspacePage({
   children: ReactNode;
 }) {
   return (
-    <motion.section
-      variants={pageMotion}
-      initial="hidden"
-      animate="show"
-      className="w-full min-w-0"
-    >
-      <motion.div variants={itemMotion} className="mb-5 flex flex-col items-stretch gap-4 border-b border-line pb-5 sm:mb-6 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+    <section className="w-full min-w-0">
+      <div className={`${RISE_CLASS} mb-5 flex flex-col items-stretch gap-4 border-b border-line pb-5 sm:mb-6 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between`}>
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-accent">{eyebrow}</p>
           <h1 className="mt-2 break-words text-2xl font-semibold leading-tight text-foreground sm:text-[30px]">{title}</h1>
           <p className="mt-1 max-w-2xl text-sm font-medium leading-6 text-muted">{description}</p>
         </div>
         {action ? <div className="min-w-0 w-full sm:w-auto">{action}</div> : null}
-      </motion.div>
+      </div>
       {children}
-    </motion.section>
+    </section>
   );
 }
 
@@ -110,12 +89,9 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <motion.div
-      variants={itemMotion}
-      className={`card-surface min-w-0 p-4 sm:p-5 ${className}`}
-    >
+    <div className={`${RISE_CLASS} card-surface min-w-0 p-4 sm:p-5 ${className}`}>
       {children}
-    </motion.div>
+    </div>
   );
 }
 
@@ -140,14 +116,11 @@ export function StatTile({
           : "text-foreground";
 
   return (
-    <motion.div
-      variants={itemMotion}
-      className="min-w-0 bg-panel p-4 sm:p-5"
-    >
+    <div className={`${RISE_CLASS} min-w-0 bg-panel p-4 sm:p-5`}>
       <p className="text-sm font-semibold text-muted">{label}</p>
       <p className={`mt-3 text-2xl font-semibold ${toneClass}`}>{value}</p>
       {helper ? <p className="mt-2 text-xs font-medium text-muted">{helper}</p> : null}
-    </motion.div>
+    </div>
   );
 }
 
@@ -412,14 +385,14 @@ export function PrimaryButton({
   children,
   className = "",
   ...props
-}: HTMLMotionProps<"button"> & { children: ReactNode }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { children: ReactNode }) {
   return (
-    <motion.button
+    <button
       {...props}
       className={`btn-dark btn-active disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
     >
       {children}
-    </motion.button>
+    </button>
   );
 }
 

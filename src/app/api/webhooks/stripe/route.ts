@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
 
   let event: { id: string; type: string; data: { object: Record<string, unknown> } };
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     event = stripe.webhooks.constructEvent(rawBody, sig, secret) as unknown as typeof event;
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Signature verification failed";

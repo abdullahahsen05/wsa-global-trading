@@ -21,6 +21,7 @@ import {
   sendWebTrade,
   useWarmWebTradeRoutes,
   useWebTradeAccounts,
+  useWebTradeHistory,
   useWebTradeState,
   useWebTradeSymbols,
   WEB_TRADE_STATE_QUERY_KEY,
@@ -28,6 +29,7 @@ import {
   type WebTradeAction,
 } from "@/hooks/useWebTrade";
 import { BulkBar, PendingCard, PositionCard, type RowEdit } from "@/components/trading/wsaTrade/Book";
+import { HistoryTab } from "@/components/trading/wsaTrade/History";
 import { SymbolPicker } from "@/components/trading/wsaTrade/SymbolPicker";
 import { TradeSettings } from "@/components/trading/wsaTrade/TradeSettings";
 import {
@@ -87,6 +89,14 @@ import {
   timingHeadline,
   timingText,
 } from "@/lib/trade/webTradeFormat";
+import {
+  DEFAULT_HISTORY_PERIOD,
+  LOCAL_ROW_TTL_MS,
+  mergeHistory,
+  rowFromClose,
+  type HistoryPeriodId,
+  type WebTradeHistoryRow,
+} from "@/lib/trade/webTradeHistory";
 import type { WsaTradePatch, WsaTradeWorkspace } from "@/lib/terminal/workspace";
 
 /**
@@ -97,6 +107,8 @@ import type { WsaTradePatch, WsaTradeWorkspace } from "@/lib/terminal/workspace"
  * names, read from the account), choose market / limit / stop, set the volume and the levels,
  * press Buy or Sell, then manage what is open - move the stop loss, take profit or break-even,
  * close or part-close a position, change or delete a pending order, close several at once.
+ * The History tab lists the trades that were closed (a period at a time, with the net result,
+ * win rate and best / worst trade); a trade closed from the panel is listed at once.
  * It works for any connected MT4 / MT5 account, with no broker web terminal and no second login.
  *
  * Orders do not go to the broker from the browser or from the web server: they are handed to the
@@ -124,7 +136,15 @@ const ORDER_KINDS: ReadonlyArray<{ id: WebTradeOrderKind; label: string }> = [
   { id: "STOP", label: "Stop" },
 ];
 
-type BookTab = "positions" | "pending" | "activity";
+type BookTab = "positions" | "pending" | "history" | "activity";
+
+/** A trade the panel has just closed: kept (with the account it belongs to) until the synced record has it. */
+interface ClosedHere {
+  accountId: string;
+  row: WebTradeHistoryRow;
+}
+
+const EMPTY_HISTORY: WebTradeHistoryRow[] = [];
 
 interface Problem {
   message: string;
@@ -157,6 +177,8 @@ interface RunOptions {
   changes?: (result: WebTradeOrderResult) => StateChange[];
   /** the same order sent again after an answer that never came keeps this id (the server never places it twice) */
   retry?: { key: string; id: string };
+  /** the trades this answer closed; they are listed in History at once, until the synced record has them */
+  closed?: (result: WebTradeOrderResult) => ClosedHere[];
 }
 
 /** How long an order whose answer never came may be re-sent with the same id. */
@@ -362,6 +384,8 @@ export function WsaTradePanel({
   const [notice, setNotice] = useState<Notice | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [tab, setTab] = useState<BookTab>("positions");
+  const [historyPeriod, setHistoryPeriod] = useState<HistoryPeriodId>(DEFAULT_HISTORY_PERIOD);
+  const [closedHere, setClosedHere] = useState<ClosedHere[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -377,11 +401,22 @@ export function WsaTradePanel({
   // an order whose answer never came: sent again, it keeps its id, so it can never be placed twice
   const retryId = useRef<{ key: string; id: string; at: number } | null>(null);
 
+  // ── History: the closed trades of the account (read only while that tab is open) ──
+  const historyQuery = useWebTradeHistory(accountId, historyPeriod, tab === "history" && reading);
+  const syncedHistory = historyQuery.data && historyQuery.data.accountId === accountId ? historyQuery.data : null;
+  const historyRows = useMemo(() => {
+    if (!syncedHistory) return EMPTY_HISTORY;
+    const mine = closedHere.filter((entry) => entry.accountId === accountId).map((entry) => entry.row);
+    return mergeHistory(syncedHistory.rows, mine, syncedHistory.since);
+  }, [syncedHistory, closedHere, accountId]);
+
   const readOnly = Boolean(state?.readOnly);
   const canOpen = Boolean(platformGate?.canOpen) && !state?.riskBlocked && !readOnly;
   const canManage = Boolean(platformGate?.canManage) && !readOnly;
   const gateMessage = platformGate && !platformGate.canManage ? platformGate.message : null;
   const route = state?.route ?? accountsQuery.data?.route;
+  const lane = state?.lane;
+  const laneNote = state?.laneNote ?? null;
 
   function dropTransient() {
     setFormError(null);
@@ -436,6 +471,17 @@ export function WsaTradePanel({
     overlayTimers.current.add(timer);
   }
 
+  /** Keeps the trades an answer closed for the History list, until the synced record has them (or a few minutes have passed). */
+  function rememberClosed(list: ClosedHere[]) {
+    if (list.length === 0) return;
+    setClosedHere((current) => [...list, ...current].slice(0, 100));
+    const timer = setTimeout(() => {
+      overlayTimers.current.delete(timer);
+      setClosedHere((current) => current.filter((entry) => !list.includes(entry)));
+    }, LOCAL_ROW_TTL_MS);
+    overlayTimers.current.add(timer);
+  }
+
   /** The id an order is sent with: the one of the attempt whose answer never came, if this is the same order again. */
   function idFor(key: string): { key: string; id: string } {
     const kept = retryId.current;
@@ -472,6 +518,7 @@ export function WsaTradePanel({
       setNotice({ text: base, headline, detail });
       log("ok", base, headline, detail);
       if (!result.repeated && options.changes) remember(options.changes(result));
+      if (!result.repeated && options.closed) rememberClosed(options.closed(result));
       if (result.failed && result.failed > 0) {
         const failures = (result.failures ?? [])
           .slice(0, 3)
@@ -566,6 +613,11 @@ export function WsaTradePanel({
       {
         onDone: () => setRowEdit(null),
         changes: (result) => changesFromClose(accountId, result, position, partial ? lots : null),
+        // (a whole close is a closed trade at once; the part of a partial close gets its own record from the broker)
+        closed: (result) =>
+          partial
+            ? []
+            : [{ accountId, row: rowFromClose(position, result.detail?.fillPrice, new Date(currentTimeMs()).toISOString()) }],
       },
     );
   }
@@ -682,6 +734,19 @@ export function WsaTradePanel({
       {
         retry: attempt,
         changes: (result) => changesFromBulk(accountId, result, targets),
+        closed: (result) => {
+          // Reuse the guarded bulk result: a capped failures list or a changed broker position list does not
+          // prove which tickets closed. Never show an unconfirmed position as closed in History.
+          const confirmed = new Set(
+            changesFromBulk(accountId, result, targets)
+              .filter((change) => change.kind === "closed")
+              .map((change) => change.ticket),
+          );
+          const closedAt = new Date(currentTimeMs()).toISOString();
+          return targets.positions
+            .filter((entry) => confirmed.has(entry.ticket))
+            .map((entry) => ({ accountId, row: rowFromClose(entry, null, closedAt) }));
+        },
         onDone: () => setRowEdit(null),
       },
     );
@@ -725,6 +790,26 @@ export function WsaTradePanel({
             <Zap className="h-3 w-3" aria-hidden="true" />
             {routeLabel(route)}
           </span>
+          {lane ? (
+            <span
+              className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
+                lane === "direct"
+                  ? "border-accent-2/60 bg-accent-2/10 text-accent-2"
+                  : laneNote
+                    ? "border-accent/60 bg-accent/10 text-accent"
+                    : "border-line text-muted"
+              }`}
+              title={
+                lane === "direct"
+                  ? "Orders go straight to the trading system in one signed, encrypted request - no database in between."
+                  : laneNote
+                    ? `Orders go through the database queue (slower). ${laneNote}`
+                    : "Orders go through the trading system's queue (the database)."
+              }
+            >
+              {lane === "direct" ? "Direct" : laneNote ? "Standard · direct paused" : "Standard"}
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-muted" aria-live="polite">
@@ -1129,6 +1214,7 @@ export function WsaTradePanel({
                     [
                       { id: "positions", label: `Positions${state ? ` (${positions.length})` : ""}` },
                       { id: "pending", label: `Pending${state ? ` (${pendingCount})` : ""}` },
+                      { id: "history", label: "History" },
                       { id: "activity", label: "Activity" },
                     ] as const
                   ).map((entry) => (
@@ -1243,6 +1329,20 @@ export function WsaTradePanel({
                       </>
                     )}
                   </div>
+                ) : null}
+
+                {tab === "history" ? (
+                  <HistoryTab
+                    period={historyPeriod}
+                    onPeriod={setHistoryPeriod}
+                    rows={historyRows}
+                    currency={syncedHistory?.currency ?? currency}
+                    loading={historyQuery.isPending || (historyQuery.isFetching && !syncedHistory)}
+                    error={historyQuery.isError ? historyQuery.error.message : null}
+                    truncated={syncedHistory?.truncated ?? false}
+                    refreshing={historyQuery.isFetching}
+                    onRefresh={() => void historyQuery.refetch()}
+                  />
                 ) : null}
 
                 {tab === "activity" ? (

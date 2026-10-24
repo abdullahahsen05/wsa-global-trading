@@ -92,7 +92,23 @@ describe("the full check stays the default", () => {
 
     expect(supabase.auth.getUser).toHaveBeenCalledTimes(2);
     expect(profileReads).toEqual([USER_A, USER_A]);
-    expect(supabase.auth.getSession).not.toHaveBeenCalled();
+  });
+
+  test("the profile is read while Supabase verifies the token: one round trip, and the read counts only for the verified person", async () => {
+    await requireTrader();
+    expect(profileReads).toEqual([USER_A]); // the token names USER_A, Supabase confirms USER_A: no second read
+
+    // a token that CLAIMS to be USER_B but that Supabase says belongs to USER_A: the early read of B is thrown away
+    profileReads.length = 0;
+    sessionToken = tokenFor(USER_B);
+    verifiesAs(USER_A);
+    const user = await requireTrader();
+    expect(user.id).toBe(USER_A);
+    expect(profileReads).toEqual([USER_B, USER_A]);
+
+    // a token Supabase does not accept gets nothing, whatever it claims
+    verifiesAs(null);
+    await expect(requireTrader()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 
   test("a person who is signed out is refused, a suspended one too, a partner is not a trader", async () => {

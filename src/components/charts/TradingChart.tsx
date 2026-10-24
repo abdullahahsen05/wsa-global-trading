@@ -12,7 +12,6 @@ import {
   Send,
   SlidersHorizontal,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { TradingViewAdvancedChart } from "@/components/trading/TradingViewAdvancedChart";
 import { TradingViewOptionsPanel } from "@/components/trading/TradingViewOptionsPanel";
 import { TradingViewWatchlistEditor } from "@/components/trading/TradingViewWatchlistEditor";
@@ -293,7 +292,7 @@ export function TradingChart({
       : "Context only";
 
   return (
-    <motion.section layout className="section-surface overflow-hidden">
+    <section className="section-surface overflow-hidden">
       <video ref={videoRef} playsInline className="pointer-events-none fixed h-px w-px opacity-0" />
 
       <div className="flex flex-col items-start justify-between gap-4 border-b border-line px-4 py-4 sm:flex-row sm:flex-wrap sm:px-5 sm:py-5">
@@ -530,6 +529,6 @@ export function TradingChart({
           ) : null}
         </div>
       ) : null}
-    </motion.section>
+    </section>
   );
 }

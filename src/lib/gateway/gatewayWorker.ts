@@ -30,16 +30,23 @@ if (typeof window !== "undefined") {
  *                062 (or when the database refuses the long call) it polls exactly as before;
  *  - the heartbeat carries what the worker knows about itself - the round trip to the database, how late its
  *                event loop runs, whether it waits inside the database - so the web panel can say where a
- *                delay comes from.
+ *                delay comes from;
+ *  - the DIRECT LANE (`directLane.ts`): an order can also arrive over HTTP from the web server (`runDirect`). It goes
+ *                through the very same chain, owner check and executor, is ANSWERED as soon as the broker has
+ *                answered, but first reserves (user, request id) durably in the database. A restart may leave an
+ *                uncertain RUNNING row, but it cannot send that request to the broker twice.
  *
  * No Next / React imports: runs inside the AWS worker.
  */
 
+import { randomUUID } from "node:crypto";
 import { monitorEventLoopDelay, performance, type IntervalHistogram } from "node:perf_hooks";
 import type { BrokerAdapter } from "@/lib/broker/BrokerAdapter";
 import { KeyedChains } from "@/lib/copy/keyedChains";
+import type { DirectReply, DirectRequest } from "./directLane";
 import { GatewayNotInstalledError, LONG_POLL_TROUBLE_PAUSE_MS, LongPollUnavailableError } from "./gatewayDb";
-import type { ClaimedCommand, GatewayStore, WatchedAccount } from "./gatewayStore";
+import { commandAnswer } from "./gatewayQueue";
+import type { ClaimedCommand, DirectRecord, GatewayStore, WatchedAccount } from "./gatewayStore";
 import {
   ORDER_COMMAND_KINDS,
   parseTradeCommand,
@@ -47,6 +54,7 @@ import {
   type CommandTiming,
   type GatewayTradingState,
   type ParsedTradeCommand,
+  type StoredCommandError,
   type TradeCommandOutcome,
 } from "./tradeCommands";
 import { describeCommandError, executeTradeCommand, readGatewayState } from "./tradeExecutor";
@@ -107,6 +115,23 @@ const LONG_POLL_MAX_FAILURES = 3;
 const LAG_RESOLUTION_MS = 10;
 /** How many database round trips are remembered for the median. */
 const DB_SAMPLES = 7;
+/** A direct-lane request is answered from memory for this long when it is sent again (a retry after a dropped connection). */
+const DIRECT_REMEMBER_MS = 10 * 60_000;
+const DIRECT_REMEMBER_MAX = 5_000;
+const DIRECT_UNCERTAIN_MESSAGE =
+  "The order was sent, but its answer could not be confirmed. Check the open positions before sending it again.";
+
+/** What running one command came to - the same for a command from the database and one from the direct lane. */
+type Ran =
+  | { ok: true; startedAt: number; parsed: ParsedTradeCommand; outcome: TradeCommandOutcome; timing: CommandTiming }
+  | { ok: false; startedAt: number; failure: StoredCommandError };
+
+/** A direct-lane request being answered or answered already. */
+interface DirectEntry {
+  at: number;
+  reply: DirectReply | null;
+  pending: Promise<DirectReply> | null;
+}
 
 /** What one round of claiming brought. */
 interface ClaimRound {
@@ -186,6 +211,11 @@ export class GatewayWorker {
   private readonly refreshAgain = new Set<string>();
   /** answers being stored (they are written outside the chain of the account) */
   private readonly answers = new Set<Promise<void>>();
+  /** direct-lane requests by "user:request id": what they were answered, so a repeated request never reaches the broker */
+  private readonly directSeen = new Map<string, DirectEntry>();
+  /** the HTTP server of the direct lane is listening (reported in the heartbeat) */
+  private directListening = false;
+  private directTls = false;
 
   private running = false;
   private startedAt = new Date(0);
@@ -473,10 +503,14 @@ export class GatewayWorker {
     }
   }
 
-  private async process(command: ClaimedCommand): Promise<void> {
+  /**
+   * Runs one command through the owner check and the executor and says how it went (it stores nothing). The same for a
+   * command from the database (`process`) and one from the direct lane (`answerDirect`), so a click means the same on both.
+   * `lane` is only added to the log line.
+   */
+  private async runCommand(command: ClaimedCommand, label: string, lane: string): Promise<Ran> {
     const startedAt = this.now();
     const queueMs = Math.max(0, startedAt - Date.parse(command.createdAt));
-    const label = `${command.kind} ${shortId(command.accountId)}`;
     // filled in by the executor while it works: where the time of this command goes
     const timing: Partial<CommandTiming> = {};
 
@@ -502,28 +536,197 @@ export class GatewayWorker {
       const failure = describeCommandError(error);
       this.commandsFailed += 1;
       this.log(
-        `[trade-gateway] ${label} failed in ${this.now() - startedAt}ms (queue ${queueMs}ms${timingSuffix(timing)}): ${failure.code} - ${failure.message}`,
+        `[trade-gateway] ${label} failed in ${this.now() - startedAt}ms (queue ${queueMs}ms${timingSuffix(timing)}): ${failure.code} - ${failure.message}${lane}`,
       );
-      await this.withRetries(() => this.store.fail(command.id, failure)).catch((storeError) => {
+      return { ok: false, startedAt, failure };
+    }
+
+    // The command has run: from here on only the answer must be delivered - it is never run again.
+    const runMs = this.now() - startedAt;
+    this.commandsRun += 1;
+    if (touchesBroker) this.orderFinished(command.accountId);
+    if (parsed.kind !== "STATE") {
+      this.log(`[trade-gateway] ${label} done in ${runMs}ms (queue ${queueMs}ms${timingSuffix(timing)})${lane}`);
+    }
+    return { ok: true, startedAt, parsed, outcome, timing: { ...timing, queueMs, runMs } };
+  }
+
+  private async process(command: ClaimedCommand): Promise<void> {
+    const label = `${command.kind} ${shortId(command.accountId)}`;
+    const ran = await this.runCommand(command, label, "");
+    if (!ran.ok) {
+      await this.withRetries(() => this.store.fail(command.id, ran.failure)).catch((storeError) => {
         this.warn(`[trade-gateway] could not store the failure of ${shortId(command.id)}: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
       });
       return;
     }
-
-    // The command has run: from here on only the answer must be stored - it is never run again.
-    const runMs = this.now() - startedAt;
-    this.commandsRun += 1;
-    if (touchesBroker) this.orderFinished(command.accountId);
-    if (parsed.kind !== "STATE") this.log(`[trade-gateway] ${label} done in ${runMs}ms (queue ${queueMs}ms${timingSuffix(timing)})`);
-    if (parsed.kind === "SYMBOLS" && outcome.symbols) {
-      await this.store.saveSymbols(command.accountId, outcome.symbols, new Date(this.now())).catch((storeError) => {
+    if (ran.parsed.kind === "SYMBOLS" && ran.outcome.symbols) {
+      await this.store.saveSymbols(command.accountId, ran.outcome.symbols, new Date(this.now())).catch((storeError) => {
         if (!this.noteNotInstalled(storeError)) {
           this.warn(`[trade-gateway] could not store the symbols: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
         }
       });
     }
     // Written outside the chain of the account: the next order on it does not wait for this round trip.
-    this.storeAnswer(command, label, { ...outcome, timing: { ...timing, queueMs, runMs } });
+    this.storeAnswer(command, label, { ...ran.outcome, timing: ran.timing });
+  }
+
+  // ── the direct lane ────────────────────────────────────────────────────────
+
+  /**
+   * The HTTP server of the direct lane started / stopped listening (the heartbeat tells the web server), and whether its port
+   * serves HTTPS - the web server checks its address against that before it sends anything.
+   */
+  setDirectLane(listening: boolean, tls: boolean = false): void {
+    this.directListening = listening;
+    this.directTls = listening && tls;
+  }
+
+  /**
+   * An order that arrived over the direct lane. It runs on the chain of its account - behind everything queued
+   * before it, in front of what comes after - exactly as a command from the database does, and is answered at once.
+   * Asked twice (a retry after a dropped connection) the same (user, request id) is answered from memory or its
+   * durable reservation: the order reaches the broker at most once, even across worker restarts. Never throws.
+   */
+  async runDirect(request: DirectRequest, receivedAt: number = this.now()): Promise<DirectReply> {
+    const key = `${request.userId}:${request.clientRequestId}`;
+    const known = this.directSeen.get(key);
+    if (known && (known.pending !== null || receivedAt - known.at < DIRECT_REMEMBER_MS)) {
+      const reply = known.reply ?? (await (known.pending as Promise<DirectReply>));
+      return { ...reply, repeated: true };
+    }
+    const entry: DirectEntry = { at: receivedAt, reply: null, pending: null };
+    this.rememberDirect(key, entry);
+    const pending = this.answerDirect(request, receivedAt).then((reply) => {
+      entry.reply = reply;
+      entry.pending = null;
+      return reply;
+    });
+    entry.pending = pending;
+    return pending;
+  }
+
+  private rememberDirect(key: string, entry: DirectEntry): void {
+    if (this.directSeen.size >= DIRECT_REMEMBER_MAX) {
+      for (const [oldKey, old] of this.directSeen) {
+        if (old.pending === null && entry.at - old.at >= DIRECT_REMEMBER_MS) this.directSeen.delete(oldKey);
+      }
+      // still full: the oldest answered ones go (never one that is being answered)
+      for (const [oldKey, old] of this.directSeen) {
+        if (this.directSeen.size < DIRECT_REMEMBER_MAX * 0.9) break;
+        if (old.pending === null) this.directSeen.delete(oldKey);
+      }
+    }
+    this.directSeen.set(key, entry);
+  }
+
+  /** What an earlier try of this request left in the database. */
+  private async earlierDirectAnswer(request: DirectRequest): Promise<DirectReply | null> {
+    if (typeof this.store.findByRequest !== "function") return null;
+    const row = await this.store.findByRequest(request.userId, request.clientRequestId);
+    if (!row) return null;
+    // a command somebody else started and nobody finished: it may exist at the broker
+    if (row.status === "PENDING" || row.status === "RUNNING") {
+      return { ok: false, error: { code: "ORDER_UNCERTAIN", message: DIRECT_UNCERTAIN_MESSAGE, statusCode: 504 } };
+    }
+    const answer = commandAnswer(row);
+    return answer.ok ? { ok: true, outcome: answer.outcome } : { ok: false, error: answer.error };
+  }
+
+  private async answerDirect(request: DirectRequest, receivedAt: number): Promise<DirectReply> {
+    const uncertain: DirectReply = {
+      ok: false,
+      error: { code: "ORDER_UNCERTAIN", message: DIRECT_UNCERTAIN_MESSAGE, statusCode: 504 },
+    };
+    try {
+      // In-memory deduplication is lost on restart. Without a durable reservation made before broker execution,
+      // a repeated first attempt could otherwise place the same order twice.
+      if (!this.store.reserveDirect || !this.store.recordDirect || !this.store.findByRequest) return uncertain;
+      const command: ClaimedCommand = {
+        id: randomUUID(),
+        userId: request.userId,
+        accountId: request.accountId,
+        kind: request.kind,
+        payload: request.payload,
+        clientRequestId: request.clientRequestId,
+        createdAt: new Date(receivedAt).toISOString(),
+        expiresAt: new Date(receivedAt + request.ttlMs).toISOString(),
+      };
+      const reserved = await this.store.reserveDirect({
+        id: command.id,
+        userId: command.userId,
+        accountId: command.accountId,
+        kind: command.kind,
+        payload: command.payload,
+        clientRequestId: command.clientRequestId,
+        receivedAt: command.createdAt,
+        expiresAt: command.expiresAt,
+        startedAt: new Date(this.now()).toISOString(),
+        workerId: this.workerId,
+      });
+      if (!reserved) {
+        // The unique (user, request id) constraint arbitrates even after a restart or on another worker.
+        // A RUNNING row may already have reached the broker; do not execute it again.
+        const earlier = await this.earlierDirectAnswer(request);
+        return earlier ? { ...earlier, repeated: true } : uncertain;
+      }
+      const label = `${command.kind} ${shortId(command.accountId)}`;
+      const holder: { ran: Ran | null } = { ran: null };
+      await this.commandChains.run(
+        command.accountId,
+        async () => {
+          holder.ran = await this.runCommand(command, label, " [direct]");
+        },
+        (error) => this.warn(`[trade-gateway] direct command ${shortId(command.id)} crashed: ${error instanceof Error ? error.message : "unknown error"}`),
+      );
+      const ran = holder.ran;
+      if (!ran) return uncertain;
+
+      // The broker has answered: the answer leaves now, the database is written afterwards.
+      if (!ran.ok) {
+        this.recordDirectAnswer(command, receivedAt, ran.startedAt, { error: ran.failure });
+        return { ok: false, error: ran.failure, ...(ran.failure.code === "NOT_SENT" ? { notSent: true } : {}) };
+      }
+      const outcome: TradeCommandOutcome = { ...ran.outcome, timing: ran.timing };
+      this.recordDirectAnswer(command, receivedAt, ran.startedAt, { outcome });
+      return { ok: true, outcome };
+    } catch (error) {
+      this.warn(`[trade-gateway] direct request ${shortId(request.clientRequestId)} failed: ${error instanceof Error ? error.message : "unknown error"}`);
+      return uncertain;
+    }
+  }
+
+  /** Write-behind: the order is in the database (DONE / FAILED) a moment after it was answered - with retries, like every stored answer. */
+  private recordDirectAnswer(
+    command: ClaimedCommand,
+    receivedAt: number,
+    startedAt: number,
+    result: { outcome: TradeCommandOutcome } | { error: StoredCommandError },
+  ): void {
+    const record = this.store.recordDirect?.bind(this.store);
+    if (!record) return;
+    const entry: DirectRecord = {
+      id: command.id,
+      userId: command.userId,
+      accountId: command.accountId,
+      kind: command.kind,
+      payload: command.payload,
+      clientRequestId: command.clientRequestId,
+      receivedAt: new Date(receivedAt).toISOString(),
+      expiresAt: command.expiresAt,
+      startedAt: new Date(startedAt).toISOString(),
+      completedAt: new Date(this.now()).toISOString(),
+      workerId: this.workerId,
+      ...result,
+    };
+    const task: Promise<void> = this.withRetries(() => record(entry))
+      .catch((storeError) => {
+        this.warn(`[trade-gateway] direct ${command.kind} ${shortId(command.accountId)} was answered but could not be recorded: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
+      })
+      .finally(() => {
+        this.answers.delete(task);
+      });
+    this.answers.add(task);
   }
 
   /** Stores the answer of a command that has run - with retries, because the order exists whatever happens now. */
@@ -709,6 +912,10 @@ export class GatewayWorker {
       commandsRun: this.commandsRun,
       commandsFailed: this.commandsFailed,
       longPoll: this.longPollActive(),
+      // the web server may hand orders over HTTP (`directLane.ts`) while this is true ...
+      direct: this.directListening,
+      // ... and this says whether that port serves HTTPS (the web address must then start with https://)
+      directTls: this.directTls,
     };
     const dbRttMs = this.medianDbMs();
     if (dbRttMs !== undefined) info.dbRttMs = dbRttMs;

@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { AlertTriangle, RefreshCcw, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { BrandLogo } from "@/components/app/BrandLogo";
@@ -89,7 +88,7 @@ export function WorkspaceErrorState({
 }) {
   return (
     <section className="mx-auto grid min-h-[60vh] max-w-3xl place-items-center px-4 py-10">
-      <motion.div className="w-full rounded-[6px] border border-line bg-panel p-6">
+      <div className="w-full rounded-[6px] border border-line bg-panel p-6">
         <div className="flex items-start gap-4">
           <div className="grid h-12 w-12 shrink-0 place-items-center rounded-[4px] bg-danger/10 text-danger">
             <AlertTriangle className="h-5 w-5" />
@@ -109,7 +108,7 @@ export function WorkspaceErrorState({
             </div>
           </div>
         </div>
-      </motion.div>
+      </div>
     </section>
   );
 }

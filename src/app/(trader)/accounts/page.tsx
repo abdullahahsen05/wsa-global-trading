@@ -24,8 +24,8 @@ import { BrokerAutocompleteField } from "@/components/accounts/BrokerAutocomplet
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 import { normalizeBrokerLogin } from "@/lib/utils/brokerLogin";
 import type { TraderAccountSummary } from "@/lib/domain/types";
-import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
-import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 
 // Dialog step state machine
 type ConnectStep = "setup" | "credentials";
@@ -62,10 +62,9 @@ function accountActionLabel(account: TraderAccountSummary) {
 }
 
 export default function AccountsPage() {
-  const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
-  const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
+  const { access, checking } = usePlatformGate();
 
-  if (accessLoading && !summary) {
+  if (checking) {
     return (
       <WorkspacePage
         eyebrow="Trading accounts"
@@ -98,7 +97,6 @@ export default function AccountsPage() {
 }
 
 function AccountsContent() {
-  const { setSelectedAccountId } = useTradingAccountSelection();
   const searchParams = useSearchParams();
   const handledRouteActionRef = useRef("");
   const [query, setQuery] = useState("");
@@ -120,13 +118,9 @@ function AccountsContent() {
   const queryClient = useQueryClient();
 
   const { data: tradingAccounts = [], isLoading, isError } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts"],
-    queryFn: async () => {
-      const res = await fetch("/api/trading-accounts");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
-      return json.data;
-    },
+    // (the same key and request as the top bar's account picker: one request, not two)
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
   });
 
   const brokerServersQuery = useQuery<{
@@ -807,7 +801,6 @@ function AccountsContent() {
                       ? `/accounts?setup=${account.accountId}`
                       : `/accounts/${account.accountId}`
                   }
-                  onClick={() => setSelectedAccountId(account.accountId)}
                   className="btn-dark inline-flex h-9 items-center whitespace-nowrap px-3 text-xs font-semibold text-accent"
                 >
                   {accountActionLabel(account)}

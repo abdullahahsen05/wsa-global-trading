@@ -11,6 +11,23 @@ import { publicTradeRejection } from "@/lib/broker/api2TradeErrors";
 import { BROKER_EXEC_ERROR, BrokerExecutionError, type BrokerAdapter } from "@/lib/broker/BrokerAdapter";
 import { createBrokerAdapter } from "@/lib/broker/provider";
 import type { AccountStatus, RiskEnforcementStateDto } from "@/lib/domain/types";
+import {
+  DIRECT_LANE_VERSION,
+  DIRECT_ORDER_TTL_MS,
+  directLaneMismatch,
+  directLaneStatus,
+  type DirectLaneStatus,
+  type DirectRequest,
+} from "@/lib/gateway/directLane";
+import {
+  directLaneConfig,
+  directLaneDown,
+  directLaneDownNote,
+  sendDirect,
+  warmDirectLane,
+  type DirectLaneConfig,
+  type DirectSend,
+} from "@/lib/gateway/directLaneClient";
 import { GatewayNotInstalledError, longPollKnownOff, type CommandRow } from "@/lib/gateway/gatewayDb";
 import {
   abandonCommand,
@@ -19,6 +36,7 @@ import {
   enqueueCommand,
   gatewayAvailability,
   keepWatching,
+  lookupCommandByRequest,
   readAccountWatch,
   readStoredSymbols,
   waitForCommand,
@@ -26,6 +44,7 @@ import {
   type WatchRow,
 } from "@/lib/gateway/gatewayQueue";
 import {
+  ORDER_COMMAND_KINDS,
   parseTradeCommand,
   TradeCommandError,
   type GatewayTradingState,
@@ -37,6 +56,7 @@ import { executeTradeCommand } from "@/lib/gateway/tradeExecutor";
 import { writeAuditLog, type AuditAction, type WriteAuditLogParams } from "@/lib/services/auditService";
 import { getPlatformSubscriptionAccess, hasActivePlatformProductSubscription } from "@/lib/services/billingService";
 import { getRiskEnforcementState } from "@/lib/services/riskService";
+import { mintOrderPass, type OrderPassClaims, type OrderUser } from "@/lib/services/webTradePass";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTerminalPlatform, sanitizeServer } from "@/lib/terminal/metatrader";
 import type {
@@ -51,6 +71,12 @@ import type {
   WebTradeTiming,
 } from "@/lib/trade/webTrade";
 import { WebTradeGuard } from "@/lib/trade/webTradeGuard";
+import {
+  WEB_TRADE_HISTORY_LIMIT,
+  WEB_TRADE_HISTORY_MAX,
+  type WebTradeHistory,
+  type WebTradeHistoryRow,
+} from "@/lib/trade/webTradeHistory";
 import type {
   WebTradeCancelInput,
   WebTradeCloseBulkInput,
@@ -174,7 +200,7 @@ function databaseProblem(what: string, detail: string): WebTradeError {
   return new WebTradeError("SERVICE_UNAVAILABLE", "Your accounts could not be loaded. Try again in a moment.", 503);
 }
 
-function assertMayTrade(user: SessionUser): void {
+function assertMayTrade(user: OrderUser): void {
   // Partners have no trading terminal (same rule as the MetaTrader pane).
   if (user.role === "PARTNER") {
     throw new WebTradeError("FORBIDDEN", "Partners do not have a trading terminal.", 403);
@@ -242,16 +268,24 @@ const RISK_HOLD_MS = 4_000;
 const RISK_HOLD_MAX = 2_000;
 const riskHeld = new Map<string, { state: RiskState; at: number }>();
 
-async function riskStateOf(accountId: string, maxAgeMs: number = RISK_HOLD_MS): Promise<RiskState> {
+async function riskVerdictOf(
+  accountId: string,
+  maxAgeMs: number = RISK_HOLD_MS,
+): Promise<{ state: RiskState; at: number }> {
   const held = riskHeld.get(accountId);
-  if (held && Date.now() - held.at < maxAgeMs) return held.state;
+  if (held && Date.now() - held.at < maxAgeMs) return { state: held.state, at: held.at };
   riskHeld.delete(accountId);
   const state = await getRiskEnforcementState(accountId);
+  const at = Date.now();
   if (!state?.blockedNewTrades) {
     if (riskHeld.size >= RISK_HOLD_MAX) riskHeld.clear();
-    riskHeld.set(accountId, { state, at: Date.now() });
+    riskHeld.set(accountId, { state, at });
   }
-  return state;
+  return { state, at };
+}
+
+async function riskStateOf(accountId: string, maxAgeMs: number = RISK_HOLD_MS): Promise<RiskState> {
+  return (await riskVerdictOf(accountId, maxAgeMs)).state;
 }
 
 function riskMessage(rules: ReadonlyArray<{ name: string }>): string {
@@ -284,6 +318,8 @@ interface AwsFacts {
   loopMs?: number;
   /** it waits for commands inside the database (migration 062) instead of asking again and again */
   longPoll: boolean;
+  /** its direct lane (an HTTP port for orders from this server) is listening */
+  direct: boolean;
 }
 
 type OrderRoute =
@@ -301,13 +337,32 @@ async function gatewayState(maxAgeMs?: number): Promise<GatewayAvailability> {
   }
 }
 
-function awsFacts(gateway: Extract<GatewayAvailability, { state: "online" }>): AwsFacts {
+function awsFacts(gateway: OnlineGateway): AwsFacts {
+  // The lane may be used when the worker listens AND the address here can reach it: the worker serving HTTPS while the
+  // address says http:// is a mismatch no order should be sent into (the other way round - a TLS proxy in front - is fine).
+  const config = directLaneConfig();
+  const usable = gateway.awsDirect === true && config !== null && directLaneMismatch(config.base.startsWith("https:"), gateway.awsDirectTls) === null;
   return {
     ...(gateway.awsDbMs !== undefined ? { dbMs: gateway.awsDbMs } : {}),
     ...(gateway.awsLoopMs !== undefined ? { loopMs: gateway.awsLoopMs } : {}),
     // a worker that does not report the flag is an older one: it asks again and again
     longPoll: gateway.awsLongPoll === true,
+    // (an older worker has no direct lane)
+    direct: usable,
   };
+}
+
+/** What the panel's "lane" chip says: orders go straight to the trading system, or through the database (and, if the lane was meant to be used, why not). */
+function laneOf(gateway: OnlineGateway): DirectLaneStatus {
+  const config = directLaneConfig();
+  return directLaneStatus({
+    configured: config !== null,
+    secureUrl: config?.base.startsWith("https:") === true,
+    workerListening: gateway.awsDirect === true,
+    workerTls: gateway.awsDirectTls,
+    down: directLaneDown(),
+    downNote: directLaneDownNote(),
+  });
 }
 
 /** How orders reach the broker right now. */
@@ -335,12 +390,13 @@ function routeName(route: OrderRoute): WebTradeRoute {
 }
 
 type ReadAdapter = BrokerAdapter & Required<Pick<BrokerAdapter, "fetchTradingState">>;
-type ReadRoute = { via: "gateway" } | { via: "direct"; adapter: ReadAdapter; gateway: GatewayAvailability };
+type OnlineGateway = Extract<GatewayAvailability, { state: "online" }>;
+type ReadRoute = { via: "gateway"; online: OnlineGateway } | { via: "direct"; adapter: ReadAdapter; gateway: GatewayAvailability };
 
 /** Where positions are read from: the AWS system while it reports in, else this server's own bridge. */
 async function readRoute(): Promise<ReadRoute> {
   const gateway = await gatewayState();
-  if (gateway.state === "online") return { via: "gateway" };
+  if (gateway.state === "online") return { via: "gateway", online: gateway };
   if (routeMode() === "gateway") throw new WebTradeError("GATEWAY_OFFLINE", GATEWAY_OFFLINE_MESSAGE, 503);
   const adapter = createBrokerAdapter();
   if (!adapter.fetchTradingState) {
@@ -387,7 +443,7 @@ export function resetWebTradeCaches(): void {
 
 /** The platform subscription check (admins exempt). Null = allowed. */
 async function subscriptionProblem(
-  user: SessionUser,
+  user: OrderUser,
   maxAgeMs: number = SUBSCRIPTION_OK_MS,
 ): Promise<WebTradeError | null> {
   if (isAdmin(user.role)) return null;
@@ -428,12 +484,19 @@ const WARM_RISK_MS = 2_000;
  * panel sends when somebody reaches for the buttons (`establish` true: also the first check). Nothing here throws
  * and nothing here can refuse anything - the order path still decides on its own.
  */
-export async function warmWebTradeGates(user: SessionUser, accountId: string, establish: boolean): Promise<void> {
+export async function warmWebTradeGates(user: OrderUser, accountId: string, establish: boolean): Promise<void> {
   if (user.role === "PARTNER") return;
   const subscription =
     establish || subscriptionSeenAt.has(user.id) ? subscriptionProblem(user, WARM_SUBSCRIPTION_MS) : Promise.resolve(null);
+  // The AWS system's heartbeat - and, when its direct lane is up, the connection to it (a signed ping, at most every
+  // few seconds), so the next order does not begin with a TCP + TLS handshake and a dead lane is noticed before an order needs it.
+  const availability = gatewayState(WARM_AVAILABILITY_MS).then((state) => {
+    if (state.state !== "online" || !state.awsDirect) return undefined;
+    const lane = directLaneConfig();
+    return lane ? warmDirectLane(lane) : undefined;
+  });
   await Promise.allSettled([
-    gatewayState(WARM_AVAILABILITY_MS),
+    availability,
     subscription,
     loadOwnedAccount(user.id, accountId, WARM_ACCOUNT_MS).then((account) => riskStateOf(account.id, WARM_RISK_MS)),
   ]);
@@ -460,7 +523,7 @@ async function platformGate(user: SessionUser, route: OrderRoute): Promise<WebTr
   return { canOpen: true, canManage: true, reason: null, message: null };
 }
 
-function takeSlot(user: SessionUser): void {
+function takeSlot(user: OrderUser): void {
   if (!guard.allow(user.id)) {
     throw new WebTradeError("RATE_LIMITED", "Too many orders in a short time. Wait a moment and try again.", 429);
   }
@@ -546,10 +609,20 @@ async function readGatewayPicture(
   throw new WebTradeError("GATEWAY_TIMEOUT", "The trading system did not answer in time. Try again in a moment.", 504);
 }
 
+/** How young the risk verdict must be for an order pass to rest on it (the pass trusts it for `ORDER_PASS_RISK_LIFE_MS` more). */
+const PASS_RISK_MAX_AGE_MS = 2_000;
+
+/** What the state route knows about the request's session; with it the state also carries an order pass. */
+export interface WebTradeStateMeta {
+  /** the session token's key and own expiry (`currentTokenFacts()`); without it no pass is made */
+  token?: { key: string; expiresAtMs: number | null } | null;
+}
+
 /** Figures, positions, pending orders and (when a symbol is given) the price of one of the caller's accounts. */
 export async function getWebTradeState(
   user: SessionUser,
   query: { accountId: string; symbol?: string },
+  meta: WebTradeStateMeta = {},
 ): Promise<WebTradeState> {
   assertMayTrade(user);
   const route = await readRoute();
@@ -557,13 +630,17 @@ export async function getWebTradeState(
   // The account is checked first; the risk state is only read for an account that is the caller's.
   const accountPromise = loadOwnedAccount(user.id, query.accountId);
   const riskPromise = accountPromise.then(
-    (owned) => riskStateOf(owned.id).catch(() => null),
+    (owned) => riskVerdictOf(owned.id, PASS_RISK_MAX_AGE_MS).catch(() => null),
     () => null,
   );
   // (the picture is filtered by the caller's id too, so reading it next to the account check is safe)
   const watchPromise = db ? readAccountWatch(db, query.accountId, user.id).catch(() => null) : Promise.resolve(null);
+  // The subscription is what an order pass also vouches for: asked next to the rest (a kept answer costs nothing).
+  const subscriptionPromise =
+    meta.token && route.via === "gateway" ? settled(subscriptionProblem(user, WARM_SUBSCRIPTION_MS)) : null;
   const account = await accountPromise;
-  const [earlier, risk] = await Promise.all([watchPromise, riskPromise]);
+  const [earlier, verdict] = await Promise.all([watchPromise, riskPromise]);
+  const risk = verdict?.state ?? null;
 
   let state: GatewayTradingState;
   let delayed = false;
@@ -591,8 +668,28 @@ export async function getWebTradeState(
   }
 
   const riskBlocked = Boolean(risk?.blockedNewTrades);
+
+  // The order pass: "this session, this account, was checked just now" - signed, for a few seconds. Only for a caller whose
+  // subscription is in order and whose account can trade; a refusal is never turned into a pass.
+  let pass: string | undefined;
+  if (meta.token && subscriptionPromise && route.via === "gateway" && route.online.executionEnabled && state.readOnly !== true) {
+    const subscription = await subscriptionPromise;
+    if (subscription.ok && subscription.value === null) {
+      pass =
+        mintOrderPass({
+          user,
+          accountId: account.id,
+          tokenKey: meta.token.key,
+          tokenExpiresAtMs: meta.token.expiresAtMs,
+          riskReadAt: verdict && !riskBlocked ? verdict.at : null,
+          aws: awsFacts(route.online),
+        }) ?? undefined;
+    }
+  }
+
   // A poll is also the moment to renew what the next order will check (after this answer has left).
   warmAfterResponse(user, account.id);
+  const laneInfo = route.via === "gateway" ? laneOf(route.online) : null;
   return {
     accountId: account.id,
     currency: state.currency,
@@ -611,7 +708,9 @@ export async function getWebTradeState(
     riskMessage: riskBlocked ? riskMessage(risk?.breachedRules ?? []) : null,
     fetchedAt: state.fetchedAt,
     route: route.via,
+    ...(laneInfo ? { lane: laneInfo.lane, laneNote: laneInfo.note } : {}),
     delayed,
+    ...(pass ? { pass } : {}),
   };
 }
 
@@ -656,6 +755,82 @@ export async function getWebTradeSymbols(user: SessionUser, query: { accountId: 
   }
 }
 
+interface HistoryDbRow {
+  id: string;
+  external_trade_id: string | null;
+  symbol: string | null;
+  side: string | null;
+  volume: number | string | null;
+  open_price: number | string | null;
+  close_price: number | string | null;
+  profit: number | string | null;
+  opened_at: string | null;
+  closed_at: string | null;
+}
+
+function finiteNumber(value: number | string | null): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * The closed trades of one of the caller's own accounts, newest first (the History tab of the panel). They are read from the
+ * platform's synchronised trade record - the same rows the account pages list - never from the broker, so it costs the
+ * broker nothing; the explicit account/user filter of `loadOwnedAccount` is what keeps it to the caller's own account.
+ */
+export async function getWebTradeHistory(
+  user: SessionUser,
+  query: { accountId: string; since?: string; limit?: number },
+): Promise<WebTradeHistory> {
+  assertMayTrade(user);
+  const account = await loadOwnedAccount(user.id, query.accountId);
+  const limit = Math.min(Math.max(1, Math.floor(query.limit ?? WEB_TRADE_HISTORY_LIMIT)), WEB_TRADE_HISTORY_MAX);
+
+  let request = createAdminClient()
+    .from("trades")
+    .select("id, external_trade_id, symbol, side, volume, open_price, close_price, profit, opened_at, closed_at")
+    .eq("trading_account_id", account.id)
+    .eq("status", "CLOSED");
+  if (query.since) request = request.gte("closed_at", query.since);
+  // (one more than asked for tells whether the period holds more than is shown)
+  const { data, error } = await request.order("closed_at", { ascending: false, nullsFirst: false }).limit(limit + 1);
+  if (error) {
+    console.error("[web-trade] could not read the trade history:", error.message);
+    throw new WebTradeError("SERVICE_UNAVAILABLE", "Your trade history could not be loaded. Try again in a moment.", 503);
+  }
+
+  const found = (data ?? []) as HistoryDbRow[];
+  const rows: WebTradeHistoryRow[] = [];
+  for (const row of found.slice(0, limit)) {
+    const volume = finiteNumber(row.volume);
+    const openPrice = finiteNumber(row.open_price);
+    const closedAt = row.closed_at ?? row.opened_at;
+    if (!row.symbol || (row.side !== "BUY" && row.side !== "SELL") || volume === null || openPrice === null || !closedAt) continue;
+    const closePrice = finiteNumber(row.close_price);
+    rows.push({
+      ticket: row.external_trade_id ?? row.id,
+      symbol: row.symbol,
+      side: row.side,
+      volume,
+      openPrice,
+      closePrice: closePrice !== null && closePrice > 0 ? closePrice : null,
+      profit: finiteNumber(row.profit) ?? 0,
+      openedAt: row.opened_at,
+      closedAt,
+    });
+  }
+
+  return {
+    accountId: account.id,
+    currency: account.currency?.trim() || "USD",
+    since: query.since ?? null,
+    rows,
+    truncated: found.length > limit,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Orders
 // ─────────────────────────────────────────────────────────────────────────────
@@ -678,15 +853,98 @@ interface GatewayReply {
   repeated: boolean;
   /** from just before the command was written to its answer being seen */
   waitedMs: number;
-  /** writing the command: one round trip between this server and the database */
+  /** writing the command: one round trip between this server and the database (0 on the direct lane: nothing is written first) */
   insertMs: number;
-  /** the answer was waited for inside the database (migration 062) or by asking again and again */
-  wake: "live" | "poll";
+  /**
+   * How the command and its answer found each other: inside the database (migration 062) or by asking again and again, or
+   * "direct" = the order went straight to the AWS worker over HTTP and its answer came back on the same request.
+   */
+  wake: "live" | "poll" | "direct";
+}
+
+/** How long the database is only READ for the order of an unconfirmed direct request (the worker writes it down right after answering). */
+const DIRECT_LOOKUP_MS = 3_000;
+const UNCERTAIN_ORDER_MESSAGE =
+  "The order was sent, but its answer has not arrived yet. Check the open positions before sending it again.";
+
+/**
+ * Sends an order over the DIRECT LANE (`directLaneClient.ts`): one signed HTTP request to the AWS worker, answered when the
+ * broker has answered. The worker durably reserves the request in the database before broker execution so a restart
+ * cannot place it twice; the final answer is stored afterwards.
+ *
+ *  - answered  -> the worker's answer (a refusal is an answer too: it is thrown as the error it is);
+ *  - the request provably never reached the worker -> null: nothing exists at the broker, the caller sends the very same
+ *    order the normal way (through the database). This applies to transport/auth refusals before a reservation;
+ *  - it MAY have reached it -> the same request id is sent once more (`attempt: 2`: the worker looks for its own earlier
+ *    durable reservation before it would send anything) and then the database is only READ for a few seconds. The order
+ *    is NEVER put on the normal lane after an unclear try, because that could place it twice; if nothing confirms it the
+ *    person is told to check the positions (`ORDER_UNCERTAIN`).
+ */
+async function sendOverDirectLane(
+  lane: DirectLaneConfig,
+  db: ReturnType<typeof createAdminClient>,
+  input: {
+    userId: string;
+    accountId: string;
+    command: ParsedTradeCommand;
+    clientRequestId: string;
+    waitMs: number;
+    ttlMs?: number;
+    sentAt: number;
+  },
+): Promise<GatewayReply | null> {
+  const left = () => Math.max(0, input.waitMs - (Date.now() - input.sentAt));
+  const request: DirectRequest = {
+    v: DIRECT_LANE_VERSION,
+    userId: input.userId,
+    accountId: input.accountId,
+    kind: input.command.kind,
+    payload: input.command.payload,
+    clientRequestId: input.clientRequestId,
+    ttlMs: Math.min(input.ttlMs ?? DIRECT_ORDER_TTL_MS, DIRECT_ORDER_TTL_MS),
+    attempt: 1,
+  };
+  const answered = (sent: Extract<DirectSend, { kind: "answered" }>): GatewayReply => {
+    if (!sent.reply.ok) {
+      throw new WebTradeError(sent.reply.error.code, sent.reply.error.message, sent.reply.error.statusCode);
+    }
+    return {
+      outcome: sent.reply.outcome,
+      repeated: sent.reply.repeated === true,
+      waitedMs: Math.max(0, Date.now() - input.sentAt),
+      insertMs: 0,
+      wake: "direct",
+    };
+  };
+
+  const first = await sendDirect(lane, request, { deadlineMs: left() });
+  if (first.kind === "answered") return answered(first);
+  if (first.kind === "not_sent") return null;
+
+  if (left() > 800) {
+    const second = await sendDirect(lane, { ...request, attempt: 2 }, { deadlineMs: left() });
+    if (second.kind === "answered") return answered(second);
+  }
+  const row = await lookupCommandByRequest(db, {
+    userId: input.userId,
+    clientRequestId: input.clientRequestId,
+    timeoutMs: DIRECT_LOOKUP_MS,
+  }).catch(() => null);
+  if (row) {
+    const answer = commandAnswer(row);
+    if (!answer.ok) throw new WebTradeError(answer.error.code, answer.error.message, answer.error.statusCode);
+    return { outcome: answer.outcome, repeated: true, waitedMs: Math.max(0, Date.now() - input.sentAt), insertMs: 0, wake: "direct" };
+  }
+  throw new WebTradeError("ORDER_UNCERTAIN", UNCERTAIN_ORDER_MESSAGE, 504);
 }
 
 /**
  * Hands a command to the AWS system and waits for its answer. The same (user, request id)
  * is one command: a repeated request gets the command that already exists.
+ *
+ * An order first tries the DIRECT LANE when it is set up and the worker reports it listening (`options.direct`): the
+ * worker reserves the request before execution, but the web tier skips its enqueue/claim round trips. Anything that
+ * provably did not reach the worker continues below.
  *
  * The wait for the answer starts TOGETHER with the write. It finds the command by (user, request id) - not by the
  * id the write will return - so it does not have to wait for the write to come back, and the database answers it
@@ -699,11 +957,24 @@ async function sendThroughGateway(
   accountId: string,
   command: ParsedTradeCommand,
   requestId: string | undefined,
-  options: { waitMs: number; ttlMs?: number },
+  options: { waitMs: number; ttlMs?: number; direct?: DirectLaneConfig | null },
 ): Promise<GatewayReply> {
   const db = createAdminClient();
   const sentAt = Date.now();
   const clientRequestId = requestId ?? randomUUID();
+
+  if (options.direct && ORDER_COMMAND_KINDS.has(command.kind) && !directLaneDown(sentAt)) {
+    const viaLane = await sendOverDirectLane(options.direct, db, {
+      userId,
+      accountId,
+      command,
+      clientRequestId,
+      waitMs: options.waitMs,
+      ttlMs: options.ttlMs,
+      sentAt,
+    });
+    if (viaLane) return viaLane;
+  }
 
   const stopWaiting = new AbortController();
   const live = longPollKnownOff(sentAt)
@@ -757,11 +1028,7 @@ async function sendThroughGateway(
       // taken by a worker, or finished just now
       row = fate === "FINISHED" ? await waitForCommand(db, queued.row.id, 1_500).catch(() => null) : null;
       if (!row) {
-        throw new WebTradeError(
-          "ORDER_UNCERTAIN",
-          "The order was sent, but its answer has not arrived yet. Check the open positions before sending it again.",
-          504,
-        );
+        throw new WebTradeError("ORDER_UNCERTAIN", UNCERTAIN_ORDER_MESSAGE, 504);
       }
     }
     const answer = commandAnswer(row);
@@ -874,11 +1141,22 @@ export interface WebTradeRequestMeta {
   startedAt?: number;
   /** `Date.now()` when the sign-in check was done; the time report shows what it cost. */
   signedInAt?: number;
+  /**
+   * The verified order pass the request carried (`signInForOrder`): the sign-in, subscription, account and route were checked
+   * a moment ago by this very session, so they are not checked again. Absent = the long way.
+   */
+  pass?: OrderPassClaims | null;
+}
+
+/** The pass if it really vouches for THIS person and THIS account and has not run out. */
+function passFor(pass: OrderPassClaims | null | undefined, user: OrderUser, accountId: string): OrderPassClaims | null {
+  if (!pass || pass.user !== user.id || pass.account !== accountId || pass.until <= Date.now()) return null;
+  return pass;
 }
 
 /** The whole life of one order or change: gates, route, execution, repeat protection, audit. */
 async function runOrder(
-  user: SessionUser,
+  user: OrderUser,
   request: OrderRequest,
   meta: WebTradeRequestMeta = {},
 ): Promise<WebTradeOrderResult> {
@@ -894,29 +1172,48 @@ async function runOrder(
   }
   try {
     takeSlot(user);
-    // The checks do not depend on each other, so they are asked together - one round trip to the database
-    // instead of three in a row. The verdicts are read in the order the checks always had.
-    const [routeVerdict, subscriptionVerdict, accountVerdict, riskVerdict] = await Promise.all([
-      settled(orderRoute()),
-      settled(subscriptionProblem(user)),
-      settled(loadOwnedAccount(user.id, request.accountId)),
-      request.checkRisk ? settled(riskStateOf(request.accountId)) : Promise.resolve(null),
-    ]);
-    if (!routeVerdict.ok) throw routeVerdict.error;
-    const route = routeVerdict.value;
-    if (route.via === "none") {
-      throw new WebTradeError(route.reason, route.message, 503);
-    }
-    if (!subscriptionVerdict.ok) throw subscriptionVerdict.error;
-    if (subscriptionVerdict.value) throw subscriptionVerdict.value;
-    if (!accountVerdict.ok) throw accountVerdict.error;
-    const account = accountVerdict.value;
-    if (riskVerdict) {
-      // (read next to the account check; it only counts once the account is known to be the caller's)
-      if (!riskVerdict.ok) throw riskVerdict.error;
-      if (riskVerdict.value?.blockedNewTrades) {
-        throw new WebTradeError("RISK_BLOCKED", riskMessage(riskVerdict.value.breachedRules), 423);
+    let route: Exclude<OrderRoute, { via: "none" }>;
+    let accountId: string;
+    const vouched = passFor(meta.pass, user, request.accountId);
+    if (vouched) {
+      // The state poll that made this pass checked the platform subscription, the account (the caller's own, connected),
+      // the route and - for a few seconds - the risk verdict. None of it is read again: an order that lands on a cold
+      // function instance costs no database round trip before it is sent. Only a risk verdict that is too old is asked for.
+      route = { via: "gateway", aws: { ...vouched.aws } };
+      accountId = vouched.account;
+      if (request.checkRisk && !(vouched.riskUntil !== undefined && Date.now() < vouched.riskUntil)) {
+        const riskVerdict = await settled(riskStateOf(accountId));
+        if (!riskVerdict.ok) throw riskVerdict.error;
+        if (riskVerdict.value?.blockedNewTrades) {
+          throw new WebTradeError("RISK_BLOCKED", riskMessage(riskVerdict.value.breachedRules), 423);
+        }
       }
+    } else {
+      // The checks do not depend on each other, so they are asked together - one round trip to the database
+      // instead of three in a row. The verdicts are read in the order the checks always had.
+      const [routeVerdict, subscriptionVerdict, accountVerdict, riskVerdict] = await Promise.all([
+        settled(orderRoute()),
+        settled(subscriptionProblem(user)),
+        settled(loadOwnedAccount(user.id, request.accountId)),
+        request.checkRisk ? settled(riskStateOf(request.accountId)) : Promise.resolve(null),
+      ]);
+      if (!routeVerdict.ok) throw routeVerdict.error;
+      const checkedRoute = routeVerdict.value;
+      if (checkedRoute.via === "none") {
+        throw new WebTradeError(checkedRoute.reason, checkedRoute.message, 503);
+      }
+      if (!subscriptionVerdict.ok) throw subscriptionVerdict.error;
+      if (subscriptionVerdict.value) throw subscriptionVerdict.value;
+      if (!accountVerdict.ok) throw accountVerdict.error;
+      if (riskVerdict) {
+        // (read next to the account check; it only counts once the account is known to be the caller's)
+        if (!riskVerdict.ok) throw riskVerdict.error;
+        if (riskVerdict.value?.blockedNewTrades) {
+          throw new WebTradeError("RISK_BLOCKED", riskMessage(riskVerdict.value.breachedRules), 423);
+        }
+      }
+      route = checkedRoute;
+      accountId = accountVerdict.value.id;
     }
 
     const command = parseCommand(request.kind, request.payload);
@@ -928,18 +1225,23 @@ async function runOrder(
     let repeated = false;
     let waitedMs: number | null = null;
     if (route.via === "gateway") {
-      const sent = await sendThroughGateway(user.id, account.id, command, requestId, {
+      // The worker's direct lane, when it is set up here and the worker says it listens (see `sendOverDirectLane`).
+      const lane = route.aws.direct ? directLaneConfig() : null;
+      const sent = await sendThroughGateway(user.id, accountId, command, requestId, {
         waitMs: request.waitMs ?? ORDER_WAIT_MS,
+        direct: lane,
       });
       outcome = sent.outcome;
       repeated = sent.repeated;
       waitedMs = sent.waitedMs;
-      stages.insertMs = sent.insertMs;
+      // (an order on the direct lane writes nothing to the database before it is sent: there is no round trip to report)
+      if (sent.wake !== "direct") stages.insertMs = sent.insertMs;
       if (route.aws.dbMs !== undefined) stages.awsDbMs = route.aws.dbMs;
       if (route.aws.loopMs !== undefined) stages.awsLoopMs = route.aws.loopMs;
-      stages.wake = sent.wake === "poll" ? "web-poll" : route.aws.longPoll ? "live" : "aws-poll";
+      stages.wake =
+        sent.wake === "direct" ? "direct" : sent.wake === "poll" ? "web-poll" : route.aws.longPoll ? "live" : "aws-poll";
     } else {
-      outcome = await executeTradeCommand(route.adapter, account.id, command);
+      outcome = await executeTradeCommand(route.adapter, accountId, command);
     }
 
     if (command.kind === "CLOSE_BULK" && (outcome.closed ?? 0) === 0 && (outcome.failed ?? 0) > 0) {
@@ -953,12 +1255,12 @@ async function runOrder(
 
     const result = toOrderResult(outcome);
     if (requestId) guard.remember(user.id, requestId, result);
-    const entry = request.audit({ outcome, route: routeName(route), accountId: account.id });
+    const entry = request.audit({ outcome, route: routeName(route), accountId });
     auditAfterResponse({
       actorUserId: user.id,
       action: entry.action,
       entityType: "trading_account",
-      entityId: account.id,
+      entityId: accountId,
       metadata: entry.metadata,
     });
     const stamped = stampTiming(result, startedAt, waitedMs, stages);
@@ -970,7 +1272,7 @@ async function runOrder(
 
 /** A new order: at the market, or a limit / stop order that waits for its price. */
 export async function placeWebTradeOrder(
-  user: SessionUser,
+  user: OrderUser,
   input: WebTradeOpenInput,
   meta?: WebTradeRequestMeta,
 ): Promise<WebTradeOrderResult> {
@@ -1012,7 +1314,7 @@ export async function placeWebTradeOrder(
 
 /** New stop loss / take profit of an open position, or entry price / levels of a pending order (a level can be removed). */
 export async function modifyWebTradePosition(
-  user: SessionUser,
+  user: OrderUser,
   input: WebTradeModifyInput,
   meta?: WebTradeRequestMeta,
 ): Promise<WebTradeOrderResult> {
@@ -1046,7 +1348,7 @@ export async function modifyWebTradePosition(
 
 /** Closes a position, or only `volume` lots of it. */
 export async function closeWebTradePosition(
-  user: SessionUser,
+  user: OrderUser,
   input: WebTradeCloseInput,
   meta?: WebTradeRequestMeta,
 ): Promise<WebTradeOrderResult> {
@@ -1075,7 +1377,7 @@ export async function closeWebTradePosition(
 
 /** Deletes a pending order. */
 export async function cancelWebTradeOrder(
-  user: SessionUser,
+  user: OrderUser,
   input: WebTradeCancelInput,
   meta?: WebTradeRequestMeta,
 ): Promise<WebTradeOrderResult> {
@@ -1098,7 +1400,7 @@ export async function cancelWebTradeOrder(
 
 /** Closes several positions (all, the winners, the losers, one side, one symbol) or deletes the pending orders. */
 export async function closeWebTradeBulk(
-  user: SessionUser,
+  user: OrderUser,
   input: WebTradeCloseBulkInput,
   meta?: WebTradeRequestMeta,
 ): Promise<WebTradeOrderResult> {

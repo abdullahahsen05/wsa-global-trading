@@ -914,6 +914,57 @@ export function deriveSeries(dto: PerformanceSeriesDto): DerivedSeries {
   };
 }
 
+/**
+ * The curve reaches "now". While the recording is live and the account's current equity is known, one more point at the
+ * end of the axis carries it: the line then ends where the account is (not at the last stored snapshot, up to a quarter
+ * of an hour ago) and moves as the equity does. Growth is continued from the last point - a reading seconds after a
+ * snapshot has no deposit in between that anyone could know of - and drawdown against the highest point so far.
+ *
+ * Nothing is added (the very same series is returned) when the recording is stale (a chart ends at the last stored
+ * data), when there is no point to continue from, when the reading is not a usable number, or when it is so far from the
+ * last snapshot (more than a halving or a doubling) that it can only be a different account value, not a move.
+ */
+export function withLiveEquity(
+  derived: DerivedSeries,
+  liveEquity: number | null | undefined,
+  stale: boolean,
+): DerivedSeries {
+  const last = derived.latest;
+  if (stale || !last || typeof liveEquity !== "number" || !Number.isFinite(liveEquity) || !(liveEquity > 0)) return derived;
+  if (!(last.equity > 0)) return derived;
+  const ratio = liveEquity / last.equity;
+  if (!(ratio > 0.5 && ratio < 2)) return derived;
+
+  const index = (1 + last.equityGrowth / 100) * ratio;
+  let peak = Math.max(1, index);
+  for (const point of derived.points) peak = Math.max(peak, 1 + point.equityGrowth / 100);
+  const drawdown = peak > 0 ? Math.max(0, ((peak - index) / peak) * 100) : 0;
+
+  // a reading within a second of the last snapshot replaces it instead of standing next to it
+  const replaces = derived.end - last.t < 1_000;
+  const tail: DerivedPoint = {
+    ...last,
+    t: replaces ? last.t : derived.end,
+    equity: liveEquity,
+    floating: round2(liveEquity - last.balance),
+    equityGrowth: (index - 1) * 100,
+    drawdown,
+    // (margin figures are only ever the recorded ones: the margin curve ends at the last snapshot)
+    margin: replaces ? last.margin : null,
+    freeMargin: replaces ? last.freeMargin : null,
+    marginLevel: replaces ? last.marginLevel : null,
+    estimated: false,
+  };
+  return {
+    ...derived,
+    points: replaces ? [...derived.points.slice(0, -1), tail] : [...derived.points, tail],
+    latest: tail,
+    equityGrowthPct: tail.equityGrowth,
+    currentDrawdownPct: drawdown,
+    maxDrawdownPct: Math.max(derived.maxDrawdownPct, drawdown),
+  };
+}
+
 /** Index of the sample whose time is closest to `t` (times must be ascending). */
 export function nearestIndexByTime(times: number[], t: number): number {
   if (times.length === 0) return -1;

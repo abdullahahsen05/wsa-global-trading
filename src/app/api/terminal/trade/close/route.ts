@@ -1,5 +1,5 @@
 import { jsonFail, jsonOk } from "@/lib/api/envelope";
-import { requireTrader } from "@/lib/auth/session";
+import { signInForOrder } from "@/lib/services/webTradePass";
 import { closeWebTradePosition, webTradeErrorResponse } from "@/lib/services/webTradeService";
 import { answerWebTradeWarmUp } from "@/lib/services/webTradeWarmUp";
 import { issuesText, webTradeCloseSchema } from "@/lib/trade/webTradeSchemas";
@@ -27,13 +27,13 @@ export function GET(request?: Request) {
 export async function POST(request: Request) {
   const startedAt = Date.now();
   try {
-    const user = await requireTrader({ cached: true });
-    const signedInAt = Date.now();
+    const signedIn = await signInForOrder(request);
     const parsed = webTradeCloseSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) return jsonFail("VALIDATION_ERROR", issuesText(parsed.error), 400);
-    return jsonOk(await closeWebTradePosition(user, parsed.data, { startedAt, signedInAt }), {
-      headers: { "Cache-Control": "private, no-store, max-age=0" },
-    });
+    return jsonOk(
+      await closeWebTradePosition(signedIn.user, parsed.data, { startedAt, signedInAt: signedIn.at, pass: signedIn.pass }),
+      { headers: { "Cache-Control": "private, no-store, max-age=0" } },
+    );
   } catch (error) {
     return webTradeErrorResponse(error);
   }

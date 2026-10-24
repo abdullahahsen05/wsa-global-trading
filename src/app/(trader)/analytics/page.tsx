@@ -20,18 +20,13 @@ import type {
   AnalyticsSummary,
   TraderAccountSummary,
 } from "@/lib/domain/types";
-import {
-  EMPTY_PLATFORM_SUBSCRIPTION_ACCESS,
-  useTraderAccessSummary,
-} from "@/hooks/useTraderAccessSummary";
-import { isLiveConnectedAccount, resolveLiveSelectedAccountId } from "@/lib/accounts/lifecycle";
-import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 
 const periods = ["DAILY", "WEEKLY", "MONTHLY", "ALL_TIME"] as const;
 
 function DrawdownMeter({ value }: { value: number }) {
-  const chartMaximum = Math.max(1, Math.ceil(Math.max(0, value) * 1.25 * 10) / 10);
-  const capped = Math.min(Math.max(0, value), chartMaximum);
+  const capped = Math.min(value, 12);
   return (
     <div className="rounded-[4px] border border-line bg-panel p-5">
       <div className="flex items-center justify-between gap-3">
@@ -52,24 +47,22 @@ function DrawdownMeter({ value }: { value: number }) {
       <div className="mt-5 h-4 overflow-hidden rounded-full border border-line bg-background">
         <div
           className="h-full rounded-full bg-accent transition-all"
-          style={{ width: `${(capped / chartMaximum) * 100}%` }}
+          style={{ width: `${(capped / 12) * 100}%` }}
         />
       </div>
       <div className="mt-4 flex items-center justify-between text-xs text-muted">
         <span>0%</span>
-        <span>{formatPercent(chartMaximum / 2)}</span>
-        <span>{formatPercent(chartMaximum)}</span>
+        <span>6%</span>
+        <span>12%</span>
       </div>
     </div>
   );
 }
 
 export default function AnalyticsPage() {
-  const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
-  const access =
-    summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
+  const { access, checking } = usePlatformGate();
 
-  if (accessLoading && !summary) {
+  if (checking) {
     return (
       <WorkspacePage
         eyebrow="Performance lab"
@@ -103,31 +96,22 @@ export default function AnalyticsPage() {
 
 function AnalyticsContent() {
   const [period, setPeriod] = useState<(typeof periods)[number]>("ALL_TIME");
-  const [allScopeSelection, setAllScopeSelection] = useState<{ selectedAccountId: string | null } | null>(null);
-  const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
-  const showAllAccounts = allScopeSelection !== null
-    && allScopeSelection.selectedAccountId === selectedAccountId;
+  const [accountScope, setAccountScope] = useState("ALL");
 
   const {
     data: accounts = [],
     isLoading: accountsLoading,
     isError: accountsError,
   } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts"],
-    queryFn: async () => {
-      const res = await fetch("/api/trading-accounts");
-      const json = await res.json();
-      if (!json.ok)
-        throw new Error(json.error?.message ?? "Failed to load accounts");
-      return json.data;
-    },
+    // (the same key and request as the top bar's account picker: one request, not two)
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
     refetchInterval: 10_000,
   });
 
-  const connectedAccounts = accounts.filter(isLiveConnectedAccount);
-  const accountScope = showAllAccounts
-    ? "ALL"
-    : resolveLiveSelectedAccountId(accounts, selectedAccountId);
+  const connectedAccounts = accounts.filter(
+    (account) => account.status === "CONNECTED",
+  );
   const selectedAccount = connectedAccounts.find(
     (account) => account.accountId === accountScope,
   );
@@ -147,7 +131,7 @@ function AnalyticsContent() {
         throw new Error(json.error?.message ?? "Failed to load analytics");
       return json.data;
     },
-    enabled: !accountsLoading && Boolean(accountScope),
+    enabled: !accountsLoading && connectedAccounts.length > 0,
     refetchInterval: 10_000,
   });
 
@@ -158,7 +142,7 @@ function AnalyticsContent() {
   const { data: performanceSeries } = usePerformanceSeries(
     accountScope,
     rangeForAnalyticsPeriod(period),
-    { enabled: !accountsLoading && Boolean(accountScope) },
+    { enabled: !accountsLoading && connectedAccounts.length > 0 },
   );
   const chartMaxDrawdown = useMemo(
     () => (performanceSeries ? deriveSeries(performanceSeries).maxDrawdownPct : 0),
@@ -262,15 +246,8 @@ function AnalyticsContent() {
         <label className="grid gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted">
           Account scope
           <select
-            value={accountScope ?? ""}
-            onChange={(event) => {
-              if (event.target.value === "ALL") {
-                setAllScopeSelection({ selectedAccountId });
-              } else {
-                setAllScopeSelection(null);
-                setSelectedAccountId(event.target.value || null);
-              }
-            }}
+            value={accountScope}
+            onChange={(event) => setAccountScope(event.target.value)}
             className="min-h-11 rounded-[4px] border border-line bg-background px-3 text-sm font-semibold normal-case tracking-normal text-foreground focus:outline-none focus:ring-2 focus:ring-accent/50"
           >
             <option value="ALL">All Accounts</option>

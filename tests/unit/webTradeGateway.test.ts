@@ -61,7 +61,8 @@ vi.mock("@/lib/auth/session", () => {
       this.name = "AuthError";
     }
   }
-  return { AuthError, requireTrader: vi.fn() };
+  // (no token facts: the order routes then take the ordinary cached sign-in, not an order pass)
+  return { AuthError, requireTrader: vi.fn(), currentTokenFacts: vi.fn(async () => null) };
 });
 
 vi.mock("@/lib/services/auditService", () => ({ writeAuditLog: vi.fn(async () => undefined) }));

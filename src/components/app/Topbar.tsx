@@ -7,6 +7,7 @@ import { AlertTriangle, Bell, CheckCircle2, Info, Menu, X } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { navItems } from "@/components/app/navigation";
 import type { UserRole, TraderAccountSummary, NotificationDto } from "@/lib/domain/types";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
 import {
   isLiveConnectedAccount,
@@ -36,13 +37,29 @@ function notificationTone(type: string | null): "danger" | "lime" | "accent" {
   return "accent";
 }
 
+/**
+ * The top bar's place before the server has said who is signed in (the very first visit in a browser): the same
+ * height as the real bar, so the page below does not jump when it takes over.
+ */
+export function TopbarPlaceholder() {
+  return (
+    <header
+      aria-hidden="true"
+      className="sticky top-0 z-20 flex h-[4.3125rem] items-center border-b border-line bg-panel px-3 sm:px-4 lg:px-7"
+    >
+      <div className="hidden min-w-0 md:block">
+        <div className="h-5 w-40 animate-pulse rounded-[4px] bg-panel-strong/80" />
+        <div className="mt-1.5 h-3 w-64 animate-pulse rounded-[4px] bg-panel-strong/60" />
+      </div>
+    </header>
+  );
+}
+
 export function Topbar({
   role,
-  userId,
   onOpenMobileNav,
 }: {
   role: UserRole;
-  userId: string;
   onOpenMobileNav: () => void;
 }) {
   const pathname = usePathname();
@@ -51,15 +68,11 @@ export function Topbar({
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const { selectedAccountId, setSelectedAccountId } = useTradingAccountSelection();
 
+  // (the same key as the dashboard's account list: one request and one poll for both)
   const { data: tradingAccounts = [] } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts", role, userId],
-    queryFn: async () => {
-      const res = await fetch("/api/trading-accounts", { cache: "no-store" });
-      const json = await res.json();
-      if (!json.ok) return [];
-      return json.data;
-    },
-    enabled: role === "TRADER" && Boolean(userId),
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
+    enabled: role === "TRADER",
     staleTime: 15_000,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,

@@ -28,7 +28,8 @@ import { AccountCombobox } from "@/components/copy/AccountCombobox";
 import { CopyExecutionLog } from "@/components/copy/CopyExecutionLog";
 import { FollowerSettingsDialog } from "@/components/copy/FollowerSettingsDialog";
 import { SelfCopyPanel, type SelfCopyResponse } from "@/components/copy/SelfCopyPanel";
-import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 import type { CopyFollowerDto, CopyLogDto } from "@/lib/copy/types";
 import type { TraderAccountSummary } from "@/lib/domain/types";
 import type { TraderStrategyDto } from "@/lib/services/copyTradingService";
@@ -54,9 +55,8 @@ function engineTone(status: CopyFollowerDto["engineStatus"]) {
 }
 
 export default function CopyTradingPage() {
-  const { data: access, isLoading } = useTraderAccessSummary();
-  const platform = access?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
-  if (isLoading && !access) {
+  const { summary: access, access: platform, checking } = usePlatformGate();
+  if (checking) {
     return (
       <WorkspacePage eyebrow="Copy Trading" title="Copy operations" description="Loading access...">
         <Panel><p className="text-sm text-muted">Loading...</p></Panel>
@@ -102,8 +102,9 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
     queryFn: () => api("/api/copy/strategies"),
   });
   const { data: accounts = [] } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts"],
-    queryFn: () => api("/api/trading-accounts"),
+    // (the same key and request as the top bar's account picker: one request, not two)
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
   });
   const { data: subscriptions = [] } = useQuery<CopyFollowerDto[]>({
     queryKey: ["copy-my-subscriptions"],
@@ -176,9 +177,14 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
     [connectionFilter, currentSubscriptions, normalizedConnectionSearch],
   );
 
-  const activeSettingsSubscription = settingsSubscription
-    ? subscriptions.find((subscription) => subscription.id === settingsSubscription.id) ?? settingsSubscription
-    : null;
+  // The open settings dialog follows the freshest copy of its connection. (State adjusted while rendering, under a
+  // condition that is false again after one pass - not in an effect: that would draw the stale copy first.)
+  if (settingsSubscription) {
+    const freshSubscription = subscriptions.find((subscription) => subscription.id === settingsSubscription.id);
+    if (freshSubscription && freshSubscription !== settingsSubscription) {
+      setSettingsSubscription(freshSubscription);
+    }
+  }
 
   const refresh = async (savedSubscription?: CopyFollowerDto) => {
     if (savedSubscription) {
@@ -525,7 +531,7 @@ function LiveCopyContent({ initialBilling }: { initialBilling?: UserBillingSumma
         />
       ) : null}
 
-      <FollowerSettingsDialog subscription={activeSettingsSubscription} onClose={() => setSettingsSubscription(null)} onSaved={refresh} />
+      <FollowerSettingsDialog subscription={settingsSubscription} onClose={() => setSettingsSubscription(null)} onSaved={refresh} />
 
       {follow ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4">

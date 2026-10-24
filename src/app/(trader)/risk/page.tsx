@@ -12,9 +12,8 @@ import {
 import { PlatformSubscriptionLocked } from "@/components/app/PlatformSubscriptionLocked";
 import { formatMoney, formatPercent } from "@/lib/utils/format";
 import type { RiskEventDto, RiskRuleDto, TraderAccountSummary } from "@/lib/domain/types";
-import { EMPTY_PLATFORM_SUBSCRIPTION_ACCESS, useTraderAccessSummary } from "@/hooks/useTraderAccessSummary";
-import { resolveLiveSelectedAccountId } from "@/lib/accounts/lifecycle";
-import { useTradingAccountSelection } from "@/providers/TradingAccountSelectionProvider";
+import { usePlatformGate } from "@/hooks/useTraderAccessSummary";
+import { fetchTraderAccounts, TRADER_ACCOUNTS_QUERY_KEY } from "@/lib/data/traderAccountsQuery";
 
 function RiskBar({
   label,
@@ -57,10 +56,9 @@ function RiskBar({
 }
 
 export default function RiskPage() {
-  const { data: summary, isLoading: accessLoading } = useTraderAccessSummary();
-  const access = summary?.platformSubscription ?? EMPTY_PLATFORM_SUBSCRIPTION_ACCESS;
+  const { access, checking } = usePlatformGate();
 
-  if (accessLoading && !summary) {
+  if (checking) {
     return (
       <WorkspacePage eyebrow="Risk control" title="Risk dashboard" description="Loading your platform access status.">
         <Panel>
@@ -89,51 +87,40 @@ export default function RiskPage() {
 }
 
 function RiskContent() {
-  const { selectedAccountId } = useTradingAccountSelection();
-  const { data: tradingAccounts = [] } = useQuery<TraderAccountSummary[]>({
-    queryKey: ["trading-accounts"],
-    queryFn: async () => {
-      const res = await fetch("/api/trading-accounts");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error?.message ?? "Failed to load accounts");
-      return json.data;
-    },
-  });
-  const accountId = resolveLiveSelectedAccountId(tradingAccounts, selectedAccountId);
-  const selectedAccount = tradingAccounts.find((account) => account.accountId === accountId);
-  const scopedAccounts = selectedAccount ? [selectedAccount] : [];
-
   const { data: riskRules = [] } = useQuery<RiskRuleDto[]>({
-    queryKey: ["risk-rules", accountId],
+    queryKey: ["risk-rules"],
     queryFn: async () => {
-      const res = await fetch(`/api/risk/rules?accountId=${encodeURIComponent(accountId!)}`);
+      const res = await fetch("/api/risk/rules");
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load risk rules");
       return json.data;
     },
-    enabled: Boolean(accountId),
   });
 
   const { data: riskEvents = [] } = useQuery<RiskEventDto[]>({
-    queryKey: ["risk-events", accountId],
+    queryKey: ["risk-events"],
     queryFn: async () => {
-      const res = await fetch(`/api/risk/events?accountId=${encodeURIComponent(accountId!)}`);
+      const res = await fetch("/api/risk/events");
       const json = await res.json();
       if (!json.ok) throw new Error(json.error?.message ?? "Failed to load risk events");
       return json.data;
     },
-    enabled: Boolean(accountId),
+  });
+
+  const { data: tradingAccounts = [] } = useQuery<TraderAccountSummary[]>({
+    // (the same key and request as the top bar's account picker: one request, not two)
+    queryKey: TRADER_ACCOUNTS_QUERY_KEY,
+    queryFn: ({ signal }) => fetchTraderAccounts(signal),
   });
 
   const { data: dailyPnlData } = useQuery<{ dailyPnl: number; currency: string }>({
-    queryKey: ["daily-pnl", accountId],
+    queryKey: ["daily-pnl"],
     queryFn: async () => {
-      const res = await fetch(`/api/trader/daily-pnl?accountId=${encodeURIComponent(accountId!)}`);
+      const res = await fetch("/api/trader/daily-pnl");
       const json = await res.json();
       if (!json.ok) return { dailyPnl: 0, currency: "USD" };
       return json.data;
     },
-    enabled: Boolean(accountId),
   });
 
   const dailyLossLimit =
@@ -141,8 +128,8 @@ function RiskContent() {
   const maxDrawdownLimit =
     riskRules.find((rule) => rule.metric === "MAX_DRAWDOWN")?.threshold ?? 5;
   const maxDrawdown =
-    selectedAccount
-      ? selectedAccount.drawdownPercent
+    tradingAccounts.length > 0
+      ? Math.max(...tradingAccounts.map((a) => a.drawdownPercent))
       : 0;
   const dailyPnl = dailyPnlData?.dailyPnl ?? 0;
 
@@ -150,19 +137,19 @@ function RiskContent() {
     <WorkspacePage
       eyebrow="Risk"
       title="Risk rule monitoring"
-      description="Daily loss, drawdown, open-trade concentration, and warning history for the account selected in the top bar."
+      description="Daily loss, drawdown, open trade concentration, and warning history."
     >
       <InlineStatusStrip
         items={[
           {
             label: "Active rules",
             value: riskRules.filter((r) => r.enabled).length,
-            helper: "Selected account + platform rules",
+            helper: "Platform + account rules",
           },
           {
             label: "Open events",
             value: riskEvents.length,
-            helper: "For the selected account",
+            helper: "Pending review by admin",
             tone: riskEvents.length > 0 ? "accent" : undefined,
           },
           {
@@ -172,9 +159,9 @@ function RiskContent() {
           },
           {
             label: "Restricted",
-            value: selectedAccount?.status === "RESTRICTED" ? 1 : 0,
-            helper: "Selected account status",
-            tone: selectedAccount?.status === "RESTRICTED" ? "danger" : "lime",
+            value: tradingAccounts.filter((account) => account.status === "RESTRICTED").length,
+            helper: "Live enforced account locks",
+            tone: tradingAccounts.some((account) => account.status === "RESTRICTED") ? "danger" : "lime",
           },
         ]}
       />
@@ -291,17 +278,17 @@ function RiskContent() {
                   Rule-based account monitoring
                 </h2>
                 <p className="mt-1 text-sm text-muted">
-                  The selected account&apos;s current risk posture.
+                  Accounts shown with current risk posture.
                 </p>
               </div>
-              <StatusPill tone="accent">{selectedAccount?.accountName ?? "No account"}</StatusPill>
+              <StatusPill tone="accent">{tradingAccounts.length} accounts</StatusPill>
             </div>
             <div className="mt-4">
               <DataTable
                 headers={["Account", "Broker", "Status", "Balance", "Equity", "Drawdown", "Risk"]}
                 paginated
                 initialPageSize={10}
-                rows={scopedAccounts.map((account) => [
+                rows={tradingAccounts.map((account) => [
                   <span key="account" className="font-semibold text-foreground">
                     {account.accountName}
                   </span>,

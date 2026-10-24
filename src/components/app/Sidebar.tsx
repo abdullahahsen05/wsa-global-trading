@@ -8,7 +8,37 @@ import { LogOut, X } from "lucide-react";
 import { BrandLogo } from "@/components/app/BrandLogo";
 import { navItems } from "@/components/app/navigation";
 import type { UserRole } from "@/lib/domain/types";
-import { createClient } from "@/lib/supabase/client";
+import { forgetLastAccount } from "@/lib/shell/lastAccount";
+import { clearShellHint } from "@/lib/shell/shellHint";
+
+/**
+ * The sidebar's place before the server has said who is signed in (the very first visit in a browser): the same box, the
+ * same logo, quiet rows where the links will appear. It keeps the page from jumping when the real sidebar takes over.
+ */
+export function SidebarPlaceholder() {
+  return (
+    <aside
+      aria-hidden="true"
+      className="fixed inset-y-0 left-0 z-30 hidden h-screen max-h-screen min-h-0 w-[var(--sidebar-width)] overflow-hidden border-r border-line bg-panel px-3 py-3 xl:px-4 lg:flex lg:flex-col"
+    >
+      <div className="mb-5 flex min-h-[8rem] shrink-0 items-center justify-center overflow-hidden px-1 sm:mb-6">
+        <BrandLogo
+          className="h-[clamp(7.5rem,17vh,9.75rem)] w-auto max-w-[250px]"
+          zoomClassName="scale-[1.55]"
+          priority
+        />
+      </div>
+      <div className="mb-2 shrink-0 px-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
+      </div>
+      <div className="mt-2 flex flex-col gap-1">
+        {Array.from({ length: 8 }).map((_, index) => (
+          <div key={index} className="h-10 animate-pulse rounded-[4px] bg-panel-strong/60" />
+        ))}
+      </div>
+    </aside>
+  );
+}
 
 export function Sidebar({
   role,
@@ -30,8 +60,13 @@ export function Sidebar({
     .sort((left, right) => right.href.length - left.href.length)[0]?.href;
 
   const handleLogout = async () => {
+    // (the Supabase browser client is a chunk of its own: it is fetched here, when somebody signs out, instead of being
+    // shipped with every page)
+    const { createClient } = await import("@/lib/supabase/client");
     const supabase = createClient();
     await supabase.auth.signOut();
+    clearShellHint();
+    forgetLastAccount();
     queryClient.clear();
     router.replace("/login");
     router.refresh();

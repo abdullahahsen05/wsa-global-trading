@@ -6,22 +6,27 @@ import {
   isUncertainTradeCode,
   WEB_TRADE_BURST_MS,
   WEB_TRADE_BURST_POLL_MS,
+  WEB_TRADE_PASS_HEADER,
   WEB_TRADE_POLL_MS,
   type WebTradeAccountsResponse,
   type WebTradeOrderResult,
   type WebTradeState,
   type WebTradeSymbols,
 } from "@/lib/trade/webTrade";
+import { historySince, type HistoryPeriodId, type WebTradeHistory } from "@/lib/trade/webTradeHistory";
 
 /**
  * WSA Trade data: the caller's accounts (with the platform-wide gate), the live state
- * of one account (figures, positions, pending orders, price) and the symbols the
- * account's broker offers. None of these keys is one of the keys `useRealtimeUpdates`
- * invalidates - the open panel polls by itself, and only while it is on screen.
+ * of one account (figures, positions, pending orders, price), the symbols the
+ * account's broker offers and the closed trades (History). None of the first three keys is one of
+ * the keys `useRealtimeUpdates` invalidates - the open panel polls by itself, and only while it is on screen.
+ * The History key is the exception on purpose: it starts with "trades", which `useRealtimeUpdates` invalidates
+ * whenever the broker sync records a trade, so an open History list follows by itself.
  */
 export const WEB_TRADE_ACCOUNTS_QUERY_KEY = "terminal-web-trade-accounts";
 export const WEB_TRADE_STATE_QUERY_KEY = "terminal-web-trade-state";
 export const WEB_TRADE_SYMBOLS_QUERY_KEY = "terminal-web-trade-symbols";
+export const WEB_TRADE_HISTORY_QUERY_KEY = "terminal-web-trade-history";
 
 type Envelope<T> = { ok?: boolean; data?: T; error?: { code?: string; message?: string } };
 
@@ -69,6 +74,31 @@ export function useWebTradeAccounts(enabled: boolean) {
   });
 }
 
+/**
+ * The newest order pass each state poll brought, per account. It is only kept in memory and sent back with an order
+ * (`WEB_TRADE_PASS_HEADER`): it tells the server "this session and this account were checked a moment ago", so the order
+ * does not wait for those checks again. A pass the server does not accept is simply ignored by it.
+ */
+const passes = new Map<string, { pass: string; at: number }>();
+/** The server stops trusting a pass after about eight seconds; an older one is not even sent. */
+const PASS_SEND_MAX_AGE_MS = 9_000;
+
+function rememberPass(state: WebTradeState): void {
+  if (state.pass) passes.set(state.accountId, { pass: state.pass, at: Date.now() });
+  else passes.delete(state.accountId);
+}
+
+function passOf(accountId: unknown): string | null {
+  if (typeof accountId !== "string") return null;
+  const held = passes.get(accountId);
+  return held && Date.now() - held.at <= PASS_SEND_MAX_AGE_MS ? held.pass : null;
+}
+
+/** Test helper. */
+export function resetWebTradePasses(): void {
+  passes.clear();
+}
+
 /** Until when the state is asked for faster than usual (set right after an order). */
 let fastRefreshUntil = 0;
 
@@ -111,7 +141,9 @@ export function useWebTradeState(accountId: string | null, symbol: string, activ
         credentials: "same-origin",
         signal,
       });
-      return readEnvelope<WebTradeState>(response, "Could not read this account from the broker.");
+      const state = await readEnvelope<WebTradeState>(response, "Could not read this account from the broker.");
+      rememberPass(state);
+      return state;
     },
   });
 }
@@ -140,6 +172,36 @@ export function useWebTradeSymbols(accountId: string | null, enabled: boolean) {
   });
 }
 
+/** How often an open History list asks again (the realtime channel usually gets there first). */
+const HISTORY_POLL_MS = 15_000;
+
+/**
+ * The closed trades of one account for a period (History tab). Only read while the tab is open: it is a short indexed
+ * read of the platform's synchronised trade record, so it costs the broker nothing. A period or account change shows
+ * "loading" instead of the previous list (those rows would be another period's).
+ */
+export function useWebTradeHistory(accountId: string | null, period: HistoryPeriodId, enabled: boolean) {
+  return useQuery<WebTradeHistory>({
+    queryKey: ["trades", WEB_TRADE_HISTORY_QUERY_KEY, accountId, period],
+    enabled: enabled && accountId !== null,
+    staleTime: 4_000,
+    refetchInterval: enabled ? HISTORY_POLL_MS : false,
+    refetchIntervalInBackground: false,
+    retry: false,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ accountId: accountId as string });
+      const since = historySince(period);
+      if (since) params.set("since", since);
+      const response = await fetch(`/api/terminal/trade/history?${params.toString()}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal,
+      });
+      return readEnvelope<WebTradeHistory>(response, "Could not load the trade history.");
+    },
+  });
+}
+
 export type WebTradeAction = "open" | "modify" | "close" | "cancel" | "close-bulk";
 
 const WEB_TRADE_ACTIONS: readonly WebTradeAction[] = ["open", "modify", "close", "cancel", "close-bulk"];
@@ -156,11 +218,12 @@ function clockMs(): number {
  */
 export async function sendWebTrade(action: WebTradeAction, body: Record<string, unknown>): Promise<WebTradeOrderResult> {
   const startedAt = clockMs();
+  const pass = passOf(body.accountId);
   let response: Response;
   try {
     response = await fetch(`/api/terminal/trade/${action}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(pass ? { [WEB_TRADE_PASS_HEADER]: pass } : {}) },
       credentials: "same-origin",
       cache: "no-store",
       body: JSON.stringify(body),

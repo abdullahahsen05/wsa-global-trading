@@ -21,6 +21,8 @@ import { createBrokerAdapter, getBrokerProviderId } from "../src/lib/broker/prov
 import { KeyedChains } from "../src/lib/copy/keyedChains";
 import { createSupabaseGatewayStore } from "../src/lib/gateway/gatewayStore";
 import { startGatewayWorker, type GatewayWorker } from "../src/lib/gateway/gatewayWorker";
+import { validDirectSecret } from "../src/lib/gateway/directLane";
+import { startDirectLaneServer, type DirectLaneServer } from "../src/lib/gateway/directLaneServer";
 import { StreamPump } from "../src/lib/copy/streamPump";
 import {
   buildMasterEvent,
@@ -123,6 +125,8 @@ let backgroundJobRun: Promise<void> | null = null;
 let backgroundTicker: ReturnType<typeof setInterval> | null = null;
 /** The WSA Trade gateway: executes the commands the web app queues and keeps watched accounts fresh (migration 060). */
 let tradeGateway: GatewayWorker | null = null;
+/** The direct lane: an HTTP port the web server sends WSA Trade orders to (skips the database for the order itself). */
+let directLane: DirectLaneServer | null = null;
 let wakeDiscovery: (() => void) | null = null;
 const strategyHeartbeatAt = new Map<string, number>();
 const streamStatusLoggedAt = new Map<string, number>();
@@ -939,6 +943,10 @@ function shutdown(): Promise<void> {
   if (backgroundTicker) clearInterval(backgroundTicker);
   backgroundTicker = null;
   shuttingDown = (async () => {
+    // the lane closes first: nothing new may arrive while the gateway finishes what it is running
+    tradeGateway?.setDirectLane(false);
+    await Promise.allSettled([directLane?.close()]);
+    directLane = null;
     await Promise.allSettled([tradeGateway?.stop()]);
     tradeGateway = null;
     await backgroundJobRun?.catch(() => undefined);
@@ -971,6 +979,41 @@ function runBackgroundJobsWithoutBlockingRealtime() {
     .finally(() => {
       backgroundJobRun = null;
     });
+}
+
+/**
+ * Opens the direct lane when `WSA_TRADE_DIRECT_SECRET` (>= 32 characters) is set: the web server then hands a WSA Trade order
+ * straight to this process over HTTPS (signed with that secret) instead of through the database queue. The worker
+ * still reserves each request in the database before broker execution. It is OFF without the
+ * secret, and a port that can not be opened never stops copy trading - the orders simply keep using the database.
+ *
+ * The port serves HTTPS with a key and a self-signed certificate that both ends work out from the secret (nothing to install
+ * or copy). `WSA_TRADE_DIRECT_TLS=off` serves plain HTTP instead - only for a port that a local TLS proxy in front reaches
+ * (then also set `WSA_TRADE_DIRECT_HOST=127.0.0.1`).
+ */
+async function startDirectLane(): Promise<void> {
+  const gateway = tradeGateway;
+  const secret = process.env.WSA_TRADE_DIRECT_SECRET;
+  if (!gateway || !validDirectSecret(secret)) {
+    if (secret) console.warn("[copy-worker] WSA_TRADE_DIRECT_SECRET is shorter than 32 characters - the direct lane stays off.");
+    return;
+  }
+  const tlsSetting = process.env.WSA_TRADE_DIRECT_TLS?.trim().toLowerCase();
+  const tls = !(tlsSetting === "off" || tlsSetting === "false" || tlsSetting === "0" || tlsSetting === "no");
+  try {
+    directLane = await startDirectLaneServer({
+      secret: secret.trim(),
+      port: intFromEnv("WSA_TRADE_DIRECT_PORT", 8787, 1, 65_535),
+      host: process.env.WSA_TRADE_DIRECT_HOST?.trim() || "0.0.0.0",
+      tls,
+      run: (request, receivedAt) => gateway.runDirect(request, receivedAt),
+      maxInFlight: intFromEnv("WSA_TRADE_DIRECT_MAX_IN_FLIGHT", 64, 1, 512),
+    });
+    gateway.setDirectLane(true, directLane.tls);
+  } catch (error) {
+    gateway.setDirectLane(false);
+    console.error(`[copy-worker] the direct lane could not start (${errorMessage(error)}); WSA Trade orders keep using the database.`);
+  }
 }
 
 async function main() {
@@ -1013,6 +1056,7 @@ async function main() {
       stateConcurrency: intFromEnv("WSA_TRADE_GATEWAY_STATE_CONCURRENCY", 6, 1, 32),
     });
     console.log("[copy-worker] WSA Trade gateway started (orders and live account state for the web terminal).");
+    await startDirectLane();
   }
   await discoveryLoop();
   await shutdown();

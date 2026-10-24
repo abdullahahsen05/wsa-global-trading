@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, Bell, CheckCircle2, Info, X } from "lucide-react";
 
 export type ToastTone = "accent" | "lime" | "danger" | "muted";
@@ -87,43 +86,39 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       <div className="pointer-events-none fixed bottom-4 right-4 z-40 flex w-[92vw] max-w-sm flex-col gap-3 sm:bottom-6 sm:right-6">
-        <AnimatePresence>
-          {toasts.map((toast) => {
-            const tone = toneConfig[toast.tone ?? "muted"];
-            const Icon = tone.icon;
+        {toasts.map((toast) => {
+          const tone = toneConfig[toast.tone ?? "muted"];
+          const Icon = tone.icon;
 
-            return (
-              <motion.div
-                key={toast.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                transition={{ duration: 0.18, ease: "easeOut" }}
-                className={`pointer-events-auto rounded-[4px] border p-4 ${tone.className}`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[4px] border border-current/15 bg-background/25">
-                    <Icon className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">{toast.title}</p>
-                    {toast.description ? (
-                      <p className="mt-1 text-sm leading-6 text-foreground/80">{toast.description}</p>
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => dismissToast(toast.id)}
-                    className="grid h-8 w-8 shrink-0 place-items-center rounded-[4px] border border-current/15 bg-background/30 text-current/70 transition hover:bg-background/50"
-                    aria-label="Dismiss toast"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
+          // (a toast fades in with CSS - `wsa-toast-in` in globals.css - and simply goes when dismissed: the animation
+          // library that gave it an exit fade is no longer loaded for every page)
+          return (
+            <div
+              key={toast.id}
+              className={`wsa-toast-in pointer-events-auto rounded-[4px] border p-4 ${tone.className}`}
+            >
+              <div className="flex items-start gap-3">
+                <div className="grid h-9 w-9 shrink-0 place-items-center rounded-[4px] border border-current/15 bg-background/25">
+                  <Icon className="h-4 w-4" />
                 </div>
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold">{toast.title}</p>
+                  {toast.description ? (
+                    <p className="mt-1 text-sm leading-6 text-foreground/80">{toast.description}</p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => dismissToast(toast.id)}
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-[4px] border border-current/15 bg-background/30 text-current/70 transition hover:bg-background/50"
+                  aria-label="Dismiss toast"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </ToastContext.Provider>
   );

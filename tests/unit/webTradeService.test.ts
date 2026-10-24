@@ -63,7 +63,8 @@ vi.mock("@/lib/auth/session", () => {
       this.name = "AuthError";
     }
   }
-  return { AuthError, requireTrader: vi.fn() };
+  // (no token facts: the order routes then take the ordinary cached sign-in, not an order pass)
+  return { AuthError, requireTrader: vi.fn(), currentTokenFacts: vi.fn(async () => null) };
 });
 
 vi.mock("@/lib/services/auditService", () => ({ writeAuditLog: vi.fn(async () => undefined) }));
@@ -1402,7 +1403,7 @@ describe("what an order keeps in memory for a few seconds", () => {
     expect(getRiskEnforcementState).not.toHaveBeenCalled();
   });
 
-  test("a poll every second reads the account once and the risk verdict every four seconds", async () => {
+  test("a poll every second reads the account once and the risk verdict every two seconds (young enough for an order pass to rest on)", async () => {
     clockAt();
 
     for (let poll = 0; poll < 5; poll += 1) {
@@ -1411,7 +1412,7 @@ describe("what an order keeps in memory for a few seconds", () => {
     }
 
     expect(db.callsTo("trading_accounts")).toHaveLength(1);
-    expect(getRiskEnforcementState).toHaveBeenCalledTimes(2);
+    expect(getRiskEnforcementState).toHaveBeenCalledTimes(3); // at 0 s, 2 s and 4 s
   });
 
   test("a poll still shows a risk block as soon as it is read (and an order is refused with it)", async () => {
