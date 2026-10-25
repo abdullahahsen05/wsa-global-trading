@@ -90,7 +90,9 @@ export WSA_ACCOUNT_SYNC_INTERVAL_MS=300000
 export WSA_EVALUATION_INTERVAL_MS=300000
 
 case "$worker" in
-  copy) exec npm run copy:worker ;;
-  risk) exec npm run risk:worker ;;
-  jobs) exec npm run jobs:worker ;;
+  # Keep the Node worker as systemd's main process. `npm run` starts another
+  # process and can exit before the worker handles SIGTERM, forcing a SIGKILL.
+  copy) exec node --import tsx scripts/wsa-copy-worker.ts ;;
+  risk) exec node --import tsx scripts/wsa-risk-worker.ts ;;
+  jobs) exec node --import tsx scripts/wsa-background-worker.ts ;;
 esac
