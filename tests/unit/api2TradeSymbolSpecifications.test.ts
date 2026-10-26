@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { mapSymbolSpecifications } from "@/lib/broker/Api2TradeBrokerAdapter";
+import { mapSymbolSpecifications, normalizeExecutionLots } from "@/lib/broker/Api2TradeBrokerAdapter";
 import { calculateFollowerLot } from "@/lib/copy/lotScaling";
 
 describe("API2Trade risk-percent symbol specifications", () => {
@@ -29,5 +29,14 @@ describe("API2Trade risk-percent symbol specifications", () => {
       tickSize: 0.01, tickValue: 1, volumeStep: 0.01, minVolume: 0.01, profitCurrency: "USD",
     }, "USD")).toMatchObject({ tickSize: 0.01, tickValue: 1, volumeStep: 0.01 });
     expect(mapSymbolSpecifications("EURUSD", { symbolInfo: {}, symbolGroup: {} }, "USD")?.contractSize).toBeNull();
+  });
+
+  test("stores executed volume in lots when Pro returns raw MetaTrader units", () => {
+    expect(normalizeExecutionLots(5_000_000, 0.05)).toBe(0.05);
+    expect(normalizeExecutionLots(1_000_000, 0.05)).toBe(0.01);
+    expect(normalizeExecutionLots(0.05, 0.05)).toBe(0.05);
+    expect(normalizeExecutionLots(100, 200)).toBe(100);
+    expect(normalizeExecutionLots(50_000_000, 0.05)).toBe(0.05);
+    expect(normalizeExecutionLots(null, 0.05)).toBe(0.05);
   });
 });

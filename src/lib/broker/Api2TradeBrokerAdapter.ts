@@ -21,7 +21,7 @@ import {
   type OpenTradeRequest,
   type OrderKind,
 } from "./BrokerAdapter";
-import { classifyOrderType, mapOpenPositions, orderVolumeLots, positionTicket } from "./openPositions";
+import { classifyOrderType, mapOpenPositions, orderVolumeLots, positionTicket, scaleRawVolume } from "./openPositions";
 import { parseQuote, QUOTE_ENDPOINTS } from "./quote";
 import {
   Api2TradeClient,
@@ -349,6 +349,16 @@ export function mapSymbolSpecifications(
     accountCurrencyConversionRate: conversionRate ?? (profitCurrency && accountCurrency && profitCurrency !== accountCurrency ? null : 1),
     rawResponse: raw,
   };
+}
+
+/** A Pro order response may report MetaTrader integer volume instead of lots. */
+export function normalizeExecutionLots(reported: number | null | undefined, requested: number): number {
+  if (reported == null || !Number.isFinite(reported) || reported <= 0) return requested;
+  const tolerance = Math.max(1e-8, requested * 1e-6);
+  if (reported <= requested + tolerance) return reported;
+  const scaled = scaleRawVolume(reported);
+  // Never turn a malformed or unexpectedly larger broker value into a larger copied position.
+  return scaled > 0 && scaled <= requested + tolerance ? scaled : requested;
 }
 
 function isMissingApi2TradeClient(error: unknown): boolean {
@@ -1069,7 +1079,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
         }),
       req.stages,
     );
-    return { ...result, executedVolume: result.executedVolume ?? req.volume };
+    return { ...result, executedVolume: normalizeExecutionLots(result.executedVolume, req.volume) };
   }
 
   async closeTrade(req: CloseTradeRequest): Promise<BrokerExecutionResult> {
