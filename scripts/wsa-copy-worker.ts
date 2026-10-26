@@ -1,7 +1,7 @@
 import { createAdminClient } from "../src/lib/supabase/admin";
 import { enqueueJob } from "../src/lib/services/backgroundJobService";
 import { runWorkerOnce } from "../src/lib/workers/jobProcessor";
-import { executeCopyForEvent, warmCopyStrategyAccounts, type CopyEventTrace, type LinkedEvent } from "../src/lib/services/copyTradingService";
+import { executeCopyForEvent, prewarmCopyEventRiskSymbols, warmCopyStrategyAccounts, type CopyEventTrace, type LinkedEvent } from "../src/lib/services/copyTradingService";
 import { closeVanishedSelfCopyPositions, executeSelfCopyPositionEvent } from "../src/lib/services/selfCopyService";
 import {
   flushSelfCopyActivity,
@@ -196,12 +196,16 @@ async function persistEvent(strategy: LiveStrategy, event: DetectedEvent) {
   const startedAt = Date.now();
   const detectedAt = event.detectedAt ?? startedAt;
   const built = buildMasterEvent(strategy, event, { liveBrokerSource: isApi2Trade });
+  const riskSpecWarmup = event.eventType === "OPEN" && isApi2Trade
+    ? prewarmCopyEventRiskSymbols(strategy.id, event.position.symbol).catch(() => undefined)
+    : Promise.resolve();
   const eventId = await storeMasterEvent(createAdminClient(), built, {
     onRetry: (attempt, message) =>
       console.warn(`[copy-worker] master event could not be stored (attempt ${attempt}); trying again: ${message}`),
   });
   if (!eventId) return;
   const eventStoredAt = Date.now();
+  await riskSpecWarmup;
   const openedAge = openedBeforeDetectionMs(event, detectedAt);
   console.log(
     `[copy-worker] detected ${event.eventType} ${event.position.symbol} ${Number(event.position.volume ?? 0)} lot(s): `

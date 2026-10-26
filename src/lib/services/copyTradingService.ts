@@ -1170,6 +1170,32 @@ function getStrategyHotRuntime(strategyId: string): StrategyHotRuntime | null {
   return cached.value;
 }
 
+/**
+ * Fetch risk-percent contract specifications while the master event is being
+ * durably stored. The copy path still performs its normal sizing and gates;
+ * this only fills the broker-spec cache ahead of that read. Bound the warmup
+ * so a strategy with many followers cannot fan out unbounded provider calls.
+ */
+export async function prewarmCopyEventRiskSymbols(
+  strategyId: string,
+  sourceSymbol: string,
+  adapter = createBrokerAdapter(),
+): Promise<void> {
+  const runtime = getStrategyHotRuntime(strategyId);
+  if (!runtime || !adapter.fetchSymbolSpecifications) return;
+  const targets = runtime.followers
+    .filter((follower) => follower.copy_enabled && !follower.emergency_stop && followerScalingMode(follower) === "RISK_PERCENT")
+    .slice(0, 16);
+  await Promise.all(targets.map((follower) =>
+    loadRiskSymbolSpecifications(
+      adapter,
+      follower.follower_account_id,
+      mapFollowerSymbol(sourceSymbol, follower.symbol_mapping),
+      "RISK_PERCENT",
+    ).catch(() => null),
+  ));
+}
+
 async function loadActiveFollowersCached(
   strategyId: string,
 ): Promise<FollowerRow[]> {
