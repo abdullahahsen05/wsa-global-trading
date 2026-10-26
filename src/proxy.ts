@@ -66,10 +66,30 @@ function sweepExpired(now: number) {
 }
 
 export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  // A database-region cutover needs a hard web-write pause. Some GET handlers
+  // also write preferences, so block all dynamic traffic, not only mutations.
+  // This switch is off unless the deployment explicitly enables it.
+  if (process.env.WSA_MAINTENANCE_MODE === "true") {
+    if (pathname.startsWith("/_next/")) return NextResponse.next();
+    const headers = { "Cache-Control": "no-store", "Retry-After": "60" };
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { ok: false, error: { code: "MAINTENANCE", message: "The platform is temporarily paused for maintenance. Please retry shortly." } },
+        { status: 503, headers },
+      );
+    }
+    return new NextResponse("The platform is temporarily paused for maintenance. Please retry shortly.", {
+      status: 503,
+      headers: { ...headers, "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  // Keep the existing rate limiter API-only when the maintenance switch is off.
+  if (!pathname.startsWith("/api/")) return NextResponse.next();
   const now = Date.now();
   sweepExpired(now);
 
-  const { pathname } = request.nextUrl;
   const rule = ruleFor(pathname, request.method);
   const ip = clientIp(request);
   const key = `${rule.name}:${ip}`;
@@ -113,5 +133,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.png).*)"],
 };
