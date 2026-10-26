@@ -34,6 +34,7 @@ export interface Api2TradePositionEvent {
   previous?: Api2TradeLivePosition;
   /** when the message / answer that revealed the change reached this process (epoch ms) */
   detectedAt?: number;
+  detectedBy?: "websocket" | "rest";
   /** OPEN only: the position was already open in the first list this source read (it was not seen opening) */
   existing?: boolean;
 }
@@ -131,6 +132,17 @@ export interface Api2TradeLiveSourceStats {
   fastPolling: boolean;
   consecutiveReadErrors: number;
   trackedPositions: number;
+  websocketMessages: number;
+  websocketSignals: number;
+  websocketSnapshots: number;
+  websocketIgnored: number;
+  websocketEvents: number;
+  restReads: number;
+  restEvents: number;
+  safetyMisses: number;
+  /** Safety-poll-discovered changes divided by all changes this source observed. */
+  safetyPollDiscoveryRate: number | null;
+  lastWebsocketMessageAgeMs: number;
 }
 
 interface SnapshotResult {
@@ -177,10 +189,20 @@ export class Api2TradeLiveAccountSource {
   /** when the newest applied list was taken (REST: request start, WebSocket: arrival) */
   private appliedTakenAt = 0;
   private lastWsMessageAt = 0;
+  /** Heartbeats do not prove the order-update channel announced a trade. */
+  private lastWsRelevantAt = 0;
   private lastWsActivityAt = 0;
   private fastPollUntil = 0;
   private consecutiveReadErrors = 0;
   private massCloseSince = 0;
+  private websocketMessages = 0;
+  private websocketSignals = 0;
+  private websocketSnapshots = 0;
+  private websocketIgnored = 0;
+  private websocketEvents = 0;
+  private restReads = 0;
+  private restEvents = 0;
+  private safetyMisses = 0;
 
   constructor(
     private readonly client: Api2TradeClient,
@@ -234,12 +256,23 @@ export class Api2TradeLiveAccountSource {
   }
 
   stats(): Api2TradeLiveSourceStats {
+    const observedEvents = this.websocketEvents + this.restEvents;
     return {
       websocket: this.wsConnected,
       pictureAgeMs: this.lastSnapshotAt ? Date.now() - this.lastSnapshotAt : -1,
       fastPolling: Date.now() < this.fastPollUntil,
       consecutiveReadErrors: this.consecutiveReadErrors,
       trackedPositions: this.positions.size,
+      websocketMessages: this.websocketMessages,
+      websocketSignals: this.websocketSignals,
+      websocketSnapshots: this.websocketSnapshots,
+      websocketIgnored: this.websocketIgnored,
+      websocketEvents: this.websocketEvents,
+      restReads: this.restReads,
+      restEvents: this.restEvents,
+      safetyMisses: this.safetyMisses,
+      safetyPollDiscoveryRate: observedEvents > 0 ? this.safetyMisses / observedEvents : null,
+      lastWebsocketMessageAgeMs: this.lastWsMessageAt ? Date.now() - this.lastWsMessageAt : -1,
     };
   }
 
@@ -297,7 +330,7 @@ export class Api2TradeLiveAccountSource {
     orders: Api2TradeOrder[],
     takenAt: number,
     arrivedAt: number,
-    options: { emitExistingAsOpen?: boolean } = {},
+    options: { emitExistingAsOpen?: boolean; detectedBy?: "websocket" | "rest" } = {},
   ): SnapshotResult {
     // taken before the list that is already applied: a newer picture exists, drop this one
     if (takenAt < this.appliedTakenAt) return { events: [], heldBack: false };
@@ -324,18 +357,18 @@ export class Api2TradeLiveAccountSource {
       const previous = this.positions.get(id);
       if (!previous) {
         if (this.initialized) {
-          events.push({ eventType: "OPEN", position, detectedAt: arrivedAt });
+          events.push({ eventType: "OPEN", position, detectedAt: arrivedAt, detectedBy: options.detectedBy });
         } else if (options.emitExistingAsOpen) {
-          events.push({ eventType: "OPEN", position, detectedAt: arrivedAt, existing: true });
+          events.push({ eventType: "OPEN", position, detectedAt: arrivedAt, detectedBy: options.detectedBy, existing: true });
         }
         continue;
       }
       if (api2TradePositionChanged(previous, position)) {
-        events.push({ eventType: "MODIFY", position, previous, detectedAt: arrivedAt });
+        events.push({ eventType: "MODIFY", position, previous, detectedAt: arrivedAt, detectedBy: options.detectedBy });
       }
     }
     for (const [id, previous] of this.positions) {
-      if (!current.has(id)) events.push({ eventType: "CLOSE", position: previous, detectedAt: arrivedAt });
+      if (!current.has(id)) events.push({ eventType: "CLOSE", position: previous, detectedAt: arrivedAt, detectedBy: options.detectedBy });
     }
 
     this.positions.clear();
@@ -365,8 +398,10 @@ export class Api2TradeLiveAccountSource {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const takenAt = Date.now();
         const orders = await this.client.openedOrdersChecked(this.providerAccountId);
+        this.restReads += 1;
         const arrivedAt = Date.now();
-        const result = this.applySnapshot(orders, takenAt, arrivedAt, options);
+        const result = this.applySnapshot(orders, takenAt, arrivedAt, { ...options, detectedBy: "rest" });
+        this.restEvents += result.events.length;
         this.consecutiveReadErrors = 0;
         collected.push(...result.events);
         this.noteSafetyPollResult(result.events.length, forced, arrivedAt);
@@ -388,7 +423,12 @@ export class Api2TradeLiveAccountSource {
   /** A safety poll that finds a change the quiet socket never mentioned means the socket cannot be relied on. */
   private noteSafetyPollResult(eventCount: number, forced: boolean, now: number): void {
     if (eventCount === 0 || forced || !this.wsConnected) return;
-    if (now - this.lastWsMessageAt <= SILENT_STREAM_MS) return;
+    const missedByOrderChannel = now - this.lastWsRelevantAt > SILENT_STREAM_MS;
+    if (missedByOrderChannel) this.safetyMisses += eventCount;
+    // The stricter rule may increase REST traffic for every affected account. Stage it
+    // behind a flag until demo-stream completeness and provider load are measured.
+    const strict = process.env.API2TRADE_STRICT_ORDER_STREAM === "true";
+    if (now - (strict ? this.lastWsRelevantAt : this.lastWsMessageAt) <= SILENT_STREAM_MS) return;
     if (now >= this.fastPollUntil) {
       console.warn(
         `[api2trade] the order stream did not announce a change that the safety poll found; polling every ${this.fastPollMs()}ms for the next ${Math.round(FAST_POLL_WINDOW_MS / 60_000)} minutes.`,
@@ -416,14 +456,21 @@ export class Api2TradeLiveAccountSource {
   /** One message of the stream (public so it can be tested without a socket). */
   ingestSocketMessage(text: string): void {
     const arrivedAt = Date.now();
+    this.websocketMessages += 1;
     this.lastWsMessageAt = arrivedAt;
     this.lastWsActivityAt = arrivedAt;
     const message = readOrderUpdateMessage(text);
-    if (message.kind === "ignore") return;
+    if (message.kind === "ignore") {
+      this.websocketIgnored += 1;
+      return;
+    }
+    this.lastWsRelevantAt = arrivedAt;
 
     if (message.kind === "snapshot" && this.initialized) {
       try {
-        const result = this.applySnapshot(message.orders, arrivedAt, arrivedAt);
+        this.websocketSnapshots += 1;
+        const result = this.applySnapshot(message.orders, arrivedAt, arrivedAt, { detectedBy: "websocket" });
+        this.websocketEvents += result.events.length;
         if (result.events.length > 0) this.bufferedEvents.push(...result.events);
         if (result.heldBack) this.forceSnapshot = true;
         if (result.events.length > 0 || result.heldBack) this.signal();
@@ -433,6 +480,7 @@ export class Api2TradeLiveAccountSource {
       }
     }
     // A signal, a list that could not be used, or a list before the first REST read.
+    this.websocketSignals += 1;
     this.forceSnapshot = true;
     this.signal();
   }

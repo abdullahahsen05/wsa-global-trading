@@ -136,6 +136,7 @@ beforeEach(() => {
   delete process.env.API2TRADE_REST_POLL_MS;
   delete process.env.API2TRADE_FAST_POLL_MS;
   delete process.env.API2TRADE_WS_SILENCE_MS;
+  delete process.env.API2TRADE_STRICT_ORDER_STREAM;
 });
 
 afterEach(() => {
@@ -221,6 +222,7 @@ describe("Api2TradeLiveAccountSource - reading the list over REST", () => {
     const events = await source.reconcile({ emitExistingAsOpen: true });
 
     expect(types(events)).toEqual(["OPEN:2"]);
+    expect(events[0].detectedBy).toBe("rest");
     expect(events[0].existing).toBeUndefined();
     expect(events[0].detectedAt).toBe(Date.now());
   });
@@ -476,6 +478,8 @@ describe("Api2TradeLiveAccountSource - messages of the order stream", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     const events = await source.reconcile();
     expect(types(events)).toEqual(["OPEN:2"]);
+    expect(events[0].detectedBy).toBe("websocket");
+    expect(source.stats()).toMatchObject({ websocketMessages: 1, websocketSnapshots: 1, websocketEvents: 1, restReads: 1 });
     expect(client.openedOrdersChecked).toHaveBeenCalledTimes(1);
     // delivered once
     await expect(source.reconcile()).resolves.toEqual([]);
@@ -505,6 +509,8 @@ describe("Api2TradeLiveAccountSource - messages of the order stream", () => {
     const events = await source.reconcile();
 
     expect(types(events)).toEqual(["OPEN:2"]);
+    expect(events[0].detectedBy).toBe("rest");
+    expect(source.stats()).toMatchObject({ websocketSignals: 1, restReads: 2, restEvents: 1 });
     expect(client.openedOrdersChecked).toHaveBeenCalledTimes(2);
   });
 
@@ -609,6 +615,7 @@ describe("Api2TradeLiveAccountSource - polling speed", () => {
 
     expect(types(events)).toEqual(["OPEN:2"]);
     expect(source.stats().fastPolling).toBe(true);
+    expect(source.stats()).toMatchObject({ safetyMisses: 1, safetyPollDiscoveryRate: 1 });
     expect(warn).toHaveBeenCalledTimes(1);
 
     // from now on every 300 ms instead of every second
@@ -635,7 +642,8 @@ describe("Api2TradeLiveAccountSource - polling speed", () => {
     expect(source.stats().fastPolling).toBe(false);
   });
 
-  test("a stream that spoke a moment ago is trusted even if the poll was first", async () => {
+  test("a heartbeat does not mask an order update missed by the socket", async () => {
+    process.env.API2TRADE_STRICT_ORDER_STREAM = "true";
     const { source, state } = makeSource([[order(1)]]);
     (source as unknown as { wsConnected: boolean }).wsConnected = true;
     await source.reconcile();
@@ -644,9 +652,24 @@ describe("Api2TradeLiveAccountSource - polling speed", () => {
     source.ingestSocketMessage("OK"); // alive, just not about this trade
     vi.advanceTimersByTime(100);
     state.answers = [[order(1), order(2)]];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     await source.reconcile();
 
-    expect(source.stats().fastPolling).toBe(false);
+    expect(source.stats().fastPolling).toBe(true);
+    expect(source.stats()).toMatchObject({ websocketIgnored: 1, safetyMisses: 1 });
+    warn.mockRestore();
+  });
+
+  test("the strict fallback is opt-in while miss diagnostics remain visible", async () => {
+    const { source, state } = makeSource([[order(1)]]);
+    (source as unknown as { wsConnected: boolean }).wsConnected = true;
+    await source.reconcile();
+    vi.advanceTimersByTime(1_000);
+    source.ingestSocketMessage("OK");
+    vi.advanceTimersByTime(100);
+    state.answers = [[order(1), order(2)]];
+    await source.reconcile();
+    expect(source.stats()).toMatchObject({ safetyMisses: 1, fastPolling: false });
   });
 
   test("the intervals can be set", async () => {

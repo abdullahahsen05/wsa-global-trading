@@ -23,6 +23,8 @@ export interface DetectedPositionEvent {
   previous?: MasterPosition;
   /** when the change reached this process (epoch ms) */
   detectedAt?: number;
+  /** Which API2Trade path first revealed this event; omitted for other sources. */
+  detectedBy?: "websocket" | "rest";
   /** found in the first list after the stream opened, not seen while it was opening */
   existing?: boolean;
 }

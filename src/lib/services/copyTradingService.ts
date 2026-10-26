@@ -6,6 +6,7 @@ import {
   BROKER_EXEC_ERROR,
   BrokerExecutionError,
   type BrokerAdapter,
+  type ExecutionStages,
 } from "@/lib/broker/BrokerAdapter";
 import {
   createBrokerAdapter,
@@ -33,6 +34,7 @@ import {
 } from "@/lib/copy/types";
 import { warmDatabaseConnections } from "@/lib/broker/api2TradeTransport";
 import { markExecutionPriority } from "@/lib/copy/executionPriority";
+import { copyLatencySample } from "@/lib/copy/latencyTrace";
 import { runPool } from "@/lib/copy/pool";
 import { isMissingSchema } from "@/lib/copy/activityLog";
 import {
@@ -69,6 +71,13 @@ function logCopyTiming(
   console.log(
     `[copy-timing:${timingLabel(eventId)}] ${stage} +${elapsedMs}ms${suffix}`,
   );
+}
+
+/** The worker knows these before the event is stored; a replayed job may not. */
+export interface CopyEventTrace {
+  masterExecutedAtMs: number | null;
+  eventStoredAtMs: number;
+  detectedBy?: "websocket" | "rest";
 }
 
 // Orders in flight at once, per worker process. The keep-alive pool to the broker service holds 64
@@ -2538,6 +2547,7 @@ export async function executeCopyForEvent(
   eventId: string | LinkedEvent,
   actorUserId: string | null,
   startedAtOverride?: number,
+  trace?: CopyEventTrace,
 ): Promise<ExecSummary> {
   const startedAt = startedAtOverride ?? Date.now();
   const supabase = createAdminClient();
@@ -3021,6 +3031,7 @@ export async function executeCopyForEvent(
     let slotCounted = false;
     let orderPlaced = false;
     try {
+      const reservationStartedAt = Date.now();
       const { data: reserved, error: reserveError } = await supabase
         .from("copy_trade_links")
         .insert({
@@ -3059,6 +3070,7 @@ export async function executeCopyForEvent(
           .update({ status: "PENDING", error_code: null, error_message: null })
           .eq("id", linkId);
       }
+      const reservedAt = Date.now();
       adjustOpenCopiedTrades(f.follower_account_id, 1);
       slotCounted = true;
       logCopyTiming(ev.id, "follower broker submit", startedAt, {
@@ -3081,13 +3093,16 @@ export async function executeCopyForEvent(
         f.follower_account_id,
       ]);
       const brokerStartedAt = Date.now();
+      let requestStartedAt = brokerStartedAt;
+      const stages: ExecutionStages = {};
       let executedSymbol = followerSymbol;
       let result = null as Awaited<ReturnType<typeof adapter.openTrade>> | null;
       let lastOpenError: unknown = null;
       for (const candidateSymbol of symbolCandidates) {
         try {
-          result = await withBrokerExecutionSlot(() =>
-            adapter.openTrade({
+          result = await withBrokerExecutionSlot(() => {
+            requestStartedAt = Date.now();
+            return adapter.openTrade({
               accountId: f.follower_account_id,
               symbol: candidateSymbol,
               side: followerSide === "SELL" ? "SELL" : "BUY",
@@ -3096,8 +3111,9 @@ export async function executeCopyForEvent(
               takeProfit: shape.takeProfit,
               slippage: shape.slippage,
               comment: `wsa:${strategy.id.slice(0, 8)}`,
-            }),
-          );
+              stages,
+            });
+          });
           executedSymbol = candidateSymbol;
           break;
         } catch (candidateError) {
@@ -3115,11 +3131,28 @@ export async function executeCopyForEvent(
       }
       if (!result) throw lastOpenError ?? new Error("Broker execution failed.");
       orderPlaced = true;
+      const providerRespondedAt = Date.now();
+      const latency = copyLatencySample({
+        masterExecutedAtMs: trace?.masterExecutedAtMs,
+        detectedAtMs: startedAt,
+        eventStoredAtMs: trace?.eventStoredAtMs,
+        followerStartedAtMs: followerStartedAt,
+        reservationStartedAtMs: reservationStartedAt,
+        reservedAtMs: reservedAt,
+        brokerStartedAtMs: requestStartedAt,
+        providerRespondedAtMs: providerRespondedAt,
+      });
       logCopyTiming(ev.id, "follower broker response", startedAt, {
         followerAccountId: f.follower_account_id,
         tier: f.tier,
         symbol: executedSymbol,
-        brokerMs: Date.now() - brokerStartedAt,
+        brokerMs: providerRespondedAt - brokerStartedAt,
+        brokerSessionMs: stages.sessionMs ?? null,
+        brokerSendMs: stages.sendMs ?? null,
+        brokerAttempts: stages.attempts ?? null,
+        detectedBy: trace?.detectedBy ?? null,
+        responseKind: "api2trade_ack_not_independent_mt5_fill",
+        latency,
       });
       markExecutionPriority([
         strategy.master_account_id,

@@ -258,13 +258,18 @@ function firstString(record: Record<string, unknown>, keys: string[]): string | 
   return null;
 }
 
-function mapSymbolSpecifications(
+/** API2Trade Pro returns symbolInfo/symbolGroup; older answers use flat fields. */
+export function mapSymbolSpecifications(
   symbol: string,
   raw: Api2TradeSymbolSpecifications | null,
   accountCurrency: string | null,
 ): BrokerSymbolSpecifications | null {
   if (!raw) return null;
   const record = raw as Record<string, unknown>;
+  const info = typeof record.symbolInfo === "object" && record.symbolInfo !== null && !Array.isArray(record.symbolInfo)
+    ? record.symbolInfo as Record<string, unknown> : {};
+  const group = typeof record.symbolGroup === "object" && record.symbolGroup !== null && !Array.isArray(record.symbolGroup)
+    ? record.symbolGroup as Record<string, unknown> : {};
   const tickSize = firstFiniteNumber(record, [
     "tickSize",
     "tick_size",
@@ -273,7 +278,7 @@ function mapSymbolSpecifications(
     "point",
     "pointSize",
     "point_size",
-  ]);
+  ]) ?? firstFiniteNumber(info, ["tickSize", "tradeTickSize", "points", "point"]);
   const tickValue = firstFiniteNumber(record, [
     "tickValue",
     "tick_value",
@@ -281,7 +286,7 @@ function mapSymbolSpecifications(
     "trade_tick_value",
     "tickValueProfit",
     "tick_value_profit",
-  ]);
+  ]) ?? firstFiniteNumber(info, ["tickValue", "tradeTickValue", "tickValueProfit"]);
   const contractSize = firstFiniteNumber(record, [
     "contractSize",
     "contract_size",
@@ -289,7 +294,7 @@ function mapSymbolSpecifications(
     "trade_contract_size",
     "lotSize",
     "lot_size",
-  ]);
+  ]) ?? firstFiniteNumber(info, ["contractSize", "tradeContractSize", "lotSize"]);
   const volumeStep = firstFiniteNumber(record, [
     "volumeStep",
     "volume_step",
@@ -297,7 +302,7 @@ function mapSymbolSpecifications(
     "lot_step",
     "volumeMinStep",
     "volume_min_step",
-  ]);
+  ]) ?? firstFiniteNumber(group, ["lotsStep", "lotStep", "volumeStep"]);
   const minVolume = firstFiniteNumber(record, [
     "minVolume",
     "min_volume",
@@ -305,7 +310,7 @@ function mapSymbolSpecifications(
     "volume_min",
     "minLot",
     "min_lot",
-  ]);
+  ]) ?? firstFiniteNumber(group, ["minLots", "minLot"]);
   const maxVolume = firstFiniteNumber(record, [
     "maxVolume",
     "max_volume",
@@ -313,14 +318,14 @@ function mapSymbolSpecifications(
     "volume_max",
     "maxLot",
     "max_lot",
-  ]);
+  ]) ?? firstFiniteNumber(group, ["maxLots", "maxLot"]);
   const profitCurrency = firstString(record, [
     "profitCurrency",
     "profit_currency",
     "currencyProfit",
     "currency_profit",
     "currency",
-  ]);
+  ]) ?? firstString(info, ["profitCurrency", "currencyProfit", "currency"]);
   const conversionRate = firstFiniteNumber(record, [
     "accountCurrencyConversionRate",
     "account_currency_conversion_rate",
@@ -329,7 +334,7 @@ function mapSymbolSpecifications(
     "currencyRate",
     "currency_rate",
     "rate",
-  ]);
+  ]) ?? firstFiniteNumber(info, ["accountCurrencyConversionRate", "conversionRate", "currencyRate"]);
 
   return {
     symbol,

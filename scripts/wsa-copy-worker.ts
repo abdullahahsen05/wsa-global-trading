@@ -1,7 +1,7 @@
 import { createAdminClient } from "../src/lib/supabase/admin";
 import { enqueueJob } from "../src/lib/services/backgroundJobService";
 import { runWorkerOnce } from "../src/lib/workers/jobProcessor";
-import { executeCopyForEvent, warmCopyStrategyAccounts, type LinkedEvent } from "../src/lib/services/copyTradingService";
+import { executeCopyForEvent, warmCopyStrategyAccounts, type CopyEventTrace, type LinkedEvent } from "../src/lib/services/copyTradingService";
 import { closeVanishedSelfCopyPositions, executeSelfCopyPositionEvent } from "../src/lib/services/selfCopyService";
 import {
   flushSelfCopyActivity,
@@ -152,11 +152,11 @@ function changed(previous: Position, current: Position) {
 
 // ── master events: build, store, copy ─────────────────────────────────────────
 
-async function copyStoredEvent(eventId: string, built: BuiltMasterEvent, startedAt: number) {
+async function copyStoredEvent(eventId: string, built: BuiltMasterEvent, startedAt: number, trace: CopyEventTrace) {
   const linked = built.linked;
   if (isApi2Trade && process.env.WSA_COPY_DIRECT_EXECUTION !== "false") {
     try {
-      const result = await executeCopyForEvent({ id: eventId, ...linked } satisfies LinkedEvent, null, startedAt);
+      const result = await executeCopyForEvent({ id: eventId, ...linked } satisfies LinkedEvent, null, startedAt, trace);
       console.log(
         `[copy-worker] direct copy event ${eventId} finished in ${Date.now() - startedAt}ms: ${result.success} succeeded, ${result.failed} failed, ${result.skipped} skipped`,
       );
@@ -201,14 +201,22 @@ async function persistEvent(strategy: LiveStrategy, event: DetectedEvent) {
       console.warn(`[copy-worker] master event could not be stored (attempt ${attempt}); trying again: ${message}`),
   });
   if (!eventId) return;
+  const eventStoredAt = Date.now();
   const openedAge = openedBeforeDetectionMs(event, detectedAt);
   console.log(
     `[copy-worker] detected ${event.eventType} ${event.position.symbol} ${Number(event.position.volume ?? 0)} lot(s): `
-    + `waited ${startedAt - detectedAt}ms, stored in ${Date.now() - startedAt}ms`
+    + `waited ${startedAt - detectedAt}ms, stored in ${eventStoredAt - startedAt}ms`
     + (openedAge === null ? "" : `, trade was open ${openedAge}ms when seen`),
   );
   // timings of the copy count from the moment the change was seen, not from when it was stored
-  await copyStoredEvent(eventId, built, detectedAt);
+  const masterExecutedAtMs = event.position.time
+    ? new Date(event.position.time).getTime()
+    : null;
+  await copyStoredEvent(eventId, built, detectedAt, {
+    masterExecutedAtMs: openedAge === null || !Number.isFinite(masterExecutedAtMs) ? null : masterExecutedAtMs,
+    eventStoredAtMs: eventStoredAt,
+    detectedBy: event.detectedBy,
+  });
 }
 
 /**
@@ -253,15 +261,21 @@ function touchStrategyLiveHeartbeat(strategyId: string) {
 /** A line about a stream that is not in perfect shape, at most once a minute per stream. */
 function reportStreamTrouble(label: string, source: Api2TradeLiveAccountSource) {
   const stats = source.stats();
-  if (stats.websocket && !stats.fastPolling && stats.consecutiveReadErrors === 0) return;
+  const diagnostics = process.env.WSA_COPY_STREAM_DIAGNOSTICS === "true";
+  if (!diagnostics && stats.websocket && !stats.fastPolling && stats.consecutiveReadErrors === 0) return;
   const now = Date.now();
   if (now - (streamStatusLoggedAt.get(label) ?? 0) < 60_000) return;
   streamStatusLoggedAt.set(label, now);
-  console.warn(
+  const message =
     `[copy-worker] ${label}: websocket ${stats.websocket ? "up" : "DOWN (polling REST)"}`
     + `${stats.fastPolling ? ", fast polling (the stream missed a change)" : ""}`
-    + `, ${stats.consecutiveReadErrors} failed read(s) in a row, ${stats.trackedPositions} open position(s)`,
-  );
+    + `, ${stats.consecutiveReadErrors} failed read(s) in a row, ${stats.trackedPositions} open position(s)`
+    + `, ws messages/signals/snapshots/ignored/events ${stats.websocketMessages}/${stats.websocketSignals}/${stats.websocketSnapshots}/${stats.websocketIgnored}/${stats.websocketEvents}`
+    + `, rest reads/events ${stats.restReads}/${stats.restEvents}, safety misses ${stats.safetyMisses}`
+    + `, safety-poll discovery rate ${stats.safetyPollDiscoveryRate === null ? "n/a" : `${(stats.safetyPollDiscoveryRate * 100).toFixed(1)}%`}`
+    + `, last ws message ${stats.lastWebsocketMessageAgeMs}ms ago`;
+  if (stats.websocket && !stats.fastPolling && stats.consecutiveReadErrors === 0) console.log(message);
+  else console.warn(message);
 }
 
 // ── streams ──────────────────────────────────────────────────────────────────
