@@ -71,6 +71,20 @@ export function readOrderUpdateMessage(text: string): OrderUpdateMessage {
   if (Array.isArray(fields.openedorders)) {
     return { kind: "snapshot", orders: fields.openedorders as Api2TradeOrder[] };
   }
+  // The Pro /OnOrderUpdate socket wraps the complete list as
+  // { type: "OpenedOrders", id, data: [...], timestampUTC }. This is the
+  // format seen on the live demo stream; the earlier top-level-only parser
+  // discarded it and left trade discovery to the REST safety poll.
+  if (typeof fields.type === "string") {
+    const type = fields.type.toLowerCase();
+    if (type === "openedorders" && Array.isArray(fields.data)) {
+      return { kind: "snapshot", orders: fields.data as Api2TradeOrder[] };
+    }
+    if (["orderupdate", "onorderupdate", "trade", "trades", "position", "positions"].includes(type)
+      && fields.data !== null && fields.data !== undefined) {
+      return { kind: "signal" };
+    }
+  }
   for (const key of Object.keys(fields)) {
     if (!CHANGE_KEYS.has(key)) continue;
     const entry = fields[key];

@@ -49,6 +49,21 @@ describe("readOrderUpdateMessage", () => {
     expect(message.kind).toBe("snapshot");
   });
 
+  test("recognizes the Pro socket's typed order-list envelope", () => {
+    const orders = [{ ticket: 7, symbol: "EURUSD" }];
+    expect(readOrderUpdateMessage(JSON.stringify({ type: "OpenedOrders", id: "account", data: orders, timestampUTC: 42 })))
+      .toEqual({ kind: "snapshot", orders });
+    expect(readOrderUpdateMessage(JSON.stringify({ type: "OpenedOrders", id: "account", data: [] })))
+      .toEqual({ kind: "snapshot", orders: [] });
+  });
+
+  test("an order event envelope prompts a REST read, but unrelated data does not", () => {
+    expect(readOrderUpdateMessage(JSON.stringify({ type: "OrderUpdate", data: { ticket: 7 } })))
+      .toEqual({ kind: "signal" });
+    expect(readOrderUpdateMessage(JSON.stringify({ type: "AccountSummary", data: { equity: 100 } })))
+      .toEqual({ kind: "ignore" });
+  });
+
   test.each([
     ["an update object", { update: { ticket: 55, action: "Open" } }],
     ["a bare order", { order: { ticket: 5 } }],

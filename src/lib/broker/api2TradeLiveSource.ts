@@ -344,6 +344,12 @@ export class Api2TradeLiveAccountSource {
     }
     const current = new Map(split.positions.map((position) => [position.id, position]));
 
+    // A streamed empty list can be transient while the provider is rebuilding a
+    // position snapshot. Confirm closes through REST before acting on one; opens
+    // and modifications still use the stream immediately.
+    if (options.detectedBy === "websocket" && this.initialized && current.size === 0 && this.positions.size === 1) {
+      return { events: [], heldBack: true };
+    }
     if (this.initialized && current.size === 0 && this.positions.size >= 2) {
       if (this.massCloseSince === 0 || arrivedAt - this.massCloseSince > MASS_CLOSE_CONFIRM_WINDOW_MS) {
         this.massCloseSince = arrivedAt;

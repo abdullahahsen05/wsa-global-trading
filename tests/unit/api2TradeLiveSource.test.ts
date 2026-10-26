@@ -485,6 +485,26 @@ describe("Api2TradeLiveAccountSource - messages of the order stream", () => {
     await expect(source.reconcile()).resolves.toEqual([]);
   });
 
+  test("the live Pro envelope opens from the socket and confirms an empty close through REST", async () => {
+    const { source, state, client } = makeSource([[]]);
+    await source.reconcile();
+
+    source.ingestSocketMessage(JSON.stringify({ type: "OpenedOrders", data: [order(2)], timestampUTC: 42 }));
+    expect(types(await source.reconcile())).toEqual(["OPEN:2"]);
+    expect(source.stats()).toMatchObject({ websocketEvents: 1, restReads: 1 });
+
+    source.ingestSocketMessage(JSON.stringify({ type: "OpenedOrders", data: [] }));
+    state.answers = [[order(2)]]; // a transient empty stream frame must not close a real position
+    expect(types(await source.reconcile())).toEqual([]);
+    expect(client.openedOrdersChecked).toHaveBeenCalledTimes(2);
+    expect(source.stats().trackedPositions).toBe(1);
+
+    source.ingestSocketMessage(JSON.stringify({ type: "OpenedOrders", data: [] }));
+    state.answers = [[]];
+    expect(types(await source.reconcile())).toEqual(["CLOSE:2"]);
+    expect(client.openedOrdersChecked).toHaveBeenCalledTimes(3);
+  });
+
   test("a list identical to what is known wakes nobody", async () => {
     const { source } = makeSource([[order(1)]]);
     await source.reconcile();
