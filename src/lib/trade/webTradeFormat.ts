@@ -117,6 +117,7 @@ function factsText(timing: WebTradeTiming): string {
   if (timing.edgeRegion && timing.functionRegion) {
     sentences.push(`Route: ${timing.edgeRegion} edge → ${timing.functionRegion} function.`);
   }
+  if (timing.awsBrowserPilot) sentences.push("Route: browser → AWS demo pilot.");
   return sentences.length > 0 ? ` ${sentences.join(" ")}` : "";
 }
 

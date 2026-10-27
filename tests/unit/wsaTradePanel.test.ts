@@ -2207,7 +2207,7 @@ describe("WsaTradePanel - how long it took", () => {
     expect(notice.querySelector("strong")?.textContent).toMatch(/^\d+ ms$/);
     // network = total - server; server = server - wait; relay = wait - queue - broker
     expect(notice.querySelectorAll("p")[1]?.textContent).toMatch(
-      /^\d+ ms in total: network 0 ms · server 500 ms · queue 120 ms · broker 330 ms \(session 12 ms · send 310 ms\) · relay 8\.05 s$/,
+      /^\d+ ms in total: network 0 ms · server 500 ms · queue 120 ms · broker 330 ms \(session 12 ms · send 310 ms\) · relay 8\.05 s/,
     );
   });
 

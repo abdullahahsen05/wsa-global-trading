@@ -310,6 +310,8 @@ export interface WebTradeTiming {
   /** Vercel edge and function region codes, when exposed by the response header */
   edgeRegion?: string;
   functionRegion?: string;
+  /** The demo-only browser → AWS order pilot, not the usual Vercel function route. */
+  awsBrowserPilot?: boolean;
 }
 
 /** What the broker said about the order, for showing the result before the next picture arrives. */

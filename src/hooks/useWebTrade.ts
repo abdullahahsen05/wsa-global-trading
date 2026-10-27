@@ -2,6 +2,7 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef } from "react";
+import { createClient } from "@/lib/supabase/client";
 import {
   isUncertainTradeCode,
   WEB_TRADE_BURST_MS,
@@ -29,7 +30,7 @@ export const WEB_TRADE_STATE_QUERY_KEY = "terminal-web-trade-state";
 export const WEB_TRADE_SYMBOLS_QUERY_KEY = "terminal-web-trade-symbols";
 export const WEB_TRADE_HISTORY_QUERY_KEY = "terminal-web-trade-history";
 
-type Envelope<T> = { ok?: boolean; data?: T; error?: { code?: string; message?: string } };
+type Envelope<T> = { ok?: boolean; data?: T; error?: { code?: string; message?: string; notSent?: boolean } };
 
 /** A failed WSA Trade request. `uncertain`: the request may have reached the broker even though no answer came back. */
 export class WebTradeRequestError extends Error {
@@ -206,6 +207,18 @@ export function useWebTradeHistory(accountId: string | null, period: HistoryPeri
 export type WebTradeAction = "open" | "modify" | "close" | "cancel" | "close-bulk";
 
 const WEB_TRADE_ACTIONS: readonly WebTradeAction[] = ["open", "modify", "close", "cancel", "close-bulk"];
+const DEMO_ORDER_URL = process.env.NEXT_PUBLIC_WSA_DEMO_ORDER_URL?.trim() ?? "";
+const DEMO_ACCOUNT_ID = process.env.NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID?.trim() ?? "";
+
+/** Only the explicit 0.01-lot demo market order may use the AWS browser pilot. */
+function eligibleForDemoOrderRoute(action: WebTradeAction, body: Record<string, unknown>, pass: string | null): boolean {
+  return Boolean(
+    DEMO_ORDER_URL && DEMO_ACCOUNT_ID && pass &&
+    action === "open" && body.accountId === DEMO_ACCOUNT_ID &&
+    body.volume === 0.01 && (body.orderKind === undefined || body.orderKind === "MARKET") &&
+    typeof body.clientRequestId === "string",
+  );
+}
 
 /** The browser's high-resolution clock (falls back to the wall clock where there is none). */
 function clockMs(): number {
@@ -243,18 +256,51 @@ function browserOrderTiming(path: string, startedAt: number, response: Response)
  */
 export async function sendWebTrade(action: WebTradeAction, body: Record<string, unknown>): Promise<WebTradeOrderResult> {
   const startedAt = clockMs();
-  const path = `/api/terminal/trade/${action}`;
+  let path = `/api/terminal/trade/${action}`;
   const pass = passOf(body.accountId);
-  let response: Response;
+  let response: Response | undefined;
   try {
-    response = await fetch(path, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(pass ? { [WEB_TRADE_PASS_HEADER]: pass } : {}) },
-      credentials: "same-origin",
-      cache: "no-store",
-      body: JSON.stringify(body),
-    });
-  } catch {
+    if (eligibleForDemoOrderRoute(action, body, pass)) {
+      const session = await createClient().auth.getSession().then((answer) => answer.data.session).catch(() => null);
+      if (session?.access_token) {
+        path = DEMO_ORDER_URL;
+        response = await fetch(path, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${session.access_token}`,
+            [WEB_TRADE_PASS_HEADER]: pass as string,
+          },
+          cache: "no-store",
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const failure = await response.clone().json().catch(() => null) as Envelope<unknown> | null;
+          // Only an explicit pre-execution refusal may retry the same request id on the established Vercel route.
+          if (failure?.error?.notSent === true) {
+            path = `/api/terminal/trade/${action}`;
+            response = undefined;
+          } else if (!failure?.error?.code) {
+            throw new WebTradeRequestError(
+              "ORDER_UNCERTAIN",
+              "The demo route did not return a clear answer. Check open positions before retrying.",
+              true,
+            );
+          }
+        }
+      }
+    }
+    if (!response) {
+      response = await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...(pass ? { [WEB_TRADE_PASS_HEADER]: pass } : {}) },
+        credentials: "same-origin",
+        cache: "no-store",
+        body: JSON.stringify(body),
+      });
+    }
+  } catch (error) {
+    if (error instanceof WebTradeRequestError) throw error;
     throw new WebTradeRequestError(
       "NETWORK_ERROR",
       "The connection dropped before an answer came back.",
@@ -290,6 +336,15 @@ const HOT_ACTIONS: readonly WebTradeAction[] = ["open", "close", "modify"];
  */
 export function warmWebTradeRoutes(accountId: string | null = null, actions: readonly WebTradeAction[] = WEB_TRADE_ACTIONS): void {
   if (typeof fetch !== "function") return;
+  if (accountId === DEMO_ACCOUNT_ID && DEMO_ORDER_URL && actions.includes("open")) {
+    // Safely prime the cross-origin POST preflight. This body fails validation before any worker call.
+    void fetch(DEMO_ORDER_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer warm", [WEB_TRADE_PASS_HEADER]: "warm" },
+      body: "{}",
+      cache: "no-store",
+    }).catch(() => undefined);
+  }
   const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
   for (const action of actions) {
     try {
