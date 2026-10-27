@@ -99,10 +99,19 @@ function factsText(timing: WebTradeTiming): string {
     sentences.push(`The AWS worker is busy: its loop ran ${formatDuration(timing.awsLoopMs)} late.`);
   }
   if (timing.wake === "live") sentences.push("Wake-up: live.");
+  else if (timing.wake === "direct") sentences.push("Wake-up: direct.");
   else if (timing.wake === "web-poll") {
     sentences.push("Wake-up: the web server still asks the database again and again - apply migration 062.");
   } else if (timing.wake === "aws-poll") {
     sentences.push("Wake-up: the AWS worker still asks the database again and again - apply migration 062 and update the worker.");
+  }
+  if (isMs(timing.browserSetupMs) && isMs(timing.browserFirstByteMs) && isMs(timing.browserDownloadMs)) {
+    sentences.push(
+      `Browser request: setup ${formatDuration(timing.browserSetupMs)} · first byte ${formatDuration(timing.browserFirstByteMs)} (includes server and broker) · download ${formatDuration(timing.browserDownloadMs)}.`,
+    );
+  }
+  if (timing.edgeRegion && timing.functionRegion) {
+    sentences.push(`Route: ${timing.edgeRegion} edge → ${timing.functionRegion} function.`);
   }
   return sentences.length > 0 ? ` ${sentences.join(" ")}` : "";
 }

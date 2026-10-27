@@ -12,6 +12,7 @@ import {
   type WebTradeOrderResult,
   type WebTradeState,
   type WebTradeSymbols,
+  type WebTradeTiming,
 } from "@/lib/trade/webTrade";
 import { historySince, type HistoryPeriodId, type WebTradeHistory } from "@/lib/trade/webTradeHistory";
 
@@ -211,6 +212,30 @@ function clockMs(): number {
   return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
 }
 
+/** Same-origin Resource Timing partitions browser/hosting delay without timing or changing the order request itself. */
+function browserOrderTiming(path: string, startedAt: number, response: Response): Partial<WebTradeTiming> {
+  const timing: Partial<WebTradeTiming> = {};
+  try {
+    const route = response.headers.get("x-vercel-id")?.split("::") ?? [];
+    const region = (part: string | undefined) => part && /^[a-z][a-z0-9]{2,6}$/i.test(part) ? part.toUpperCase() : undefined;
+    timing.edgeRegion = region(route[0]);
+    if (route.length > 2) timing.functionRegion = region(route[1]);
+
+    if (typeof window === "undefined" || typeof performance?.getEntriesByName !== "function") return timing;
+    const url = new URL(path, window.location.href).href;
+    const entries = performance.getEntriesByName(url, "resource");
+    const entry = [...entries].reverse().find((candidate) => candidate.startTime >= startedAt - 1) as PerformanceResourceTiming | undefined;
+    if (!entry || entry.requestStart <= 0 || entry.responseStart < entry.requestStart || entry.responseEnd < entry.responseStart) return timing;
+    const duration = (value: number) => Math.max(0, Math.round(value));
+    timing.browserSetupMs = duration(entry.requestStart - entry.startTime);
+    timing.browserFirstByteMs = duration(entry.responseStart - entry.requestStart);
+    timing.browserDownloadMs = duration(entry.responseEnd - entry.responseStart);
+  } catch {
+    // Optional diagnostics must never turn a broker-confirmed answer into a failed or uncertain order.
+  }
+  return timing;
+}
+
 /**
  * One order / change. The server answers with the ticket; a network failure is reported as `uncertain`.
  * The browser adds the total time it waited (`timing.totalMs`), so the report can show how much of it
@@ -218,10 +243,11 @@ function clockMs(): number {
  */
 export async function sendWebTrade(action: WebTradeAction, body: Record<string, unknown>): Promise<WebTradeOrderResult> {
   const startedAt = clockMs();
+  const path = `/api/terminal/trade/${action}`;
   const pass = passOf(body.accountId);
   let response: Response;
   try {
-    response = await fetch(`/api/terminal/trade/${action}`, {
+    response = await fetch(path, {
       method: "POST",
       headers: { "content-type": "application/json", ...(pass ? { [WEB_TRADE_PASS_HEADER]: pass } : {}) },
       credentials: "same-origin",
@@ -237,7 +263,14 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
   }
   const result = await readEnvelope<WebTradeOrderResult>(response, "The broker did not answer.");
   if (!result.timing) return result;
-  return { ...result, timing: { ...result.timing, totalMs: Math.max(0, Math.round(clockMs() - startedAt)) } };
+  return {
+    ...result,
+    timing: {
+      ...result.timing,
+      ...browserOrderTiming(path, startedAt, response),
+      totalMs: Math.max(0, Math.round(clockMs() - startedAt)),
+    },
+  };
 }
 
 const WARM_EVERY_MS = 4 * 60_000;

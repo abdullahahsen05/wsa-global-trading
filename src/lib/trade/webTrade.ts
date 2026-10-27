@@ -297,6 +297,15 @@ export interface WebTradeTiming {
   wake?: "live" | "web-poll" | "aws-poll" | "direct";
   /** browser: from the click to the answer (added by the panel's request helper) */
   totalMs?: number;
+  /** browser Resource Timing: before the HTTP request starts (connection setup, browser queueing) */
+  browserSetupMs?: number;
+  /** browser Resource Timing: request start to first response byte; includes server and broker work */
+  browserFirstByteMs?: number;
+  /** browser Resource Timing: first response byte to the complete response */
+  browserDownloadMs?: number;
+  /** Vercel edge and function region codes, when exposed by the response header */
+  edgeRegion?: string;
+  functionRegion?: string;
 }
 
 /** What the broker said about the order, for showing the result before the next picture arrives. */

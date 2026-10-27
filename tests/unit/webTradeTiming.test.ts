@@ -92,6 +92,19 @@ describe("the time report of an order", () => {
       expect(timingText({ ...whole, awsDbMs: 14 })).toBe(`${plain}${tail} Database round trip: AWS 14 ms.`);
     });
 
+    test("browser resource timing identifies setup and first-byte delay without calling it broker time", () => {
+      expect(timingText({
+        ...whole,
+        browserSetupMs: 35,
+        browserFirstByteMs: 580,
+        browserDownloadMs: 4,
+        edgeRegion: "SIN1",
+        functionRegion: "LHR1",
+      })).toBe(
+        `${plain}${tail} Browser request: setup 35 ms · first byte 580 ms (includes server and broker) · download 4 ms. Route: SIN1 edge → LHR1 function.`,
+      );
+    });
+
     test("a busy AWS worker is named only when its loop really ran late", () => {
       expect(timingText({ ...whole, awsLoopMs: 3 })).toBe(`${plain}${tail}`);
       expect(timingText({ ...whole, awsLoopMs: 19 })).toBe(`${plain}${tail}`);
@@ -101,6 +114,7 @@ describe("the time report of an order", () => {
 
     test("how the command and its answer found each other: live, or which side still asks again and again", () => {
       expect(timingText({ ...whole, wake: "live" })).toBe(`${plain}${tail} Wake-up: live.`);
+      expect(timingText({ ...whole, wake: "direct" })).toBe(`${plain}${tail} Wake-up: direct.`);
       expect(timingText({ ...whole, wake: "web-poll" })).toBe(
         `${plain}${tail} Wake-up: the web server still asks the database again and again - apply migration 062.`,
       );

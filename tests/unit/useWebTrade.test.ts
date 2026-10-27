@@ -90,6 +90,41 @@ describe("sending an order", () => {
     expect(result.timing?.totalMs).toBeGreaterThanOrEqual(0);
   });
 
+  test("partitions the browser request and names the edge and function without changing the order", async () => {
+    vi.stubGlobal("window", { location: { href: "https://wsa.example/terminal" } });
+    vi.stubGlobal("performance", {
+      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1250),
+      getEntriesByName: vi.fn().mockReturnValue([{ startTime: 1000, requestStart: 1040, responseStart: 1220, responseEnd: 1230 }]),
+    });
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true, data: { ok: true, ticket: "9001", timing: { queueMs: 30, runMs: 80 } } }), {
+        headers: { "content-type": "application/json", "x-vercel-id": "sin1::lhr1::request-id" },
+      }),
+    );
+
+    const result = await sendWebTrade("open", { accountId: "a" });
+
+    expect(result.timing).toMatchObject({
+      totalMs: 250,
+      browserSetupMs: 40,
+      browserFirstByteMs: 180,
+      browserDownloadMs: 10,
+      edgeRegion: "SIN1",
+      functionRegion: "LHR1",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("a browser timing API failure cannot hide an order that the broker already answered", async () => {
+    vi.stubGlobal("window", { location: { href: "https://wsa.example/terminal" } });
+    vi.stubGlobal("performance", { now: () => 1000, getEntriesByName: () => { throw new Error("timing unavailable"); } });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ ok: true, data: { ok: true, ticket: "9001", timing: { queueMs: 30, runMs: 80 } } }),
+    );
+
+    await expect(sendWebTrade("open", { accountId: "a" })).resolves.toMatchObject({ ok: true, ticket: "9001" });
+  });
+
   test("a null time report stays null", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true, data: { ok: true, ticket: "9001", timing: null } }));
 
