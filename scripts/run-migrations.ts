@@ -1,10 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { Client } from 'pg'
+import { resolveMigrationTarget } from './supabase-migration-target'
 
-const DB_HOST = 'db.brtdyxidblyimqteduph.supabase.co'
-const DB_PORT = 5432
-const DB_USER = 'postgres'
 function loadLocalEnv(): Record<string, string> {
   const values: Record<string, string> = {}
   try {
@@ -22,9 +20,7 @@ function loadLocalEnv(): Record<string, string> {
 }
 
 const localEnv = loadLocalEnv()
-const DB_PASSWORD = process.env.SUPABASE_DB_PASSWORD ?? localEnv.SUPABASE_DB_PASSWORD
-if (!DB_PASSWORD) throw new Error('SUPABASE_DB_PASSWORD env var is required.')
-const DB_NAME = 'postgres'
+const target = resolveMigrationTarget({ ...localEnv, ...process.env })
 
 const migrationsDir = join(process.cwd(), 'supabase', 'migrations')
 const requestedMigrations = new Set(process.argv.slice(2))
@@ -39,17 +35,17 @@ if (requestedMigrations.size > 0 && ALL_MIGRATIONS.length !== requestedMigration
 
 async function runMigrations() {
   const client = new Client({
-    host: DB_HOST,
-    port: DB_PORT,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    database: DB_NAME,
+    host: target.host,
+    port: target.port,
+    user: target.user,
+    password: target.password,
+    database: target.database,
     ssl: { rejectUnauthorized: false },
   })
 
   try {
     await client.connect()
-    console.log('Connected to Supabase Postgres\n')
+    console.log(`Connected to Supabase project ${target.projectRef}\n`)
 
     // Create a simple migrations tracking table if it does not exist
     await client.query(`
