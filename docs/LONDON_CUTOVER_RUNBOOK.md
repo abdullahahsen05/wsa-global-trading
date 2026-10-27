@@ -1,6 +1,6 @@
 # Seoul → London Supabase cutover: execution checklist
 
-Production is still `platformtrade` (`brtdyxidblyimqteduph`, Seoul). The approved London project is `platformtrade-london-stage` (`vyuyifegaacqigkzgiws`). This document does **not** authorize starting a cutover without the client's explicit maintenance-window and master-trading pause confirmation. No live-money test orders are included.
+The production cutover completed on 2026-10-27 after the client confirmed master-trading and web-write pauses. Production now uses the London project `platformtrade-london-stage` (`vyuyifegaacqigkzgiws`); the former Seoul project `platformtrade` (`brtdyxidblyimqteduph`) is retained for reconciliation/rollback. This checklist records the controlled procedure and does **not** authorize another cutover or a live-money test order. Broker-confirmed production latency remains to be measured.
 
 ## Before touching production
 
