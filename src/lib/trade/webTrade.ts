@@ -297,6 +297,10 @@ export interface WebTradeTiming {
   wake?: "live" | "web-poll" | "aws-poll" | "direct";
   /** browser: from the click to the answer (added by the panel's request helper) */
   totalMs?: number;
+  /** browser clock: order request start to response headers; includes hosting, server, and broker work */
+  browserToHeadersMs?: number;
+  /** browser clock: response headers to the parsed answer */
+  browserReadMs?: number;
   /** browser Resource Timing: before the HTTP request starts (connection setup, browser queueing) */
   browserSetupMs?: number;
   /** browser Resource Timing: request start to first response byte; includes server and broker work */

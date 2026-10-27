@@ -105,6 +105,12 @@ describe("the time report of an order", () => {
       );
     });
 
+    test("browser clock fallback distinguishes the fetch from reading the answer", () => {
+      expect(timingText({ ...whole, browserToHeadersMs: 650, browserReadMs: 10 })).toBe(
+        `${plain}${tail} Browser request: to response headers 650 ms (includes server and broker) · read answer 10 ms.`,
+      );
+    });
+
     test("a busy AWS worker is named only when its loop really ran late", () => {
       expect(timingText({ ...whole, awsLoopMs: 3 })).toBe(`${plain}${tail}`);
       expect(timingText({ ...whole, awsLoopMs: 19 })).toBe(`${plain}${tail}`);

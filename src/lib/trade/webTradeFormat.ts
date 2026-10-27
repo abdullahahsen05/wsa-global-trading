@@ -109,6 +109,10 @@ function factsText(timing: WebTradeTiming): string {
     sentences.push(
       `Browser request: setup ${formatDuration(timing.browserSetupMs)} · first byte ${formatDuration(timing.browserFirstByteMs)} (includes server and broker) · download ${formatDuration(timing.browserDownloadMs)}.`,
     );
+  } else if (isMs(timing.browserToHeadersMs) && isMs(timing.browserReadMs)) {
+    sentences.push(
+      `Browser request: to response headers ${formatDuration(timing.browserToHeadersMs)} (includes server and broker) · read answer ${formatDuration(timing.browserReadMs)}.`,
+    );
   }
   if (timing.edgeRegion && timing.functionRegion) {
     sentences.push(`Route: ${timing.edgeRegion} edge → ${timing.functionRegion} function.`);

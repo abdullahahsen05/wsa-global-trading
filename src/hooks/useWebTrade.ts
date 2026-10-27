@@ -261,14 +261,18 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
       action !== "modify",
     );
   }
+  const headersAt = clockMs();
   const result = await readEnvelope<WebTradeOrderResult>(response, "The broker did not answer.");
   if (!result.timing) return result;
+  const answeredAt = clockMs();
   return {
     ...result,
     timing: {
       ...result.timing,
       ...browserOrderTiming(path, startedAt, response),
-      totalMs: Math.max(0, Math.round(clockMs() - startedAt)),
+      browserToHeadersMs: Math.max(0, Math.round(headersAt - startedAt)),
+      browserReadMs: Math.max(0, Math.round(answeredAt - headersAt)),
+      totalMs: Math.max(0, Math.round(answeredAt - startedAt)),
     },
   };
 }

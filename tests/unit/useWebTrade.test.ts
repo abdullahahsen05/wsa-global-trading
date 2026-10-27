@@ -93,7 +93,7 @@ describe("sending an order", () => {
   test("partitions the browser request and names the edge and function without changing the order", async () => {
     vi.stubGlobal("window", { location: { href: "https://wsa.example/terminal" } });
     vi.stubGlobal("performance", {
-      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1250),
+      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1220).mockReturnValueOnce(1250),
       getEntriesByName: vi.fn().mockReturnValue([{ startTime: 1000, requestStart: 1040, responseStart: 1220, responseEnd: 1230 }]),
     });
     fetchMock.mockResolvedValueOnce(
@@ -106,6 +106,8 @@ describe("sending an order", () => {
 
     expect(result.timing).toMatchObject({
       totalMs: 250,
+      browserToHeadersMs: 220,
+      browserReadMs: 30,
       browserSetupMs: 40,
       browserFirstByteMs: 180,
       browserDownloadMs: 10,
@@ -123,6 +125,21 @@ describe("sending an order", () => {
     );
 
     await expect(sendWebTrade("open", { accountId: "a" })).resolves.toMatchObject({ ok: true, ticket: "9001" });
+  });
+
+  test("the browser clock still reports fetch and response time when resource timing is missing", async () => {
+    vi.stubGlobal("window", { location: { href: "https://wsa.example/terminal" } });
+    vi.stubGlobal("performance", {
+      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1650).mockReturnValueOnce(1660),
+      getEntriesByName: () => [],
+    });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ ok: true, data: { ok: true, ticket: "9001", timing: { queueMs: 30, runMs: 80 } } }),
+    );
+
+    const result = await sendWebTrade("close", { accountId: "a" });
+
+    expect(result.timing).toMatchObject({ totalMs: 660, browserToHeadersMs: 650, browserReadMs: 10 });
   });
 
   test("a null time report stays null", async () => {
