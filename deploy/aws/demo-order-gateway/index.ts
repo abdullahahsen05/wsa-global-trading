@@ -29,7 +29,13 @@ function same(a: Buffer, b: Buffer): boolean {
 function reply(statusCode: number, data: unknown) {
   return {
     statusCode,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store, max-age=0" },
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "private, no-store, max-age=0",
+      // Match the HTTP API's CORS allowlist so the live panel can read Resource Timing
+      // for this cross-origin pilot without exposing timing to unrelated sites.
+      "timing-allow-origin": "https://wsa-global-trading-platform.vercel.app",
+    },
     body: JSON.stringify(data),
   };
 }

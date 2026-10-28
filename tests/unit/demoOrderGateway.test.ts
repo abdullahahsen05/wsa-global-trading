@@ -86,6 +86,7 @@ describe("demo AWS order gateway", () => {
       headers: { authorization: "Bearer warm", "x-wsa-pass": "warm" }, body: "{}",
     });
     expect(response.statusCode).toBe(200);
+    expect(response.headers["timing-allow-origin"]).toBe("https://wsa-global-trading-platform.vercel.app");
     expect(warmDirectLane).toHaveBeenCalledOnce();
     expect(sendDirect).not.toHaveBeenCalled();
   });
