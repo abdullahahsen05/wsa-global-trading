@@ -4,6 +4,7 @@ import {
   demoOrderCandidate,
   demoPilotPassFresh,
   demoPilotRequest,
+  isGatewayThrottleRefusal,
   newRequestId,
   nextStatePollMs,
   requestFastRefresh,
@@ -195,6 +196,14 @@ describe("sending an order", () => {
 });
 
 describe("the demo pilot's short safety window", () => {
+  test("only API Gateway's exact pre-invocation throttle is safe to retry through the standard route", () => {
+    expect(isGatewayThrottleRefusal(429, { message: "Too Many Requests" })).toBe(true);
+    expect(isGatewayThrottleRefusal(429, { ok: false, error: { code: "BROKER_ERROR" } })).toBe(false);
+    expect(isGatewayThrottleRefusal(503, { message: "Service Unavailable" })).toBe(false);
+    expect(isGatewayThrottleRefusal(429, { message: "Too Many Requests", error: {} })).toBe(false);
+    expect(isGatewayThrottleRefusal(429, null)).toBe(false);
+  });
+
   test("only the selected demo account can route its Terminal actions through AWS", () => {
     const accountId = "test-one";
     const base = { accountId, clientRequestId: "request-12345678" };

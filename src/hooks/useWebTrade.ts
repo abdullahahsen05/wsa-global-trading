@@ -32,6 +32,13 @@ export const WEB_TRADE_HISTORY_QUERY_KEY = "terminal-web-trade-history";
 
 type Envelope<T> = { ok?: boolean; data?: T; error?: { code?: string; message?: string; notSent?: boolean } };
 
+/** API Gateway's own throttle response is emitted before Lambda invokes the worker. */
+export function isGatewayThrottleRefusal(status: number, body: unknown): boolean {
+  if (status !== 429 || !body || typeof body !== "object" || Array.isArray(body)) return false;
+  const fields = body as Record<string, unknown>;
+  return Object.keys(fields).length === 1 && fields.message === "Too Many Requests";
+}
+
 /** A failed WSA Trade request. `uncertain`: the request may have reached the broker even though no answer came back. */
 export class WebTradeRequestError extends Error {
   constructor(
@@ -323,9 +330,11 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
         if (!response.ok) {
           const failure = await response.clone().json().catch(() => null) as Envelope<unknown> | null;
           // Only an explicit pre-execution refusal may retry the same request id on the established Vercel route.
-          if (failure?.error?.notSent === true) {
-            const code = failure.error.code;
-            pilotFallback = typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : "NOT_SENT";
+          if (failure?.error?.notSent === true || isGatewayThrottleRefusal(response.status, failure)) {
+            const code = failure?.error?.code;
+            pilotFallback = isGatewayThrottleRefusal(response.status, failure)
+              ? "AWS_THROTTLED"
+              : typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : "NOT_SENT";
             pilotAttemptMs = Math.max(0, Math.round(clockMs() - requestStartedAt));
             path = `/api/terminal/trade/${action}`;
             response = undefined;
