@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   WebTradeRequestError,
+  demoOrderCandidate,
   demoPilotPassFresh,
   demoPilotRequest,
   newRequestId,
@@ -194,6 +195,21 @@ describe("sending an order", () => {
 });
 
 describe("the demo pilot's short safety window", () => {
+  test("only the selected demo account can route its Terminal actions through AWS", () => {
+    const accountId = "test-one";
+    const base = { accountId, clientRequestId: "request-12345678" };
+    const candidate = (action: "open" | "close" | "modify" | "cancel" | "close-bulk", body: Record<string, unknown>) =>
+      demoOrderCandidate(action, body, "https://aws.example/demo/open", accountId);
+    for (const action of ["close", "modify", "cancel", "close-bulk"] as const) {
+      expect(candidate(action, base)).toBe(true);
+      expect(candidate(action, { ...base, accountId: "another-account" })).toBe(false);
+      expect(candidate(action, { accountId })).toBe(false);
+    }
+    expect(candidate("open", { ...base, volume: 0.01, orderKind: "MARKET" })).toBe(true);
+    expect(candidate("open", { ...base, volume: 0.02 })).toBe(false);
+    expect(candidate("open", { ...base, volume: 0.01, orderKind: "LIMIT" })).toBe(false);
+  });
+
   test("a signed pass can still be usable by Vercel while its three-second pilot risk clearance has expired", () => {
     const now = 1_000_000;
     const pass = (until: number, riskUntil: number) =>
@@ -201,6 +217,7 @@ describe("the demo pilot's short safety window", () => {
 
     expect(demoPilotPassFresh(pass(now + 8_000, now + 3_000), now)).toBe(true);
     expect(demoPilotPassFresh(pass(now + 8_000, now + 900), now)).toBe(false);
+    expect(demoPilotPassFresh(pass(now + 8_000, now + 900), now, false)).toBe(true);
     expect(demoPilotPassFresh(pass(now + 900, now + 3_000), now)).toBe(false);
     expect(demoPilotPassFresh("broken", now)).toBe(false);
   });
@@ -212,7 +229,8 @@ describe("the demo pilot's short safety window", () => {
     expect(request.headers).toEqual({ "content-type": "text/plain" });
     expect(request.credentials).toBe("omit");
     expect(request.cache).toBeUndefined();
-    expect(JSON.parse(String(request.body))).toEqual({ order, token: "session-token", pass: "signed-pass" });
+    expect(JSON.parse(String(request.body))).toEqual({ action: "open", order, token: "session-token", pass: "signed-pass" });
+    expect(JSON.parse(String(demoPilotRequest(order, "session-token", "signed-pass", "close").body)).action).toBe("close");
   });
 });
 

@@ -1,6 +1,6 @@
 /**
- * Demo-only AWS order pilot. Only one allowlisted MT5 demo account can submit a
- * 0.01-lot market OPEN. The browser presents the short-lived WSA order pass plus
+ * Demo-only AWS order pilot. Only one allowlisted MT5 demo account can submit
+ * Terminal changes; new orders remain limited to 0.01-lot MARKET opens. The browser presents the short-lived WSA order pass plus
  * the very Supabase access token it was bound to; neither grants access alone.
  * No provider credential or direct-lane signing secret is sent to the browser.
  */
@@ -8,7 +8,10 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { DIRECT_LANE_VERSION, DIRECT_ORDER_TTL_MS, type DirectRequest } from "../../../src/lib/gateway/directLane";
 import { sendDirect, warmDirectLane } from "../../../src/lib/gateway/directLaneClient";
 import { parseTradeCommand, TradeCommandError } from "../../../src/lib/gateway/tradeCommands";
-import { webTradeOpenSchema } from "../../../src/lib/trade/webTradeSchemas";
+import {
+  webTradeCancelSchema, webTradeCloseBulkSchema, webTradeCloseSchema,
+  webTradeModifySchema, webTradeOpenSchema,
+} from "../../../src/lib/trade/webTradeSchemas";
 
 type GatewayEvent = {
   rawPath?: string;
@@ -22,6 +25,14 @@ type Claims = { user: string; role: string; account: string; token: string; unti
 type PassResult = { ok: true; claims: Claims } | { ok: false; reason: "config" | "malformed" | "signature" | "scope" | "expired" | "risk_expired" | "token_mismatch" | "session" };
 const MAX_BODY_BYTES = 16 * 1024;
 const WSA_WEB_ORIGIN = "https://wsa-global-trading-platform.vercel.app";
+const ACTIONS = {
+  open: { kind: "OPEN", audit: "AWS_DEMO_OPEN", schema: webTradeOpenSchema },
+  close: { kind: "CLOSE", audit: "AWS_DEMO_CLOSE", schema: webTradeCloseSchema },
+  modify: { kind: "MODIFY", audit: "AWS_DEMO_MODIFY", schema: webTradeModifySchema },
+  cancel: { kind: "CANCEL", audit: "AWS_DEMO_CANCEL", schema: webTradeCancelSchema },
+  "close-bulk": { kind: "CLOSE_BULK", audit: "AWS_DEMO_CLOSE_BULK", schema: webTradeCloseBulkSchema },
+} as const;
+type DemoAction = keyof typeof ACTIONS;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function same(a: Buffer, b: Buffer): boolean {
@@ -46,7 +57,7 @@ function fail(code: string, message: string, statusCode: number, notSent = false
   return reply(statusCode, { ok: false, error: { code, message, ...(notSent ? { notSent: true } : {}) } });
 }
 
-function passFor(value: string | undefined, token: string, account: string, now: number): PassResult {
+function passFor(value: string | undefined, token: string, account: string, now: number, requireRisk: boolean): PassResult {
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!secret) return { ok: false, reason: "config" };
   if (!value || value.length > 2048 || token.length > 8192) return { ok: false, reason: "malformed" };
@@ -76,7 +87,7 @@ function passFor(value: string | undefined, token: string, account: string, now:
   if (typeof claims.until !== "number" || !Number.isFinite(claims.until) || claims.until <= now || claims.until > now + 8_000) {
     return { ok: false, reason: "expired" };
   }
-  if (typeof claims.riskUntil !== "number" || !Number.isFinite(claims.riskUntil) || claims.riskUntil <= now || claims.riskUntil > claims.until) {
+  if (requireRisk && (typeof claims.riskUntil !== "number" || !Number.isFinite(claims.riskUntil) || claims.riskUntil <= now || claims.riskUntil > claims.until)) {
     return { ok: false, reason: "risk_expired" };
   }
   if (claims.token !== tokenHash) return { ok: false, reason: "token_mismatch" };
@@ -129,14 +140,23 @@ export async function handler(event: GatewayEvent) {
   try { raw = JSON.parse(rawBody); } catch { return fail("VALIDATION_ERROR", "Invalid order.", 400, true); }
   const simpleBody = simplePilot && raw && typeof raw === "object" && !Array.isArray(raw)
     ? raw as Record<string, unknown> : null;
-  const parsed = webTradeOpenSchema.safeParse(simplePilot ? simpleBody?.order : raw);
+  // Legacy header-based clients remain OPEN-only during the staged rollout.
+  const requestedAction = simplePilot ? (simpleBody?.action ?? "open") : "open";
+  if (typeof requestedAction !== "string" || !(requestedAction in ACTIONS)) {
+    return fail("VALIDATION_ERROR", "Unknown trade action.", 400, true);
+  }
+  const action = requestedAction as DemoAction;
+  const actionInfo = ACTIONS[action];
+  const parsed = actionInfo.schema.safeParse(simplePilot ? simpleBody?.order : raw);
   if (!parsed.success) return fail("VALIDATION_ERROR", "Invalid order.", 400, true);
-  const order = parsed.data;
-  if (
-    order.accountId !== process.env.WSA_DEMO_ACCOUNT_ID ||
-    (order.orderKind ?? "MARKET") !== "MARKET" ||
-    order.volume !== 0.01
-  ) return fail("DEMO_ONLY", "This pilot is limited to 0.01-lot market orders on the test demo account.", 403, true);
+  const order = parsed.data as { accountId: string; clientRequestId?: string; [key: string]: unknown };
+  if (order.accountId !== process.env.WSA_DEMO_ACCOUNT_ID) {
+    return fail("DEMO_ONLY", "This pilot is limited to the test demo account.", 403, true);
+  }
+  if (action === "open" && ((order.orderKind ?? "MARKET") !== "MARKET" || order.volume !== 0.01)) {
+    return fail("DEMO_ONLY", "This pilot is limited to 0.01-lot market opens.", 403, true);
+  }
+  if (!order.clientRequestId) return fail("VALIDATION_ERROR", "Request id is required.", 400, true);
 
   const authorization = event.headers?.authorization ?? "";
   const token = simplePilot
@@ -145,7 +165,7 @@ export async function handler(event: GatewayEvent) {
   const signedPass = simplePilot
     ? (typeof simpleBody?.pass === "string" ? simpleBody.pass : undefined)
     : event.headers?.["x-wsa-pass"];
-  const checkedPass = passFor(signedPass, token, order.accountId, Date.now());
+  const checkedPass = passFor(signedPass, token, order.accountId, Date.now(), action === "open");
   if (!checkedPass.ok) {
     console.info(`[demo-order] pass refused: ${checkedPass.reason}`);
     return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
@@ -156,11 +176,7 @@ export async function handler(event: GatewayEvent) {
   }
   let command;
   try {
-    command = parseTradeCommand("OPEN", {
-      symbol: order.symbol, side: order.side, volume: order.volume,
-      orderKind: "MARKET", price: null,
-      stopLoss: order.stopLoss ?? null, takeProfit: order.takeProfit ?? null,
-    });
+    command = parseTradeCommand(actionInfo.kind, order);
   } catch (error) {
     return fail("VALIDATION_ERROR", error instanceof TradeCommandError ? error.message : "Invalid order.", 400, true);
   }
@@ -168,12 +184,12 @@ export async function handler(event: GatewayEvent) {
     v: DIRECT_LANE_VERSION,
     userId: claims.user,
     accountId: order.accountId,
-    kind: "OPEN",
+    kind: command.kind,
     payload: command.payload,
     clientRequestId: order.clientRequestId,
     ttlMs: DIRECT_ORDER_TTL_MS,
     attempt: 1,
-    audit: "AWS_DEMO_OPEN",
+    audit: actionInfo.audit,
   };
   const sentAt = Date.now();
   const lane = { base: directUrl.replace(/\/+$/, ""), secret: directSecret };
@@ -186,11 +202,15 @@ export async function handler(event: GatewayEvent) {
     return fail("ORDER_UNCERTAIN", "The order may have reached the broker. Check open positions before retrying.", 504);
   }
   if (!sent.reply.ok) {
-    return fail(sent.reply.error.code, sent.reply.error.message, sent.reply.error.statusCode);
+    return fail(sent.reply.error.code, sent.reply.error.message, sent.reply.error.statusCode, sent.reply.notSent === true);
   }
   const brokerAnsweredAt = Date.now();
   const outcome = sent.reply.outcome;
   const repeated = sent.reply.repeated === true;
+  if (action === "close-bulk" && (outcome.closed ?? 0) === 0 && (outcome.failed ?? 0) > 0) {
+    const first = outcome.failures?.[0]?.message;
+    return fail("BULK_FAILED", first ? `Nothing could be closed: ${first}` : "Nothing could be closed.", 502);
+  }
   console.info(
     `[demo-order] confirmed ${request.clientRequestId.slice(0, 8)} worker ${brokerAnsweredAt - sentAt}ms` +
     ` queue ${outcome.timing?.queueMs ?? "?"}ms broker ${outcome.timing?.runMs ?? "?"}ms`,
@@ -200,6 +220,10 @@ export async function handler(event: GatewayEvent) {
     ticket: outcome.ticket ?? null,
     ...(outcome.note ? { note: outcome.note } : {}),
     ...(outcome.detail ? { detail: outcome.detail } : {}),
+    ...(outcome.closed !== undefined ? {
+      closed: outcome.closed, failed: outcome.failed ?? 0,
+      ...(outcome.failures?.length ? { failures: outcome.failures } : {}),
+    } : {}),
     ...(repeated ? { repeated: true } : {}),
     ...(outcome.timing ? {
       timing: {

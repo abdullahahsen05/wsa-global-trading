@@ -212,39 +212,44 @@ const DEMO_ACCOUNT_ID = process.env.NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID?.trim() ?? "
 const PILOT_PASS_MIN_REMAINING_MS = 1_000;
 
 /** Only a routing hint: the AWS gateway still verifies the signature, session, account, and current risk window. */
-export function demoPilotPassFresh(pass: string, now: number = Date.now()): boolean {
+export function demoPilotPassFresh(pass: string, now: number = Date.now(), requireRisk = true): boolean {
   try {
     if (pass.length > 2_048) return false;
     const body = pass.slice(0, pass.indexOf("."));
     if (!body) return false;
     const claims = JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/"))) as { until?: unknown; riskUntil?: unknown };
     return typeof claims.until === "number" && claims.until > now + PILOT_PASS_MIN_REMAINING_MS &&
-      typeof claims.riskUntil === "number" && claims.riskUntil > now + PILOT_PASS_MIN_REMAINING_MS;
+      (!requireRisk || (typeof claims.riskUntil === "number" && claims.riskUntil > now + PILOT_PASS_MIN_REMAINING_MS));
   } catch {
     return false;
   }
 }
 
-function demoOrderCandidate(action: WebTradeAction, body: Record<string, unknown>): boolean {
+export function demoOrderCandidate(
+  action: WebTradeAction,
+  body: Record<string, unknown>,
+  pilotUrl: string = DEMO_ORDER_URL,
+  pilotAccountId: string = DEMO_ACCOUNT_ID,
+): boolean {
   return Boolean(
-    DEMO_ORDER_URL && DEMO_ACCOUNT_ID && action === "open" && body.accountId === DEMO_ACCOUNT_ID &&
-    body.volume === 0.01 && (body.orderKind === undefined || body.orderKind === "MARKET") &&
-    typeof body.clientRequestId === "string",
+    pilotUrl && pilotAccountId && body.accountId === pilotAccountId &&
+    typeof body.clientRequestId === "string" &&
+    (action !== "open" || (body.volume === 0.01 && (body.orderKind === undefined || body.orderKind === "MARKET"))),
   );
 }
 
-/** Only the explicit 0.01-lot demo market order may use the AWS browser pilot. */
+/** Only this one demo account may use the AWS browser pilot; new orders stay at 0.01 market lots. */
 function eligibleForDemoOrderRoute(action: WebTradeAction, body: Record<string, unknown>, pass: string | null): boolean {
-  return demoOrderCandidate(action, body) && pass !== null && demoPilotPassFresh(pass);
+  return demoOrderCandidate(action, body) && pass !== null && demoPilotPassFresh(pass, Date.now(), action === "open");
 }
 
 /** Same signed credentials as before, carried only in an HTTPS body so the browser need not preflight. */
-export function demoPilotRequest(body: Record<string, unknown>, token: string, pass: string): RequestInit {
+export function demoPilotRequest(body: Record<string, unknown>, token: string, pass: string, action: WebTradeAction = "open"): RequestInit {
   return {
     method: "POST",
     headers: { "content-type": "text/plain" },
     credentials: "omit",
-    body: JSON.stringify({ order: body, token, pass }),
+    body: JSON.stringify({ action, order: body, token, pass }),
   };
 }
 
@@ -304,7 +309,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
   let requestStartedAt = startedAt;
   let path = `/api/terminal/trade/${action}`;
   const pass = passOf(body.accountId);
-  let pilotFallback: string | undefined = demoOrderCandidate(action, body) && pass && !demoPilotPassFresh(pass)
+  let pilotFallback: string | undefined = demoOrderCandidate(action, body) && pass && !demoPilotPassFresh(pass, Date.now(), action === "open")
     ? "STALE_PASS" : undefined;
   let pilotAttemptMs: number | undefined;
   let response: Response | undefined;
@@ -314,7 +319,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
       if (session?.access_token) {
         path = DEMO_ORDER_URL;
         requestStartedAt = clockMs();
-        response = await fetch(path, demoPilotRequest(body, session.access_token, pass as string));
+        response = await fetch(path, demoPilotRequest(body, session.access_token, pass as string, action));
         if (!response.ok) {
           const failure = await response.clone().json().catch(() => null) as Envelope<unknown> | null;
           // Only an explicit pre-execution refusal may retry the same request id on the established Vercel route.
@@ -351,7 +356,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
     throw new WebTradeRequestError(
       "NETWORK_ERROR",
       "The connection dropped before an answer came back.",
-      action !== "modify",
+      path === DEMO_ORDER_URL || action !== "modify",
     );
   }
   const headersAt = clockMs();
@@ -385,7 +390,7 @@ const HOT_ACTIONS: readonly WebTradeAction[] = ["open", "close", "modify"];
  */
 export function warmWebTradeRoutes(accountId: string | null = null, actions: readonly WebTradeAction[] = WEB_TRADE_ACTIONS): void {
   if (typeof fetch !== "function") return;
-  if (accountId === DEMO_ACCOUNT_ID && DEMO_ORDER_URL && actions.includes("open")) {
+  if (accountId === DEMO_ACCOUNT_ID && DEMO_ORDER_URL && actions.some((action) => HOT_ACTIONS.includes(action))) {
     // Prime the browser connection and signed worker connection without a preflight or order.
     void fetch(DEMO_ORDER_URL, {
       method: "POST",

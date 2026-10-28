@@ -30,13 +30,13 @@ function authEvent(riskReadAt: number | null = Date.now(), body: unknown = order
   };
 }
 
-function simpleEvent(riskReadAt: number | null = Date.now(), body: unknown = order) {
+function simpleEvent(riskReadAt: number | null = Date.now(), body: unknown = order, action = "open") {
   const legacy = authEvent(riskReadAt, body);
   return {
     rawPath: legacy.rawPath,
     requestContext: legacy.requestContext,
     headers: { "content-type": "text/plain;charset=UTF-8", origin: "https://wsa-global-trading-platform.vercel.app" },
-    body: JSON.stringify({ order: body, token: legacy.headers.authorization.slice(7), pass: legacy.headers["x-wsa-pass"] }),
+    body: JSON.stringify({ action, order: body, token: legacy.headers.authorization.slice(7), pass: legacy.headers["x-wsa-pass"] }),
   };
 }
 
@@ -118,6 +118,42 @@ describe("demo AWS order gateway", () => {
     expect(JSON.parse(response.body).data.ticket).toBe("123");
     expect(sendDirect).toHaveBeenCalledOnce();
     expect(vi.mocked(sendDirect).mock.calls[0][1]).toMatchObject({ audit: "AWS_DEMO_OPEN" });
+  });
+
+  it.each([
+    ["close", { accountId: account, ticket: "9001", volume: 0.005, clientRequestId: order.clientRequestId }, "CLOSE", "AWS_DEMO_CLOSE"],
+    ["modify", { accountId: account, ticket: "9001", stopLoss: 2400, clientRequestId: order.clientRequestId }, "MODIFY", "AWS_DEMO_MODIFY"],
+    ["cancel", { accountId: account, ticket: "9001", clientRequestId: order.clientRequestId }, "CANCEL", "AWS_DEMO_CANCEL"],
+    ["close-bulk", { accountId: account, scope: "ALL", clientRequestId: order.clientRequestId }, "CLOSE_BULK", "AWS_DEMO_CLOSE_BULK"],
+  ] as const)("routes a %s on the demo account with the same durable reservation", async (action, body, kind, audit) => {
+    vi.mocked(sendDirect).mockResolvedValue({
+      kind: "answered", ms: 70,
+      reply: { ok: true, outcome: { ticket: "9001", closed: action === "close-bulk" ? 1 : undefined,
+        timing: { queueMs: 20, runMs: 50, sendMs: 45 } } },
+    });
+    // A risk-blocked account may still reduce or close positions.
+    const response = await handler(simpleEvent(null, body, action));
+    expect(response.statusCode).toBe(200);
+    expect(sendDirect).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendDirect).mock.calls[0][1]).toMatchObject({
+      kind, audit, accountId: account, clientRequestId: order.clientRequestId,
+    });
+  });
+
+  it("requires a durable id for a close and never sends a malformed pilot command", async () => {
+    const response = await handler(simpleEvent(null, { accountId: account, ticket: "9001" }, "close"));
+    expect(response.statusCode).toBe(400);
+    expect(sendDirect).not.toHaveBeenCalled();
+  });
+
+  it("does not turn a broker-attempted bulk failure into a fallback", async () => {
+    vi.mocked(sendDirect).mockResolvedValue({
+      kind: "answered", ms: 70,
+      reply: { ok: true, outcome: { closed: 0, failed: 1, failures: [{ ticket: "9001", symbol: "XAUUSD", message: "market closed" }] } },
+    });
+    const response = await handler(simpleEvent(null, { accountId: account, scope: "ALL", clientRequestId: order.clientRequestId }, "close-bulk"));
+    expect(response.statusCode).toBe(502);
+    expect(JSON.parse(response.body).error.notSent).toBeUndefined();
   });
 
   it("refuses a simple order from any other origin before the broker", async () => {

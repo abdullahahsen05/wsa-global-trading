@@ -183,6 +183,7 @@ interface RunOptions {
 
 /** How long an order whose answer never came may be re-sent with the same id. */
 const RETRY_ID_MS = 90_000;
+const DEMO_PILOT_ACCOUNT_ID = process.env.NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID?.trim() ?? "";
 
 export interface WsaTradePanelProps {
   settings: WsaTradeWorkspace;
@@ -501,13 +502,18 @@ export function WsaTradePanel({
     options: RunOptions = {},
   ) {
     if (busyRef.current) return;
+    // The demo pilot needs the same durable id on an uncertain retry, including
+    // close/modify/cancel. Other accounts keep their established request shape.
+    const pilotAttempt = DEMO_PILOT_ACCOUNT_ID && body.accountId === DEMO_PILOT_ACCOUNT_ID;
+    const attempt = options.retry ?? (pilotAttempt ? idFor(JSON.stringify([action, body])) : null);
+    const requestBody = body.clientRequestId || !attempt ? body : { ...body, clientRequestId: attempt.id };
     busyRef.current = true;
     setBusy(true);
     setProblem(null);
     setNotice(null);
     try {
-      const result = await sendWebTrade(action, body);
-      if (options.retry && retryId.current?.key === options.retry.key) retryId.current = null;
+      const result = await sendWebTrade(action, requestBody);
+      if (attempt && retryId.current?.key === attempt.key) retryId.current = null;
       const base = result.repeated
         ? "This order had already been sent - nothing was sent twice."
         : typeof success === "function"
@@ -532,7 +538,7 @@ export function WsaTradePanel({
     } catch (error) {
       const message = error instanceof Error ? error.message : "The request failed.";
       const uncertain = error instanceof WebTradeRequestError ? error.uncertain : false;
-      if (uncertain && options.retry) retryId.current = { ...options.retry, at: currentTimeMs() };
+      if (uncertain && attempt) retryId.current = { ...attempt, at: currentTimeMs() };
       setProblem({ message, uncertain });
       log("error", message);
     } finally {
