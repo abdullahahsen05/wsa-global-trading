@@ -347,7 +347,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
           } else if (!failure?.error?.code) {
             throw new WebTradeRequestError(
               "ORDER_UNCERTAIN",
-              "The demo route did not return a clear answer. Check open positions before retrying.",
+              "The direct trading route did not return a clear answer. Check open positions before retrying.",
               true,
             );
           }

@@ -122,7 +122,7 @@ export async function handler(event: GatewayEvent) {
     return fail("NOT_FOUND", "Not found.", 404, true);
   }
   if (scope === "all" ? process.env.WSA_AWS_ORDER_ENABLED !== "true" : process.env.WSA_DEMO_ORDER_ENABLED !== "true") {
-    return fail("DEMO_ROUTE_OFFLINE", "The demo route is unavailable.", 503, true);
+    return fail(scope === "all" ? "AWS_ROUTE_OFFLINE" : "DEMO_ROUTE_OFFLINE", "The direct trading route is unavailable.", 503, true);
   }
   const rawBody = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : (event.body ?? "");
   if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) return fail("VALIDATION_ERROR", "Request is too large.", 413, true);
@@ -180,11 +180,11 @@ export async function handler(event: GatewayEvent) {
   const checkedPass = passFor(signedPass, token, order.accountId, Date.now(), action === "open", scope);
   if (!checkedPass.ok) {
     console.info(`[demo-order] pass refused: ${checkedPass.reason}`);
-    return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
+    return fail(scope === "all" ? "AWS_PASS_EXPIRED" : "DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
   }
   const claims = checkedPass.claims;
   if (!directSecret || !directUrl || !directUrl.startsWith("https://")) {
-    return fail("DEMO_ROUTE_OFFLINE", "The demo route is unavailable.", 503, true);
+    return fail(scope === "all" ? "AWS_ROUTE_OFFLINE" : "DEMO_ROUTE_OFFLINE", "The direct trading route is unavailable.", 503, true);
   }
   if (scope === "all" && !orderGuard.allow(claims.user)) {
     return fail("RATE_LIMITED", "Too many orders in a short time. Wait a moment and try again.", 429);
@@ -209,7 +209,7 @@ export async function handler(event: GatewayEvent) {
   const sentAt = Date.now();
   const lane = { base: directUrl.replace(/\/+$/, ""), secret: directSecret };
   let sent = await sendDirect(lane, request, { deadlineMs: 20_000 });
-  if (sent.kind === "not_sent") return fail("DEMO_ROUTE_NOT_SENT", "The demo route was unavailable before the order was sent.", 503, true);
+  if (sent.kind === "not_sent") return fail(scope === "all" ? "AWS_ROUTE_NOT_SENT" : "DEMO_ROUTE_NOT_SENT", "The direct trading route was unavailable before the order was sent.", 503, true);
   if (sent.kind === "uncertain") {
     sent = await sendDirect(lane, { ...request, attempt: 2 }, { deadlineMs: 3_000 });
   }
