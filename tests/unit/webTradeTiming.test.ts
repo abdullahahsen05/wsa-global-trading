@@ -105,6 +105,17 @@ describe("the time report of an order", () => {
       );
     });
 
+    test("browser setup details and AWS request id identify the next bottleneck without double-counting TLS", () => {
+      expect(timingText({
+        ...whole,
+        browserSetupMs: 194, browserDnsMs: 5, browserConnectMs: 70, browserTlsMs: 45,
+        browserOtherSetupMs: 119, browserFirstByteMs: 403, browserDownloadMs: 1,
+        browserProtocol: "h2", awsBrowserPilot: true, gatewayRequestId: "F9A94jhErPEEJtg=",
+      })).toBe(
+        `${plain}${tail} Browser request: setup 194 ms (DNS 5 ms · connection 70 ms · TLS 45 ms within connection · other 119 ms) · first byte 403 ms (includes server and broker) · download 1 ms. Browser transport: h2. Route: browser → AWS demo pilot. Gateway trace: F9A94jhErPEEJtg=.`,
+      );
+    });
+
     test("browser clock fallback distinguishes the fetch from reading the answer", () => {
       expect(timingText({ ...whole, browserToHeadersMs: 650, browserReadMs: 10 })).toBe(
         `${plain}${tail} Browser request: to response headers 650 ms (includes server and broker) · read answer 10 ms.`,

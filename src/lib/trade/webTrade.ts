@@ -303,6 +303,13 @@ export interface WebTradeTiming {
   browserReadMs?: number;
   /** browser Resource Timing: before the HTTP request starts (connection setup, browser queueing) */
   browserSetupMs?: number;
+  /** Browser Resource Timing: components of setup; TLS is part of connection, not an extra phase. */
+  browserDnsMs?: number;
+  browserConnectMs?: number;
+  browserTlsMs?: number;
+  /** Remaining setup after DNS and connection; may include browser queueing or CORS work. */
+  browserOtherSetupMs?: number;
+  browserProtocol?: string;
   /** browser Resource Timing: request start to first response byte; includes server and broker work */
   browserFirstByteMs?: number;
   /** browser Resource Timing: first response byte to the complete response */
@@ -312,6 +319,8 @@ export interface WebTradeTiming {
   functionRegion?: string;
   /** The demo-only browser → AWS order pilot, not the usual Vercel function route. */
   awsBrowserPilot?: boolean;
+  /** API Gateway request id, for matching one browser report with the minimal AWS access log. */
+  gatewayRequestId?: string;
 }
 
 /** What the broker said about the order, for showing the result before the next picture arrives. */

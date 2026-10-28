@@ -93,12 +93,16 @@ describe("sending an order", () => {
   test("partitions the browser request and names the edge and function without changing the order", async () => {
     vi.stubGlobal("window", { location: { href: "https://wsa.example/terminal" } });
     vi.stubGlobal("performance", {
-      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1220).mockReturnValueOnce(1250),
-      getEntriesByName: vi.fn().mockReturnValue([{ startTime: 1000, requestStart: 1040, responseStart: 1220, responseEnd: 1230 }]),
+      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1010).mockReturnValueOnce(1220).mockReturnValueOnce(1250),
+      getEntriesByName: vi.fn().mockReturnValue([{
+        startTime: 1010, domainLookupStart: 1012, domainLookupEnd: 1017,
+        connectStart: 1018, secureConnectionStart: 1023, connectEnd: 1033,
+        requestStart: 1050, responseStart: 1220, responseEnd: 1230, nextHopProtocol: "h2",
+      }]),
     });
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ ok: true, data: { ok: true, ticket: "9001", timing: { queueMs: 30, runMs: 80 } } }), {
-        headers: { "content-type": "application/json", "x-vercel-id": "sin1::lhr1::request-id" },
+        headers: { "content-type": "application/json", "x-vercel-id": "sin1::lhr1::request-id", "apigw-requestid": "F9A94jhErPEEJtg=" },
       }),
     );
 
@@ -109,10 +113,16 @@ describe("sending an order", () => {
       browserToHeadersMs: 220,
       browserReadMs: 30,
       browserSetupMs: 40,
-      browserFirstByteMs: 180,
+      browserDnsMs: 5,
+      browserConnectMs: 15,
+      browserTlsMs: 10,
+      browserOtherSetupMs: 20,
+      browserProtocol: "h2",
+      browserFirstByteMs: 170,
       browserDownloadMs: 10,
       edgeRegion: "SIN1",
       functionRegion: "LHR1",
+      gatewayRequestId: "F9A94jhErPEEJtg=",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -130,7 +140,7 @@ describe("sending an order", () => {
   test("the browser clock still reports fetch and response time when resource timing is missing", async () => {
     vi.stubGlobal("window", { location: { href: "https://wsa.example/terminal" } });
     vi.stubGlobal("performance", {
-      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1650).mockReturnValueOnce(1660),
+      now: vi.fn().mockReturnValueOnce(1000).mockReturnValueOnce(1002).mockReturnValueOnce(1650).mockReturnValueOnce(1660),
       getEntriesByName: () => [],
     });
     fetchMock.mockResolvedValueOnce(

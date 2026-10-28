@@ -8,6 +8,8 @@ The account and user IDs are set in Lambda environment, not trusted from the bro
 
 The live site's `NEXT_PUBLIC_WSA_DEMO_ORDER_URL` and `NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID` only select this one experiment; they are public routing values, not secrets. The AWS HTTP API CORS allows only the WSA Vercel origin, and its stage is throttled. A safe invalid POST from the panel warms the browser preflight cache and the signed, keep-alive connection to the worker; it cannot reach the broker. A successful time report says `Route: browser → AWS demo pilot.` Compare several opens with earlier Vercel-route demo orders from the same device. The first request may include a cold start or uncached preflight.
 
+For diagnosis, the API's `$default` stage writes access logs to `/aws/apigateway/wsa-demo-order-gateway-access` with seven-day retention. Only request IDs, method, status, response latency, and integration latency are logged; never log authorization headers, order bodies, IP addresses, or account IDs. CORS exposes `apigw-requestid`, and the Lambda's `Timing-Allow-Origin` exposes Resource Timing only to the WSA site. The terminal report includes that gateway trace ID plus browser DNS, connection (including TLS), and other setup times when the browser provides them. Match the trace ID to an access-log row; `responseLatency - integrationLatency` is gateway overhead, while browser first-byte time also includes network travel and the Lambda's broker-confirmed work. These timing phases overlap and must not be added to the report's residual `network` number.
+
 Build the AWS Lambda package from the repo root:
 
 ```powershell

@@ -106,8 +106,14 @@ function factsText(timing: WebTradeTiming): string {
     sentences.push("Wake-up: the AWS worker still asks the database again and again - apply migration 062 and update the worker.");
   }
   if (isMs(timing.browserSetupMs) && isMs(timing.browserFirstByteMs) && isMs(timing.browserDownloadMs)) {
+    const setupParts: string[] = [];
+    if (isMs(timing.browserDnsMs)) setupParts.push(`DNS ${formatDuration(timing.browserDnsMs)}`);
+    if (isMs(timing.browserConnectMs)) setupParts.push(`connection ${formatDuration(timing.browserConnectMs)}`);
+    if (isMs(timing.browserTlsMs)) setupParts.push(`TLS ${formatDuration(timing.browserTlsMs)} within connection`);
+    if (isMs(timing.browserOtherSetupMs)) setupParts.push(`other ${formatDuration(timing.browserOtherSetupMs)}`);
+    const setupDetail = setupParts.length > 0 ? ` (${setupParts.join(" · ")})` : "";
     sentences.push(
-      `Browser request: setup ${formatDuration(timing.browserSetupMs)} · first byte ${formatDuration(timing.browserFirstByteMs)} (includes server and broker) · download ${formatDuration(timing.browserDownloadMs)}.`,
+      `Browser request: setup ${formatDuration(timing.browserSetupMs)}${setupDetail} · first byte ${formatDuration(timing.browserFirstByteMs)} (includes server and broker) · download ${formatDuration(timing.browserDownloadMs)}.`,
     );
   } else if (isMs(timing.browserToHeadersMs) && isMs(timing.browserReadMs)) {
     sentences.push(
@@ -117,7 +123,9 @@ function factsText(timing: WebTradeTiming): string {
   if (timing.edgeRegion && timing.functionRegion) {
     sentences.push(`Route: ${timing.edgeRegion} edge → ${timing.functionRegion} function.`);
   }
+  if (timing.browserProtocol) sentences.push(`Browser transport: ${timing.browserProtocol}.`);
   if (timing.awsBrowserPilot) sentences.push("Route: browser → AWS demo pilot.");
+  if (timing.gatewayRequestId) sentences.push(`Gateway trace: ${timing.gatewayRequestId}.`);
   return sentences.length > 0 ? ` ${sentences.join(" ")}` : "";
 }
 

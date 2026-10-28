@@ -229,6 +229,8 @@ function clockMs(): number {
 function browserOrderTiming(path: string, startedAt: number, response: Response): Partial<WebTradeTiming> {
   const timing: Partial<WebTradeTiming> = {};
   try {
+    const requestId = response.headers.get("apigw-requestid");
+    if (requestId && /^[a-z0-9+/=_-]{8,64}$/i.test(requestId)) timing.gatewayRequestId = requestId;
     const route = response.headers.get("x-vercel-id")?.split("::") ?? [];
     const region = (part: string | undefined) => part && /^[a-z][a-z0-9]{2,6}$/i.test(part) ? part.toUpperCase() : undefined;
     timing.edgeRegion = region(route[0]);
@@ -237,10 +239,25 @@ function browserOrderTiming(path: string, startedAt: number, response: Response)
     if (typeof window === "undefined" || typeof performance?.getEntriesByName !== "function") return timing;
     const url = new URL(path, window.location.href).href;
     const entries = performance.getEntriesByName(url, "resource");
-    const entry = [...entries].reverse().find((candidate) => candidate.startTime >= startedAt - 1) as PerformanceResourceTiming | undefined;
+    const entry = entries.find((candidate) => candidate.startTime >= startedAt - 1) as PerformanceResourceTiming | undefined;
     if (!entry || entry.requestStart <= 0 || entry.responseStart < entry.requestStart || entry.responseEnd < entry.responseStart) return timing;
     const duration = (value: number) => Math.max(0, Math.round(value));
+    const phase = (start: number, end: number) =>
+      Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end >= start ? duration(end - start) : undefined;
     timing.browserSetupMs = duration(entry.requestStart - entry.startTime);
+    const dns = phase(entry.domainLookupStart, entry.domainLookupEnd);
+    const connection = phase(entry.connectStart, entry.connectEnd);
+    if (dns !== undefined && connection !== undefined) {
+      timing.browserDnsMs = dns;
+      timing.browserConnectMs = connection;
+      timing.browserOtherSetupMs = Math.max(0, timing.browserSetupMs - dns - connection);
+    }
+    if (entry.secureConnectionStart > 0) {
+      timing.browserTlsMs = phase(entry.secureConnectionStart, entry.connectEnd);
+    }
+    if (typeof entry.nextHopProtocol === "string" && /^[a-z0-9./_-]{1,16}$/i.test(entry.nextHopProtocol)) {
+      timing.browserProtocol = entry.nextHopProtocol;
+    }
     timing.browserFirstByteMs = duration(entry.responseStart - entry.requestStart);
     timing.browserDownloadMs = duration(entry.responseEnd - entry.responseStart);
   } catch {
@@ -256,6 +273,7 @@ function browserOrderTiming(path: string, startedAt: number, response: Response)
  */
 export async function sendWebTrade(action: WebTradeAction, body: Record<string, unknown>): Promise<WebTradeOrderResult> {
   const startedAt = clockMs();
+  let requestStartedAt = startedAt;
   let path = `/api/terminal/trade/${action}`;
   const pass = passOf(body.accountId);
   let response: Response | undefined;
@@ -264,6 +282,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
       const session = await createClient().auth.getSession().then((answer) => answer.data.session).catch(() => null);
       if (session?.access_token) {
         path = DEMO_ORDER_URL;
+        requestStartedAt = clockMs();
         response = await fetch(path, {
           method: "POST",
           headers: {
@@ -291,6 +310,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
       }
     }
     if (!response) {
+      requestStartedAt = clockMs();
       response = await fetch(path, {
         method: "POST",
         headers: { "content-type": "application/json", ...(pass ? { [WEB_TRADE_PASS_HEADER]: pass } : {}) },
@@ -315,7 +335,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
     ...result,
     timing: {
       ...result.timing,
-      ...browserOrderTiming(path, startedAt, response),
+      ...browserOrderTiming(path, requestStartedAt, response),
       browserToHeadersMs: Math.max(0, Math.round(headersAt - startedAt)),
       browserReadMs: Math.max(0, Math.round(answeredAt - headersAt)),
       totalMs: Math.max(0, Math.round(answeredAt - startedAt)),
