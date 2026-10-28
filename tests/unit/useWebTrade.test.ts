@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   WebTradeRequestError,
   demoPilotPassFresh,
+  demoPilotRequest,
   newRequestId,
   nextStatePollMs,
   requestFastRefresh,
@@ -202,6 +203,16 @@ describe("the demo pilot's short safety window", () => {
     expect(demoPilotPassFresh(pass(now + 8_000, now + 900), now)).toBe(false);
     expect(demoPilotPassFresh(pass(now + 900, now + 3_000), now)).toBe(false);
     expect(demoPilotPassFresh("broken", now)).toBe(false);
+  });
+
+  test("the HTTPS order uses only a safelisted header while retaining both signed credentials", () => {
+    const order = { accountId: "test", symbol: "XAUUSD", volume: 0.01 };
+    const request = demoPilotRequest(order, "session-token", "signed-pass");
+    expect(request.method).toBe("POST");
+    expect(request.headers).toEqual({ "content-type": "text/plain" });
+    expect(request.credentials).toBe("omit");
+    expect(request.cache).toBeUndefined();
+    expect(JSON.parse(String(request.body))).toEqual({ order, token: "session-token", pass: "signed-pass" });
   });
 });
 

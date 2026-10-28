@@ -30,6 +30,16 @@ function authEvent(riskReadAt: number | null = Date.now(), body: unknown = order
   };
 }
 
+function simpleEvent(riskReadAt: number | null = Date.now(), body: unknown = order) {
+  const legacy = authEvent(riskReadAt, body);
+  return {
+    rawPath: legacy.rawPath,
+    requestContext: legacy.requestContext,
+    headers: { "content-type": "text/plain;charset=UTF-8", origin: "https://wsa-global-trading-platform.vercel.app" },
+    body: JSON.stringify({ order: body, token: legacy.headers.authorization.slice(7), pass: legacy.headers["x-wsa-pass"] }),
+  };
+}
+
 describe("demo AWS order gateway", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -98,6 +108,25 @@ describe("demo AWS order gateway", () => {
     expect(vi.mocked(sendDirect).mock.calls[0][1]).toMatchObject({ audit: "AWS_DEMO_OPEN" });
   });
 
+  it("executes the same guarded demo order using the preflight-free body protocol", async () => {
+    vi.mocked(sendDirect).mockResolvedValue({
+      kind: "answered", ms: 70,
+      reply: { ok: true, outcome: { ticket: "123", timing: { queueMs: 20, runMs: 50, sendMs: 45 } } },
+    });
+    const response = await handler(simpleEvent());
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).data.ticket).toBe("123");
+    expect(sendDirect).toHaveBeenCalledOnce();
+    expect(vi.mocked(sendDirect).mock.calls[0][1]).toMatchObject({ audit: "AWS_DEMO_OPEN" });
+  });
+
+  it("refuses a simple order from any other origin before the broker", async () => {
+    const event = simpleEvent();
+    const response = await handler({ ...event, headers: { ...event.headers, origin: "https://other.example" } });
+    expect(response.statusCode).toBe(403);
+    expect(sendDirect).not.toHaveBeenCalled();
+  });
+
   it("warms the signed worker connection without reserving or placing an order", async () => {
     const response = await handler({
       rawPath: "/demo/open", requestContext: { http: { method: "POST" } },
@@ -105,6 +134,16 @@ describe("demo AWS order gateway", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.headers["timing-allow-origin"]).toBe("https://wsa-global-trading-platform.vercel.app");
+    expect(warmDirectLane).toHaveBeenCalledOnce();
+    expect(sendDirect).not.toHaveBeenCalled();
+  });
+
+  it("warms with a simple empty POST without credentials or an order", async () => {
+    const response = await handler({
+      rawPath: "/demo/open", requestContext: { http: { method: "POST" } },
+      headers: { "content-type": "text/plain", origin: "https://wsa-global-trading-platform.vercel.app" }, body: "{}",
+    });
+    expect(response.statusCode).toBe(200);
     expect(warmDirectLane).toHaveBeenCalledOnce();
     expect(sendDirect).not.toHaveBeenCalled();
   });

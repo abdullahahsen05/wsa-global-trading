@@ -21,6 +21,7 @@ type GatewayEvent = {
 type Claims = { user: string; role: string; account: string; token: string; until: number; riskUntil?: number; aws?: { dbMs?: number; loopMs?: number } };
 type PassResult = { ok: true; claims: Claims } | { ok: false; reason: "config" | "malformed" | "signature" | "scope" | "expired" | "risk_expired" | "token_mismatch" | "session" };
 const MAX_BODY_BYTES = 16 * 1024;
+const WSA_WEB_ORIGIN = "https://wsa-global-trading-platform.vercel.app";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function same(a: Buffer, b: Buffer): boolean {
@@ -35,7 +36,7 @@ function reply(statusCode: number, data: unknown) {
       "cache-control": "private, no-store, max-age=0",
       // Match the HTTP API's CORS allowlist so the live panel can read Resource Timing
       // for this cross-origin pilot without exposing timing to unrelated sites.
-      "timing-allow-origin": "https://wsa-global-trading-platform.vercel.app",
+      "timing-allow-origin": WSA_WEB_ORIGIN,
     },
     body: JSON.stringify(data),
   };
@@ -102,15 +103,21 @@ export async function handler(event: GatewayEvent) {
   }
   const rawBody = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : (event.body ?? "");
   if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) return fail("VALIDATION_ERROR", "Request is too large.", 413, true);
+  const contentType = (event.headers?.["content-type"] ?? "").split(";", 1)[0].trim().toLowerCase();
+  const simplePilot = contentType === "text/plain";
+  // Simple cross-origin POSTs have no preflight. Check Origin explicitly, in
+  // addition to the signed pass, JWT, account allowlist, and worker ownership.
+  if (simplePilot && event.headers?.origin !== WSA_WEB_ORIGIN) {
+    return fail("DEMO_ORIGIN", "The demo route is unavailable.", 403, true);
+  }
   const directSecret = process.env.WSA_TRADE_DIRECT_SECRET?.trim();
   const directUrl = process.env.WSA_TRADE_DIRECT_URL?.trim();
   if (
-    rawBody === "{}" && event.headers?.authorization === "Bearer warm" &&
-    event.headers?.["x-wsa-pass"] === "warm"
+    rawBody === "{}" && (simplePilot || (
+      event.headers?.authorization === "Bearer warm" && event.headers?.["x-wsa-pass"] === "warm"
+    ))
   ) {
-    // This exact invalid order is sent only to prime the browser's CORS preflight
-    // and the Lambda's signed, keep-alive connection to the worker. It never
-    // reserves a command or calls the broker.
+    // The exact empty body is only a warm-up. It never reserves a command or calls the broker.
     if (directSecret && directUrl?.startsWith("https://")) {
       const warmingAt = Date.now();
       await warmDirectLane({ base: directUrl.replace(/\/+$/, ""), secret: directSecret });
@@ -120,7 +127,9 @@ export async function handler(event: GatewayEvent) {
   }
   let raw: unknown;
   try { raw = JSON.parse(rawBody); } catch { return fail("VALIDATION_ERROR", "Invalid order.", 400, true); }
-  const parsed = webTradeOpenSchema.safeParse(raw);
+  const simpleBody = simplePilot && raw && typeof raw === "object" && !Array.isArray(raw)
+    ? raw as Record<string, unknown> : null;
+  const parsed = webTradeOpenSchema.safeParse(simplePilot ? simpleBody?.order : raw);
   if (!parsed.success) return fail("VALIDATION_ERROR", "Invalid order.", 400, true);
   const order = parsed.data;
   if (
@@ -130,8 +139,13 @@ export async function handler(event: GatewayEvent) {
   ) return fail("DEMO_ONLY", "This pilot is limited to 0.01-lot market orders on the test demo account.", 403, true);
 
   const authorization = event.headers?.authorization ?? "";
-  const token = /^Bearer (\S+)$/i.exec(authorization)?.[1] ?? "";
-  const checkedPass = passFor(event.headers?.["x-wsa-pass"], token, order.accountId, Date.now());
+  const token = simplePilot
+    ? (typeof simpleBody?.token === "string" ? simpleBody.token : "")
+    : (/^Bearer (\S+)$/i.exec(authorization)?.[1] ?? "");
+  const signedPass = simplePilot
+    ? (typeof simpleBody?.pass === "string" ? simpleBody.pass : undefined)
+    : event.headers?.["x-wsa-pass"];
+  const checkedPass = passFor(signedPass, token, order.accountId, Date.now());
   if (!checkedPass.ok) {
     console.info(`[demo-order] pass refused: ${checkedPass.reason}`);
     return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);

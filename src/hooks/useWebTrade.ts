@@ -238,6 +238,16 @@ function eligibleForDemoOrderRoute(action: WebTradeAction, body: Record<string, 
   return demoOrderCandidate(action, body) && pass !== null && demoPilotPassFresh(pass);
 }
 
+/** Same signed credentials as before, carried only in an HTTPS body so the browser need not preflight. */
+export function demoPilotRequest(body: Record<string, unknown>, token: string, pass: string): RequestInit {
+  return {
+    method: "POST",
+    headers: { "content-type": "text/plain" },
+    credentials: "omit",
+    body: JSON.stringify({ order: body, token, pass }),
+  };
+}
+
 /** The browser's high-resolution clock (falls back to the wall clock where there is none). */
 function clockMs(): number {
   return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
@@ -304,16 +314,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
       if (session?.access_token) {
         path = DEMO_ORDER_URL;
         requestStartedAt = clockMs();
-        response = await fetch(path, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            authorization: `Bearer ${session.access_token}`,
-            [WEB_TRADE_PASS_HEADER]: pass as string,
-          },
-          cache: "no-store",
-          body: JSON.stringify(body),
-        });
+        response = await fetch(path, demoPilotRequest(body, session.access_token, pass as string));
         if (!response.ok) {
           const failure = await response.clone().json().catch(() => null) as Envelope<unknown> | null;
           // Only an explicit pre-execution refusal may retry the same request id on the established Vercel route.
@@ -385,12 +386,12 @@ const HOT_ACTIONS: readonly WebTradeAction[] = ["open", "close", "modify"];
 export function warmWebTradeRoutes(accountId: string | null = null, actions: readonly WebTradeAction[] = WEB_TRADE_ACTIONS): void {
   if (typeof fetch !== "function") return;
   if (accountId === DEMO_ACCOUNT_ID && DEMO_ORDER_URL && actions.includes("open")) {
-    // Safely prime the cross-origin POST preflight. This body fails validation before any worker call.
+    // Prime the browser connection and signed worker connection without a preflight or order.
     void fetch(DEMO_ORDER_URL, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: "Bearer warm", [WEB_TRADE_PASS_HEADER]: "warm" },
+      headers: { "content-type": "text/plain" },
+      credentials: "omit",
       body: "{}",
-      cache: "no-store",
     }).catch(() => undefined);
   }
   const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
