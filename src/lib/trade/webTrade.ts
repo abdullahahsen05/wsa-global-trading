@@ -319,6 +319,7 @@ export interface WebTradeTiming {
   functionRegion?: string;
   /** The demo-only browser → AWS order pilot, not the usual Vercel function route. */
   awsBrowserPilot?: boolean;
+  awsBrowserDirect?: boolean;
   /** API Gateway request id, for matching one browser report with the minimal AWS access log. */
   gatewayRequestId?: string;
   /** An explicitly not-sent AWS pilot attempt (or a skipped stale pass) before the standard route. */

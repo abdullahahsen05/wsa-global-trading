@@ -8,6 +8,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { DIRECT_LANE_VERSION, DIRECT_ORDER_TTL_MS, type DirectRequest } from "../../../src/lib/gateway/directLane";
 import { sendDirect, warmDirectLane } from "../../../src/lib/gateway/directLaneClient";
 import { parseTradeCommand, TradeCommandError } from "../../../src/lib/gateway/tradeCommands";
+import { WebTradeGuard } from "../../../src/lib/trade/webTradeGuard";
 import {
   webTradeCancelSchema, webTradeCloseBulkSchema, webTradeCloseSchema,
   webTradeModifySchema, webTradeOpenSchema,
@@ -33,6 +34,15 @@ const ACTIONS = {
   "close-bulk": { kind: "CLOSE_BULK", audit: "AWS_DEMO_CLOSE_BULK", schema: webTradeCloseBulkSchema },
 } as const;
 type DemoAction = keyof typeof ACTIONS;
+type OrderScope = "demo" | "all";
+const orderGuard = new WebTradeGuard<unknown>();
+const WEB_AUDIT: Record<DemoAction, DirectRequest["audit"]> = {
+  open: "AWS_WEB_OPEN", close: "AWS_WEB_CLOSE", modify: "AWS_WEB_MODIFY",
+  cancel: "AWS_WEB_CANCEL", "close-bulk": "AWS_WEB_CLOSE_BULK",
+};
+function orderScope(): OrderScope {
+  return process.env.WSA_AWS_ORDER_SCOPE === "all" ? "all" : "demo";
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function same(a: Buffer, b: Buffer): boolean {
@@ -57,7 +67,7 @@ function fail(code: string, message: string, statusCode: number, notSent = false
   return reply(statusCode, { ok: false, error: { code, message, ...(notSent ? { notSent: true } : {}) } });
 }
 
-function passFor(value: string | undefined, token: string, account: string, now: number, requireRisk: boolean): PassResult {
+function passFor(value: string | undefined, token: string, account: string, now: number, requireRisk: boolean, scope: OrderScope): PassResult {
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!secret) return { ok: false, reason: "config" };
   if (!value || value.length > 2048 || token.length > 8192) return { ok: false, reason: "malformed" };
@@ -80,7 +90,7 @@ function passFor(value: string | undefined, token: string, account: string, now:
   if (
     claims.v !== 1 ||
     !UUID.test(claims.user) ||
-    claims.user !== process.env.WSA_DEMO_USER_ID ||
+    (scope === "demo" && claims.user !== process.env.WSA_DEMO_USER_ID) ||
     claims.account !== account ||
     !["TRADER", "ADMIN", "SUPER_ADMIN"].includes(claims.role)
   ) return { ok: false, reason: "scope" };
@@ -106,10 +116,12 @@ function passFor(value: string | undefined, token: string, account: string, now:
 
 export async function handler(event: GatewayEvent) {
   const startedAt = Date.now();
-  if (event.rawPath !== "/demo/open" || event.requestContext?.http?.method !== "POST") {
+  const scope = orderScope();
+  const allowedPath = scope === "all" ? ["/v1/trade", "/demo/open"] : ["/demo/open"];
+  if (!allowedPath.includes(event.rawPath ?? "") || event.requestContext?.http?.method !== "POST") {
     return fail("NOT_FOUND", "Not found.", 404, true);
   }
-  if (process.env.WSA_DEMO_ORDER_ENABLED !== "true") {
+  if (scope === "all" ? process.env.WSA_AWS_ORDER_ENABLED !== "true" : process.env.WSA_DEMO_ORDER_ENABLED !== "true") {
     return fail("DEMO_ROUTE_OFFLINE", "The demo route is unavailable.", 503, true);
   }
   const rawBody = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : (event.body ?? "");
@@ -129,7 +141,7 @@ export async function handler(event: GatewayEvent) {
     ))
   ) {
     // The exact empty body is only a warm-up. It never reserves a command or calls the broker.
-    if (directSecret && directUrl?.startsWith("https://")) {
+    if (scope === "demo" && directSecret && directUrl?.startsWith("https://")) {
       const warmingAt = Date.now();
       await warmDirectLane({ base: directUrl.replace(/\/+$/, ""), secret: directSecret });
       console.info(`[demo-order] signed worker warm-up ${Date.now() - warmingAt}ms`);
@@ -150,10 +162,10 @@ export async function handler(event: GatewayEvent) {
   const parsed = actionInfo.schema.safeParse(simplePilot ? simpleBody?.order : raw);
   if (!parsed.success) return fail("VALIDATION_ERROR", "Invalid order.", 400, true);
   const order = parsed.data as { accountId: string; clientRequestId?: string; [key: string]: unknown };
-  if (order.accountId !== process.env.WSA_DEMO_ACCOUNT_ID) {
+  if (scope === "demo" && order.accountId !== process.env.WSA_DEMO_ACCOUNT_ID) {
     return fail("DEMO_ONLY", "This pilot is limited to the test demo account.", 403, true);
   }
-  if (action === "open" && ((order.orderKind ?? "MARKET") !== "MARKET" || order.volume !== 0.01)) {
+  if (scope === "demo" && action === "open" && ((order.orderKind ?? "MARKET") !== "MARKET" || order.volume !== 0.01)) {
     return fail("DEMO_ONLY", "This pilot is limited to 0.01-lot market opens.", 403, true);
   }
   if (!order.clientRequestId) return fail("VALIDATION_ERROR", "Request id is required.", 400, true);
@@ -165,12 +177,15 @@ export async function handler(event: GatewayEvent) {
   const signedPass = simplePilot
     ? (typeof simpleBody?.pass === "string" ? simpleBody.pass : undefined)
     : event.headers?.["x-wsa-pass"];
-  const checkedPass = passFor(signedPass, token, order.accountId, Date.now(), action === "open");
+  const checkedPass = passFor(signedPass, token, order.accountId, Date.now(), action === "open", scope);
   if (!checkedPass.ok) {
     console.info(`[demo-order] pass refused: ${checkedPass.reason}`);
     return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
   }
   const claims = checkedPass.claims;
+  if (scope === "all" && !orderGuard.allow(claims.user)) {
+    return fail("RATE_LIMITED", "Too many orders in a short time. Wait a moment and try again.", 429);
+  }
   if (!directSecret || !directUrl || !directUrl.startsWith("https://")) {
     return fail("DEMO_ROUTE_OFFLINE", "The demo route is unavailable.", 503, true);
   }
@@ -189,7 +204,7 @@ export async function handler(event: GatewayEvent) {
     clientRequestId: order.clientRequestId,
     ttlMs: DIRECT_ORDER_TTL_MS,
     attempt: 1,
-    audit: actionInfo.audit,
+    audit: scope === "all" ? WEB_AUDIT[action] : actionInfo.audit,
   };
   const sentAt = Date.now();
   const lane = { base: directUrl.replace(/\/+$/, ""), secret: directSecret };
@@ -233,7 +248,7 @@ export async function handler(event: GatewayEvent) {
         signInMs: 0,
         checksMs: Math.max(0, sentAt - startedAt),
         wake: "direct",
-        awsBrowserPilot: true,
+        ...(scope === "all" ? { awsBrowserDirect: true } : { awsBrowserPilot: true }),
         ...(claims.aws?.dbMs !== undefined ? { awsDbMs: claims.aws.dbMs } : {}),
         ...(claims.aws?.loopMs !== undefined ? { awsLoopMs: claims.aws.loopMs } : {}),
       },

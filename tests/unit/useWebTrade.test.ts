@@ -219,6 +219,14 @@ describe("the demo pilot's short safety window", () => {
     expect(candidate("open", { ...base, volume: 0.01, orderKind: "LIMIT" })).toBe(false);
   });
 
+  test("global AWS routing accepts future accounts, larger lots, and pending orders", () => {
+    const base = { accountId: "future-account", clientRequestId: "request-12345678", volume: 0.25, orderKind: "LIMIT" };
+    expect(demoOrderCandidate("open", base, "https://aws.example/v1/trade", "test-one", "all")).toBe(true);
+    expect(demoOrderCandidate("close", base, "https://aws.example/v1/trade", "test-one", "all")).toBe(true);
+    expect(demoOrderCandidate("open", base, "", "test-one", "all")).toBe(false);
+    expect(demoOrderCandidate("open", { ...base, accountId: undefined }, "https://aws.example/v1/trade", "test-one", "all")).toBe(false);
+  });
+
   test("a signed pass can still be usable by Vercel while its three-second pilot risk clearance has expired", () => {
     const now = 1_000_000;
     const pass = (until: number, riskUntil: number) =>

@@ -611,10 +611,13 @@ async function readGatewayPicture(
 
 /** How young the risk verdict must be for an order pass to rest on it (the pass trusts it for `ORDER_PASS_RISK_LIFE_MS` more). */
 const PASS_RISK_MAX_AGE_MS = 2_000;
-/** Keep only the one demo pilot's risk verdict fresher, so its 3-second clearance is not nearly spent at issue time. */
+/** Keep AWS-browser-route risk verdicts fresher, so their 3-second clearance is not nearly spent at issue time. */
 const DEMO_PILOT_PASS_RISK_MAX_AGE_MS = 500;
 
 export function riskPassCacheAgeFor(accountId: string, pilotAccountId: string | undefined = process.env.NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID): number {
+  if (process.env.NEXT_PUBLIC_WSA_AWS_ORDER_SCOPE === "all" && process.env.NEXT_PUBLIC_WSA_AWS_ORDER_URL) {
+    return DEMO_PILOT_PASS_RISK_MAX_AGE_MS;
+  }
   return pilotAccountId?.trim() === accountId ? DEMO_PILOT_PASS_RISK_MAX_AGE_MS : PASS_RISK_MAX_AGE_MS;
 }
 

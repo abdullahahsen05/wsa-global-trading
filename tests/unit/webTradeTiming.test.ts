@@ -116,6 +116,10 @@ describe("the time report of an order", () => {
       );
     });
 
+    test("global browser route has a platform-wide label", () => {
+      expect(timingText({ ...whole, awsBrowserDirect: true })).toContain("Route: browser → AWS direct.");
+    });
+
     test("browser clock fallback distinguishes the fetch from reading the answer", () => {
       expect(timingText({ ...whole, browserToHeadersMs: 650, browserReadMs: 10 })).toBe(
         `${plain}${tail} Browser request: to response headers 650 ms (includes server and broker) · read answer 10 ms.`,

@@ -60,8 +60,8 @@ export interface DirectRecord {
   workerId: string;
   outcome?: TradeCommandOutcome;
   error?: StoredCommandError;
-  /** The one demo-pilot audit the worker writes after the broker answer. */
-  audit?: import("./directLane").DemoAuditKind;
+  /** The browser-order audit the worker writes after the broker answer. */
+  audit?: import("./directLane").DirectAuditKind;
 }
 
 /** A durable claim made before a direct-lane order may reach the broker. */
@@ -245,6 +245,7 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
         const audit = (() => {
           switch (entry.audit) {
             case "AWS_DEMO_OPEN":
+            case "AWS_WEB_OPEN":
               if (entry.kind !== "OPEN") return null;
               return { action: "WEB_TRADE_ORDER_OPENED", metadata: {
                 symbol: payload.symbol ?? null, side: payload.side ?? null, volume: payload.volume ?? null,
@@ -253,6 +254,7 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
                 ticket: entry.outcome?.ticket ?? null,
               } };
             case "AWS_DEMO_CLOSE":
+            case "AWS_WEB_CLOSE":
               if (entry.kind !== "CLOSE") return null;
               return { action: "WEB_TRADE_POSITION_CLOSED", metadata: {
                 ticket: payload.ticket ?? null, requestedVolume: payload.volume ?? null,
@@ -260,6 +262,7 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
                 partial: payload.volume !== null && payload.volume !== undefined,
               } };
             case "AWS_DEMO_MODIFY":
+            case "AWS_WEB_MODIFY":
               if (entry.kind !== "MODIFY") return null;
               return { action: "WEB_TRADE_POSITION_MODIFIED", metadata: {
                 ticket: entry.outcome?.ticket ?? payload.ticket ?? null,
@@ -269,11 +272,13 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
                 price: entry.outcome?.detail?.price ?? null,
               } };
             case "AWS_DEMO_CANCEL":
+            case "AWS_WEB_CANCEL":
               if (entry.kind !== "CANCEL") return null;
               return { action: "WEB_TRADE_ORDER_CANCELLED", metadata: {
                 ticket: payload.ticket ?? null, symbol: entry.outcome?.detail?.symbol ?? null,
               } };
             case "AWS_DEMO_CLOSE_BULK":
+            case "AWS_WEB_CLOSE_BULK":
               if (entry.kind !== "CLOSE_BULK") return null;
               return { action: "WEB_TRADE_BULK_CLOSED", metadata: {
                 scope: payload.scope ?? null, symbol: payload.symbol ?? null,
@@ -281,7 +286,7 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
               } };
           }
         })();
-        if (!audit) throw new Error("[trade-gateway] invalid demo audit command");
+        if (!audit) throw new Error("[trade-gateway] invalid browser audit command");
         // The command id is also the audit id: a retry after an ambiguous DB answer
         // cannot create a second log entry. This runs in the worker's tracked,
         // retrying write-behind task rather than delaying the broker reply.
@@ -291,9 +296,9 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
           action: audit.action,
           entity_type: "trading_account",
           entity_id: entry.accountId,
-          metadata: { ...audit.metadata, route: "aws-demo-direct", clientRequestId: entry.clientRequestId },
+          metadata: { ...audit.metadata, route: entry.audit.startsWith("AWS_WEB_") ? "aws-web-direct" : "aws-demo-direct", clientRequestId: entry.clientRequestId },
         });
-        if (auditError?.code !== "23505") failOnError(auditError, "audit a direct demo order");
+        if (auditError?.code !== "23505") failOnError(auditError, "audit a direct browser order");
       }
     },
 

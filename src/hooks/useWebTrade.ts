@@ -216,6 +216,10 @@ export type WebTradeAction = "open" | "modify" | "close" | "cancel" | "close-bul
 const WEB_TRADE_ACTIONS: readonly WebTradeAction[] = ["open", "modify", "close", "cancel", "close-bulk"];
 const DEMO_ORDER_URL = process.env.NEXT_PUBLIC_WSA_DEMO_ORDER_URL?.trim() ?? "";
 const DEMO_ACCOUNT_ID = process.env.NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID?.trim() ?? "";
+const AWS_ORDER_SCOPE = process.env.NEXT_PUBLIC_WSA_AWS_ORDER_SCOPE === "all" ? "all" : "demo";
+const AWS_ORDER_URL = AWS_ORDER_SCOPE === "all"
+  ? process.env.NEXT_PUBLIC_WSA_AWS_ORDER_URL?.trim() ?? ""
+  : DEMO_ORDER_URL;
 const PILOT_PASS_MIN_REMAINING_MS = 1_000;
 
 /** Only a routing hint: the AWS gateway still verifies the signature, session, account, and current risk window. */
@@ -235,13 +239,15 @@ export function demoPilotPassFresh(pass: string, now: number = Date.now(), requi
 export function demoOrderCandidate(
   action: WebTradeAction,
   body: Record<string, unknown>,
-  pilotUrl: string = DEMO_ORDER_URL,
+  pilotUrl: string = AWS_ORDER_URL,
   pilotAccountId: string = DEMO_ACCOUNT_ID,
+  scope: "demo" | "all" = AWS_ORDER_SCOPE,
 ): boolean {
   return Boolean(
-    pilotUrl && pilotAccountId && body.accountId === pilotAccountId &&
+    pilotUrl && typeof body.accountId === "string" && body.accountId.length > 0 &&
+    (scope === "all" || (pilotAccountId && body.accountId === pilotAccountId)) &&
     typeof body.clientRequestId === "string" &&
-    (action !== "open" || (body.volume === 0.01 && (body.orderKind === undefined || body.orderKind === "MARKET"))),
+    (scope === "all" || action !== "open" || (body.volume === 0.01 && (body.orderKind === undefined || body.orderKind === "MARKET"))),
   );
 }
 
@@ -324,7 +330,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
     if (eligibleForDemoOrderRoute(action, body, pass)) {
       const session = await createClient().auth.getSession().then((answer) => answer.data.session).catch(() => null);
       if (session?.access_token) {
-        path = DEMO_ORDER_URL;
+        path = AWS_ORDER_URL;
         requestStartedAt = clockMs();
         response = await fetch(path, demoPilotRequest(body, session.access_token, pass as string, action));
         if (!response.ok) {
@@ -365,7 +371,7 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
     throw new WebTradeRequestError(
       "NETWORK_ERROR",
       "The connection dropped before an answer came back.",
-      path === DEMO_ORDER_URL || action !== "modify",
+      path === AWS_ORDER_URL || action !== "modify",
     );
   }
   const headersAt = clockMs();
@@ -399,9 +405,10 @@ const HOT_ACTIONS: readonly WebTradeAction[] = ["open", "close", "modify"];
  */
 export function warmWebTradeRoutes(accountId: string | null = null, actions: readonly WebTradeAction[] = WEB_TRADE_ACTIONS): void {
   if (typeof fetch !== "function") return;
-  if (accountId === DEMO_ACCOUNT_ID && DEMO_ORDER_URL && actions.some((action) => HOT_ACTIONS.includes(action))) {
+  if (AWS_ORDER_URL && (AWS_ORDER_SCOPE === "all" || accountId === DEMO_ACCOUNT_ID) &&
+      actions.some((action) => HOT_ACTIONS.includes(action))) {
     // Prime the browser connection and signed worker connection without a preflight or order.
-    void fetch(DEMO_ORDER_URL, {
+    void fetch(AWS_ORDER_URL, {
       method: "POST",
       headers: { "content-type": "text/plain" },
       credentials: "omit",

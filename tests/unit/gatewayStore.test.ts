@@ -249,6 +249,15 @@ describe("demo direct-order audit write-behind", () => {
     });
   });
 
+  test("records a global browser order with a non-demo route marker", async () => {
+    db.tables[COMMANDS_TABLE] = [commandRow()];
+    await store.recordDirect?.({ ...record, audit: "AWS_WEB_OPEN", payload: { ...record.payload as object, volume: 0.25 } });
+    expect(db.tables.audit_logs[0]).toMatchObject({
+      action: "WEB_TRADE_ORDER_OPENED",
+      metadata: { volume: 0.25, route: "aws-web-direct", clientRequestId: "request-1" },
+    });
+  });
+
   test("a broker refusal never writes an opened-order audit", async () => {
     db.tables[COMMANDS_TABLE] = [commandRow()];
     await store.recordDirect?.({ ...record, outcome: undefined, error: { code: "BROKER_PROVIDER_ERROR", message: "market closed", statusCode: 502 } });

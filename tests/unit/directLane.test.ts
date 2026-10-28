@@ -88,9 +88,12 @@ describe("the protocol", () => {
     expect(parseDirectRequest({ ...request(), ttlMs: 10_000_000 })).toMatchObject({ ok: true, request: { ttlMs: 60_000 } });
     expect(parseDirectRequest({ ...request(), ttlMs: 1 })).toMatchObject({ ok: true, request: { ttlMs: 1_000 } });
     expect(parseDirectRequest(request({ audit: "AWS_DEMO_OPEN" }))).toMatchObject({ ok: true, request: { audit: "AWS_DEMO_OPEN" } });
+    expect(parseDirectRequest(request({ audit: "AWS_WEB_OPEN" }))).toMatchObject({ ok: true, request: { audit: "AWS_WEB_OPEN" } });
     for (const [kind, audit] of [
       ["CLOSE", "AWS_DEMO_CLOSE"], ["MODIFY", "AWS_DEMO_MODIFY"],
       ["CANCEL", "AWS_DEMO_CANCEL"], ["CLOSE_BULK", "AWS_DEMO_CLOSE_BULK"],
+      ["CLOSE", "AWS_WEB_CLOSE"], ["MODIFY", "AWS_WEB_MODIFY"],
+      ["CANCEL", "AWS_WEB_CANCEL"], ["CLOSE_BULK", "AWS_WEB_CLOSE_BULK"],
     ] as const) {
       expect(parseDirectRequest(request({ kind, audit }))).toMatchObject({ ok: true, request: { kind, audit } });
       expect(parseDirectRequest(request({ kind: "OPEN", audit }))).toMatchObject({ ok: false });

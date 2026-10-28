@@ -184,6 +184,8 @@ interface RunOptions {
 /** How long an order whose answer never came may be re-sent with the same id. */
 const RETRY_ID_MS = 90_000;
 const DEMO_PILOT_ACCOUNT_ID = process.env.NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID?.trim() ?? "";
+const GLOBAL_AWS_ORDER_ROUTE = process.env.NEXT_PUBLIC_WSA_AWS_ORDER_SCOPE === "all" &&
+  Boolean(process.env.NEXT_PUBLIC_WSA_AWS_ORDER_URL?.trim());
 
 export interface WsaTradePanelProps {
   settings: WsaTradeWorkspace;
@@ -504,7 +506,7 @@ export function WsaTradePanel({
     if (busyRef.current) return;
     // The demo pilot needs the same durable id on an uncertain retry, including
     // close/modify/cancel. Other accounts keep their established request shape.
-    const pilotAttempt = DEMO_PILOT_ACCOUNT_ID && body.accountId === DEMO_PILOT_ACCOUNT_ID;
+    const pilotAttempt = GLOBAL_AWS_ORDER_ROUTE || (DEMO_PILOT_ACCOUNT_ID && body.accountId === DEMO_PILOT_ACCOUNT_ID);
     const attempt = options.retry ?? (pilotAttempt ? idFor(JSON.stringify([action, body])) : null);
     const requestBody = body.clientRequestId || !attempt ? body : { ...body, clientRequestId: attempt.id };
     busyRef.current = true;

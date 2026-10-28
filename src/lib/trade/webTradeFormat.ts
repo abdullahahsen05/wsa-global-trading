@@ -124,7 +124,8 @@ function factsText(timing: WebTradeTiming): string {
     sentences.push(`Route: ${timing.edgeRegion} edge → ${timing.functionRegion} function.`);
   }
   if (timing.browserProtocol) sentences.push(`Browser transport: ${timing.browserProtocol}.`);
-  if (timing.awsBrowserPilot) sentences.push("Route: browser → AWS demo pilot.");
+  if (timing.awsBrowserDirect) sentences.push("Route: browser → AWS direct.");
+  else if (timing.awsBrowserPilot) sentences.push("Route: browser → AWS demo pilot.");
   if (timing.gatewayRequestId) sentences.push(`Gateway trace: ${timing.gatewayRequestId}.`);
   if (timing.pilotFallback === "STALE_PASS") {
     sentences.push("AWS demo pilot skipped because its safety pass was near expiry; standard route used.");

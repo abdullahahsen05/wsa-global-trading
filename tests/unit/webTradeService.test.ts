@@ -53,6 +53,17 @@ test("only the demo pilot account gets a fresher risk verdict for its order pass
   expect(riskPassCacheAgeFor(ACCOUNT, "")).toBe(2_000);
 });
 
+test("global browser-to-AWS routing keeps every account's risk clearance fresh", () => {
+  vi.stubEnv("NEXT_PUBLIC_WSA_AWS_ORDER_SCOPE", "all");
+  vi.stubEnv("NEXT_PUBLIC_WSA_AWS_ORDER_URL", "https://aws.example/v1/trade");
+  try {
+    expect(riskPassCacheAgeFor(ACCOUNT, "")).toBe(500);
+    expect(riskPassCacheAgeFor(SECOND_ACCOUNT, ACCOUNT)).toBe(500);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 vi.mock("@/lib/supabase/admin", async () => {
   const { sharedClient } = await import("./helpers/memoryDb");
   return { createAdminClient: () => sharedClient };

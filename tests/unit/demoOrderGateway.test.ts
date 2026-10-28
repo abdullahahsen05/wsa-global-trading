@@ -10,7 +10,7 @@ const user = "137e4868-6f58-437d-bc76-374acdc36d89";
 const account = "3faac609-0b67-4b1c-96e5-3e397c19955a";
 const order = { accountId: account, symbol: "XAUUSD", side: "BUY", volume: 0.01, orderKind: "MARKET", clientRequestId: "12345678-1234-1234-1234-123456789abc" };
 
-function authEvent(riskReadAt: number | null = Date.now(), body: unknown = order) {
+function authEvent(riskReadAt: number | null = Date.now(), body: unknown = order, passAccountId: string = account) {
   const now = Date.now();
   const jwt = [
     Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url"),
@@ -18,7 +18,7 @@ function authEvent(riskReadAt: number | null = Date.now(), body: unknown = order
     "test-signature",
   ].join(".");
   const pass = mintOrderPass({
-    user: { id: user, role: "TRADER" }, accountId: account,
+    user: { id: user, role: "TRADER" }, accountId: passAccountId,
     tokenKey: createHash("sha256").update(jwt).digest("base64url"),
     tokenExpiresAtMs: now + 60_000, riskReadAt,
     aws: { direct: true, longPoll: true, dbMs: 30 },
@@ -30,8 +30,8 @@ function authEvent(riskReadAt: number | null = Date.now(), body: unknown = order
   };
 }
 
-function simpleEvent(riskReadAt: number | null = Date.now(), body: unknown = order, action = "open") {
-  const legacy = authEvent(riskReadAt, body);
+function simpleEvent(riskReadAt: number | null = Date.now(), body: unknown = order, action = "open", passAccountId: string = account) {
+  const legacy = authEvent(riskReadAt, body, passAccountId);
   return {
     rawPath: legacy.rawPath,
     requestContext: legacy.requestContext,
@@ -50,6 +50,8 @@ describe("demo AWS order gateway", () => {
     process.env.WSA_TRADE_DIRECT_SECRET = "test-direct-secret-with-32-characters";
     process.env.WSA_TRADE_DIRECT_URL = "https://worker.example:8787";
     process.env.WSA_DEMO_ORDER_ENABLED = "true";
+    delete process.env.WSA_AWS_ORDER_SCOPE;
+    delete process.env.WSA_AWS_ORDER_ENABLED;
   });
 
   it("refuses non-order routes and non-allowlisted accounts before execution", async () => {
@@ -91,6 +93,38 @@ describe("demo AWS order gateway", () => {
     expect(tooLarge.statusCode).toBe(403);
     const pending = await handler(authEvent(Date.now(), { ...order, orderKind: "LIMIT", price: 100 }));
     expect(pending.statusCode).toBe(403);
+    expect(sendDirect).not.toHaveBeenCalled();
+  });
+
+  it("accepts any owned account and validated volume in global mode, with fresh risk clearance", async () => {
+    process.env.WSA_AWS_ORDER_SCOPE = "all";
+    process.env.WSA_AWS_ORDER_ENABLED = "true";
+    const otherAccount = "00000000-0000-4000-8000-000000000001";
+    const otherOrder = { ...order, accountId: otherAccount, volume: 0.25 };
+    vi.mocked(sendDirect).mockResolvedValue({
+      kind: "answered", ms: 70,
+      reply: { ok: true, outcome: { ticket: "123", timing: { queueMs: 20, runMs: 50 } } },
+    });
+    const refused = await handler(simpleEvent(null, otherOrder, "open", otherAccount));
+    expect(refused.statusCode).toBe(401);
+    expect(sendDirect).not.toHaveBeenCalled();
+    const wrongAccountPass = await handler(simpleEvent(Date.now(), otherOrder));
+    expect(wrongAccountPass.statusCode).toBe(401);
+    expect(sendDirect).not.toHaveBeenCalled();
+
+    const response = await handler({ ...simpleEvent(Date.now(), otherOrder, "open", otherAccount), rawPath: "/v1/trade" });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).data.timing.awsBrowserDirect).toBe(true);
+    expect(vi.mocked(sendDirect).mock.calls[0][1]).toMatchObject({
+      accountId: otherAccount, audit: "AWS_WEB_OPEN", payload: { volume: 0.25 },
+    });
+  });
+
+  it("keeps the global route off until explicitly enabled", async () => {
+    process.env.WSA_AWS_ORDER_SCOPE = "all";
+    const response = await handler({ ...simpleEvent(), rawPath: "/v1/trade" });
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response.body).error.notSent).toBe(true);
     expect(sendDirect).not.toHaveBeenCalled();
   });
 
