@@ -149,6 +149,8 @@ function timingSuffix(timing: Partial<CommandTiming>): string {
   if (timing.readMs !== undefined) parts.push(`read ${timing.readMs}ms`);
   if (timing.sessionMs !== undefined) parts.push(`session ${timing.sessionMs}ms`);
   if (timing.sendMs !== undefined) parts.push(`send ${timing.sendMs}ms`);
+  if (timing.providerHeadersMs !== undefined) parts.push(`headers ${timing.providerHeadersMs}ms`);
+  if (timing.providerBodyMs !== undefined) parts.push(`body ${timing.providerBodyMs}ms`);
   if (timing.attempts !== undefined && timing.attempts > 1) parts.push(`${timing.attempts} attempts`);
   return parts.length > 0 ? `, ${parts.join(", ")}` : "";
 }
@@ -913,6 +915,10 @@ export class GatewayWorker {
       watching: this.watchedList.length,
       commandsRun: this.commandsRun,
       commandsFailed: this.commandsFailed,
+      orderSlotsUsed: this.commandChains.running,
+      orderSlotsCapacity: this.commandChains.capacity,
+      orderWaitingForSlot: this.commandChains.queuedForSlot,
+      orderKeysActive: this.commandChains.size,
       longPoll: this.longPollActive(),
       // the web server may hand orders over HTTP (`directLane.ts`) while this is true ...
       direct: this.directListening,

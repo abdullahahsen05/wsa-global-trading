@@ -147,6 +147,10 @@ export interface CommandTiming {
   sessionMs?: number;
   /** the order request(s) to the broker bridge */
   sendMs?: number;
+  /** time until the bridge returns headers, including network and broker execution */
+  providerHeadersMs?: number;
+  /** time to read the bridge response after headers */
+  providerBodyMs?: number;
   /** how often the order was sent (more than once after a requote) */
   attempts?: number;
 }

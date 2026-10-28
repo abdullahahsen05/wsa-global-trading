@@ -23,6 +23,10 @@ export interface ExecutionStages {
   sessionMs?: number;
   /** the order request(s) to the bridge, all attempts together */
   sendMs?: number;
+  /** request start until the bridge returns HTTP headers (includes network and broker execution) */
+  providerHeadersMs?: number;
+  /** reading the bridge's response body after headers */
+  providerBodyMs?: number;
   /** how often the request was sent (more than once after a requote or a busy trade context) */
   attempts?: number;
 }

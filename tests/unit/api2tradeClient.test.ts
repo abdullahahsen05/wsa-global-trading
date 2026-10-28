@@ -76,6 +76,26 @@ describe("api2trade execution transport", () => {
     expect(options.body).toBeUndefined();
   });
 
+  it("measures headers and response body separately for an executed order", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 8));
+        return JSON.stringify({ ticket: 12345 });
+      },
+    }));
+    const client = new Api2TradeClient({
+      authMode: "basic",
+      baseUrl: "https://mt5.mt4api.dev",
+      username: "swagger-user",
+      password: "swagger-pass",
+    });
+    const timing: { providerHeadersMs?: number; providerBodyMs?: number } = {};
+    await client.orderSend({ accountId: "session-token", symbol: "EURUSD", operation: "Buy", volume: 0.01 }, timing);
+    expect(timing.providerHeadersMs).toBeGreaterThanOrEqual(0);
+    expect(timing.providerBodyMs).toBeGreaterThanOrEqual(5);
+  });
+
   it("falls back to GET OrderSendSafe with query params for API-key auth", async () => {
     const fetchMock = vi
       .fn()

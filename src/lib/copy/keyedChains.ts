@@ -34,6 +34,15 @@ export class KeyedChains {
     return this.active;
   }
 
+  /** Tasks waiting for a slot across all keys (not just the first task of each key). */
+  get queuedForSlot(): number {
+    return this.waiting.length;
+  }
+
+  get capacity(): number {
+    return this.maxConcurrent;
+  }
+
   /**
    * Queues `task` behind everything queued earlier under `key`. The returned promise
    * resolves when this task has finished (successfully or not) and never rejects.

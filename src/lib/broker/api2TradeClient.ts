@@ -4,6 +4,7 @@ if (typeof window !== "undefined") {
 
 import { publicApi2TradeError } from "./api2TradeErrors";
 import { brokerFetch } from "./api2TradeTransport";
+import type { ExecutionStages } from "./BrokerAdapter";
 import { parseSymbolList, type ParsedSymbol } from "./symbolList";
 import {
   api2TradeUsesApiKeyAuth,
@@ -421,6 +422,7 @@ export class Api2TradeClient {
     options?: {
       expectText?: boolean;
       body?: Record<string, string | number | boolean | null | undefined>;
+      timing?: ExecutionStages;
     },
   ): Promise<T> {
     const url = new URL(`${this.config.baseUrl}/${endpoint.replace(/^\/+/, "")}`);
@@ -447,6 +449,7 @@ export class Api2TradeClient {
     let bodyText: string;
     try {
       // one signal covers the connection, the headers and the body
+      const requestStartedAt = performance.now();
       response = await brokerFetch(url, {
         method,
         headers,
@@ -454,7 +457,14 @@ export class Api2TradeClient {
         cache: "no-store",
         signal: AbortSignal.timeout(timeoutMs),
       });
+      const headersAt = performance.now();
+      if (options?.timing) {
+        options.timing.providerHeadersMs = (options.timing.providerHeadersMs ?? 0) + Math.round(headersAt - requestStartedAt);
+      }
       bodyText = await response.text();
+      if (options?.timing) {
+        options.timing.providerBodyMs = (options.timing.providerBodyMs ?? 0) + Math.round(performance.now() - headersAt);
+      }
     } catch (error) {
       if (isAbortError(error)) {
         throw new Error(
@@ -491,14 +501,15 @@ export class Api2TradeClient {
     params: Record<string, string | number | boolean | null | undefined> = {},
     body?: Record<string, string | number | boolean | null | undefined>,
     fallbackParams?: Record<string, string | number | boolean | null | undefined>,
+    timing?: ExecutionStages,
   ): Promise<T> {
     try {
-      return await this.request<T>(method, primaryEndpoint, params, body ? { body } : undefined);
+      return await this.request<T>(method, primaryEndpoint, params, { body, timing });
     } catch (error) {
       if (!shouldFallbackToSafeExecutionEndpoint(error)) {
         throw error;
       }
-      return this.request<T>("GET", fallbackEndpoint, { ...params, ...(fallbackParams ?? body) });
+      return this.request<T>("GET", fallbackEndpoint, { ...params, ...(fallbackParams ?? body) }, { timing });
     }
   }
 
@@ -780,7 +791,7 @@ export class Api2TradeClient {
     takeProfit?: number | null;
     comment?: string | null;
     slippage?: number | null;
-  }): Promise<Api2TradeExecutionResponse> {
+  }, timing?: ExecutionStages): Promise<Api2TradeExecutionResponse> {
     const operation = OPERATION_CODES[params.operation];
     if (!this.usesApiKeyAuth()) {
       const result = await this.request<unknown>("GET", "OrderSendSafe", {
@@ -793,7 +804,7 @@ export class Api2TradeClient {
         takeprofit: params.takeProfit,
         comment: params.comment,
         slippage: params.slippage,
-      });
+      }, { timing });
       return assertRecord(result, "OrderSendSafe") as Api2TradeExecutionResponse;
     }
     const result = await this.requestWithExecutionFallback<unknown>(
@@ -821,6 +832,7 @@ export class Api2TradeClient {
         comment: params.comment,
         slippage: params.slippage,
       },
+      timing,
     );
     return assertRecord(result, "OrderSend") as Api2TradeExecutionResponse;
   }
@@ -830,14 +842,14 @@ export class Api2TradeClient {
     ticket: string;
     lots?: number | null;
     comment?: string | null;
-  }): Promise<Api2TradeExecutionResponse> {
+  }, timing?: ExecutionStages): Promise<Api2TradeExecutionResponse> {
     if (!this.usesApiKeyAuth()) {
       return this.request<Api2TradeExecutionResponse>("GET", "OrderCloseSafe", {
         ...this.accountParams(params.accountId),
         ticket: params.ticket,
         lots: params.lots,
         comment: params.comment,
-      });
+      }, { timing });
     }
     const result = await this.requestWithExecutionFallback<unknown>(
       "POST",
@@ -855,6 +867,7 @@ export class Api2TradeClient {
         lots: params.lots,
         comment: params.comment,
       },
+      timing,
     );
     return assertRecord(result, "OrderClose") as Api2TradeExecutionResponse;
   }
@@ -866,7 +879,7 @@ export class Api2TradeClient {
     price?: number | null;
     stopLoss?: number | null;
     takeProfit?: number | null;
-  }): Promise<Api2TradeExecutionResponse> {
+  }, timing?: ExecutionStages): Promise<Api2TradeExecutionResponse> {
     if (!this.usesApiKeyAuth()) {
       return this.request<Api2TradeExecutionResponse>("GET", "OrderModifySafe", {
         ...this.accountParams(params.accountId),
@@ -874,7 +887,7 @@ export class Api2TradeClient {
         price: params.price,
         stoploss: params.stopLoss,
         takeprofit: params.takeProfit,
-      });
+      }, { timing });
     }
     const result = await this.requestWithExecutionFallback<unknown>(
       "POST",
@@ -895,6 +908,7 @@ export class Api2TradeClient {
         stoploss: params.stopLoss,
         takeprofit: params.takeProfit,
       },
+      timing,
     );
     return assertRecord(result, "OrderModify") as Api2TradeExecutionResponse;
   }
@@ -908,7 +922,7 @@ export class Api2TradeClient {
   async orderCancel(params: {
     accountId: string;
     ticket: string;
-  }): Promise<Api2TradeExecutionResponse> {
+  }, timing?: ExecutionStages): Promise<Api2TradeExecutionResponse> {
     const failedWithoutEndpoint: string[] = [];
     let lastError: unknown = null;
     for (const endpoint of endpointsToTry(CANCEL_ENDPOINTS, knownCancelEndpoint, missingListEndpoints)) {
@@ -916,7 +930,7 @@ export class Api2TradeClient {
         const result = await this.request<Api2TradeExecutionResponse>("GET", endpoint, {
           ...this.accountParams(params.accountId),
           ticket: params.ticket,
-        });
+        }, { timing });
         knownCancelEndpoint = endpoint;
         const now = Date.now();
         for (const failed of failedWithoutEndpoint) missingListEndpoints.set(failed, now + SYMBOL_ENDPOINT_MISSING_TTL_MS);

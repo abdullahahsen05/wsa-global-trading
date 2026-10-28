@@ -1076,7 +1076,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
           takeProfit: req.takeProfit,
           comment: req.comment,
           slippage: kind === "MARKET" ? req.slippage : undefined,
-        }),
+        }, req.stages),
       req.stages,
     );
     return { ...result, executedVolume: normalizeExecutionLots(result.executedVolume, req.volume) };
@@ -1093,7 +1093,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
           ticket: req.brokerPositionId,
           lots: req.volume,
           comment: req.comment,
-        }),
+        }, req.stages),
       req.stages,
     );
   }
@@ -1110,7 +1110,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
           price: req.price,
           stopLoss: req.stopLoss,
           takeProfit: req.takeProfit,
-        }),
+        }, req.stages),
       req.stages,
     );
   }
@@ -1121,7 +1121,7 @@ export class Api2TradeBrokerAdapter implements BrokerAdapter {
     this.assertExecutionAvailable();
     return this.executeOrder(
       req.accountId,
-      (providerAccountId) => client.orderCancel({ accountId: providerAccountId, ticket: req.brokerOrderId }),
+      (providerAccountId) => client.orderCancel({ accountId: providerAccountId, ticket: req.brokerOrderId }, req.stages),
       req.stages,
     );
   }

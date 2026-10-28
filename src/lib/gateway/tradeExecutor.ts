@@ -184,6 +184,8 @@ function recordStages(context: ExecuteContext | undefined, stages: ExecutionStag
   if (!timing) return;
   if (stages.sessionMs !== undefined) timing.sessionMs = stages.sessionMs;
   if (stages.sendMs !== undefined) timing.sendMs = stages.sendMs;
+  if (stages.providerHeadersMs !== undefined) timing.providerHeadersMs = stages.providerHeadersMs;
+  if (stages.providerBodyMs !== undefined) timing.providerBodyMs = stages.providerBodyMs;
   if (stages.attempts !== undefined) timing.attempts = stages.attempts;
 }
 

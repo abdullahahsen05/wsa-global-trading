@@ -128,6 +128,8 @@ describe("KeyedChains", () => {
     await tick();
     expect(started).toEqual([0, 1]);
     expect(chains.running).toBe(2);
+    expect(chains.capacity).toBe(2);
+    expect(chains.queuedForSlot).toBe(2);
 
     gates[0].resolve();
     await tick();
@@ -142,6 +144,7 @@ describe("KeyedChains", () => {
     await chains.idle();
     expect(peak).toBe(2);
     expect(chains.running).toBe(0);
+    expect(chains.queuedForSlot).toBe(0);
   });
 
   test("a limit that is not usable means no limit", async () => {
@@ -161,6 +164,32 @@ describe("KeyedChains", () => {
     expect(peak).toBe(5);
     gate.resolve();
     await chains.idle();
+  });
+
+  test("serves a hundred accounts concurrently without reordering orders within any account", async () => {
+    const chains = new KeyedChains(16);
+    const lastOrder = new Map<string, number>();
+    const errors: unknown[] = [];
+    let running = 0;
+    let peak = 0;
+    for (let account = 0; account < 100; account += 1) {
+      const key = `account-${account}`;
+      for (let order = 0; order < 3; order += 1) {
+        void chains.run(key, async () => {
+          running += 1;
+          peak = Math.max(peak, running);
+          if ((lastOrder.get(key) ?? -1) !== order - 1) throw new Error(`Out-of-order ${key}:${order}`);
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          lastOrder.set(key, order);
+          running -= 1;
+        }, (error) => errors.push(error));
+      }
+    }
+    await chains.idle();
+    expect(errors).toEqual([]);
+    expect(lastOrder.size).toBe(100);
+    expect([...lastOrder.values()].every((order) => order === 2)).toBe(true);
+    expect(peak).toBe(16);
   });
 
   test("finished keys are forgotten", async () => {

@@ -273,6 +273,10 @@ export interface WebTradeTiming {
   sessionMs?: number;
   /** the order request(s) to the broker bridge */
   sendMs?: number;
+  /** time until API2Trade responds with headers; includes its bridge and the broker */
+  providerHeadersMs?: number;
+  /** time to read API2Trade's response body */
+  providerBodyMs?: number;
   /** how often the order was sent (more than once after a requote) */
   attempts?: number;
   /** web server: from the request arriving to the answer leaving */

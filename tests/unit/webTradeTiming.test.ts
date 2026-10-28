@@ -50,6 +50,12 @@ describe("the time report of an order", () => {
     expect(timingText({ queueMs: 5, runMs: 300, sendMs: 290, attempts: 1 })).toBe("305 ms (queue 5 ms · broker 300 ms (send 290 ms))");
   });
 
+  test("breaks a provider response into headers and body without adding them twice to the total", () => {
+    expect(timingText({ queueMs: 20, runMs: 480, sendMs: 470, providerHeadersMs: 465, providerBodyMs: 5 })).toBe(
+      "500 ms (queue 20 ms · broker 480 ms (send 470 ms · provider headers 465 ms · body 5 ms))",
+    );
+  });
+
   test("the whole picture, when the browser and the web server measured their parts too", () => {
     // 640 ms in the browser = 120 network + 90 web server + 60 queue + 330 broker + 40 relay
     expect(timingText({ queueMs: 60, runMs: 330, sendMs: 310, serverMs: 520, waitMs: 430, totalMs: 640 })).toBe(

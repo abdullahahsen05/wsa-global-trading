@@ -1068,7 +1068,9 @@ async function main() {
       stateRefreshMs: intFromEnv("WSA_TRADE_GATEWAY_STATE_MS", 1_000, 250, 10_000),
       // in the seconds after an order the picture of that account is renewed this often
       hotRefreshMs: intFromEnv("WSA_TRADE_GATEWAY_HOT_STATE_MS", 350, 150, 5_000),
-      commandConcurrency: intFromEnv("WSA_TRADE_GATEWAY_CONCURRENCY", 8, 1, 32),
+      // Orders remain serial per account. More independent accounts can progress together without
+      // making a slow broker hold up unrelated traders; the direct lane still caps in-flight requests.
+      commandConcurrency: intFromEnv("WSA_TRADE_GATEWAY_CONCURRENCY", 16, 1, 64),
       // STATE / SYMBOLS commands have slots of their own, so they never wait behind an order
       readConcurrency: intFromEnv("WSA_TRADE_GATEWAY_READ_CONCURRENCY", 6, 1, 32),
       stateConcurrency: intFromEnv("WSA_TRADE_GATEWAY_STATE_CONCURRENCY", 6, 1, 32),

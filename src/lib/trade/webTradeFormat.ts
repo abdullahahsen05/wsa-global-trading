@@ -69,6 +69,8 @@ function brokerText(timing: WebTradeTiming, runMs: number): string {
   if (isMs(timing.readMs) && timing.readMs > 0) parts.push(`read ${formatDuration(timing.readMs)}`);
   if (isMs(timing.sessionMs) && timing.sessionMs > 0) parts.push(`session ${formatDuration(timing.sessionMs)}`);
   if (isMs(timing.sendMs)) parts.push(`send ${formatDuration(timing.sendMs)}`);
+  if (isMs(timing.providerHeadersMs)) parts.push(`provider headers ${formatDuration(timing.providerHeadersMs)}`);
+  if (isMs(timing.providerBodyMs)) parts.push(`body ${formatDuration(timing.providerBodyMs)}`);
   if (typeof timing.attempts === "number" && timing.attempts > 1) parts.push(`${timing.attempts} attempts`);
   return parts.length > 0 ? `${formatDuration(runMs)} (${parts.join(" · ")})` : formatDuration(runMs);
 }
