@@ -68,7 +68,7 @@ function fail(code: string, message: string, statusCode: number, notSent = false
 }
 
 function passFor(value: string | undefined, token: string, account: string, now: number, requireRisk: boolean, scope: OrderScope): PassResult {
-  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const secret = process.env.WSA_ORDER_PASS_SECRET?.trim() || process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!secret) return { ok: false, reason: "config" };
   if (!value || value.length > 2048 || token.length > 8192) return { ok: false, reason: "malformed" };
   const dot = value.indexOf(".");
@@ -183,11 +183,11 @@ export async function handler(event: GatewayEvent) {
     return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
   }
   const claims = checkedPass.claims;
-  if (scope === "all" && !orderGuard.allow(claims.user)) {
-    return fail("RATE_LIMITED", "Too many orders in a short time. Wait a moment and try again.", 429);
-  }
   if (!directSecret || !directUrl || !directUrl.startsWith("https://")) {
     return fail("DEMO_ROUTE_OFFLINE", "The demo route is unavailable.", 503, true);
+  }
+  if (scope === "all" && !orderGuard.allow(claims.user)) {
+    return fail("RATE_LIMITED", "Too many orders in a short time. Wait a moment and try again.", 429);
   }
   let command;
   try {
