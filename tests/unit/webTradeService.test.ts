@@ -20,7 +20,7 @@ import { GET as warmModify } from "@/app/api/terminal/trade/modify/route";
 import { GET as warmClose } from "@/app/api/terminal/trade/close/route";
 import { GET as warmCancel } from "@/app/api/terminal/trade/cancel/route";
 import { GET as warmCloseBulk } from "@/app/api/terminal/trade/close-bulk/route";
-import { resetWebTradeCaches, warmWebTradeGates } from "@/lib/services/webTradeService";
+import { resetWebTradeCaches, riskPassCacheAgeFor, warmWebTradeGates } from "@/lib/services/webTradeService";
 import { WEB_TRADE_COMMENT } from "@/lib/trade/webTrade";
 import { sharedDb as db } from "./helpers/memoryDb";
 import {
@@ -46,6 +46,12 @@ import {
 // These tests run WSA Trade on a database without migration 060 (no trade gateway): the
 // order routes then use this server's own broker bridge - the single-box install. The
 // gateway route, with a real worker loop, is in webTradeGateway.test.ts.
+
+test("only the demo pilot account gets a fresher risk verdict for its order pass", () => {
+  expect(riskPassCacheAgeFor(ACCOUNT, ACCOUNT)).toBe(500);
+  expect(riskPassCacheAgeFor(SECOND_ACCOUNT, ACCOUNT)).toBe(2_000);
+  expect(riskPassCacheAgeFor(ACCOUNT, "")).toBe(2_000);
+});
 
 vi.mock("@/lib/supabase/admin", async () => {
   const { sharedClient } = await import("./helpers/memoryDb");
