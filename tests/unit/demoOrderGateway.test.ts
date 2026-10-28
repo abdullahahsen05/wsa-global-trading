@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handler } from "../../deploy/aws/demo-order-gateway/index";
-import { sendDirect } from "@/lib/gateway/directLaneClient";
+import { sendDirect, warmDirectLane } from "@/lib/gateway/directLaneClient";
 import { mintOrderPass } from "@/lib/services/webTradePass";
 
-vi.mock("@/lib/gateway/directLaneClient", () => ({ sendDirect: vi.fn() }));
+vi.mock("@/lib/gateway/directLaneClient", () => ({ sendDirect: vi.fn(), warmDirectLane: vi.fn(async () => undefined) }));
 
 const user = "137e4868-6f58-437d-bc76-374acdc36d89";
 const account = "3faac609-0b67-4b1c-96e5-3e397c19955a";
@@ -66,21 +66,28 @@ describe("demo AWS order gateway", () => {
     expect(sendDirect).not.toHaveBeenCalled();
   });
 
-  it("returns a confirmed signed-worker result and audits one new order", async () => {
+  it("returns a confirmed signed-worker result and marks it for worker-side audit", async () => {
     vi.mocked(sendDirect).mockResolvedValue({
       kind: "answered", ms: 70,
       reply: { ok: true, outcome: { ticket: "123", timing: { queueMs: 20, runMs: 50, sendMs: 45 } } },
     });
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
-    vi.stubGlobal("fetch", fetchMock);
     const response = await handler(authEvent());
     const body = JSON.parse(response.body);
     expect(response.statusCode).toBe(200);
     expect(body.data.ticket).toBe("123");
     expect(body.data.timing.awsBrowserPilot).toBe(true);
     expect(sendDirect).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledOnce();
-    vi.unstubAllGlobals();
+    expect(vi.mocked(sendDirect).mock.calls[0][1]).toMatchObject({ audit: "AWS_DEMO_OPEN" });
+  });
+
+  it("warms the signed worker connection without reserving or placing an order", async () => {
+    const response = await handler({
+      rawPath: "/demo/open", requestContext: { http: { method: "POST" } },
+      headers: { authorization: "Bearer warm", "x-wsa-pass": "warm" }, body: "{}",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(warmDirectLane).toHaveBeenCalledOnce();
+    expect(sendDirect).not.toHaveBeenCalled();
   });
 
   it("never falls back to another route after an uncertain send", async () => {

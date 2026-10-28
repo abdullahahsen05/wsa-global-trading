@@ -688,7 +688,7 @@ export class GatewayWorker {
         return { ok: false, error: ran.failure, ...(ran.failure.code === "NOT_SENT" ? { notSent: true } : {}) };
       }
       const outcome: TradeCommandOutcome = { ...ran.outcome, timing: ran.timing };
-      this.recordDirectAnswer(command, receivedAt, ran.startedAt, { outcome });
+      this.recordDirectAnswer(command, receivedAt, ran.startedAt, { outcome }, request.audit);
       return { ok: true, outcome };
     } catch (error) {
       this.warn(`[trade-gateway] direct request ${shortId(request.clientRequestId)} failed: ${error instanceof Error ? error.message : "unknown error"}`);
@@ -696,12 +696,13 @@ export class GatewayWorker {
     }
   }
 
-  /** Write-behind: the order is in the database (DONE / FAILED) a moment after it was answered - with retries, like every stored answer. */
+  /** Write-behind: the order result (and a marked demo audit) is stored after it was answered, with retries. */
   private recordDirectAnswer(
     command: ClaimedCommand,
     receivedAt: number,
     startedAt: number,
     result: { outcome: TradeCommandOutcome } | { error: StoredCommandError },
+    audit?: DirectRequest["audit"],
   ): void {
     const record = this.store.recordDirect?.bind(this.store);
     if (!record) return;
@@ -717,11 +718,12 @@ export class GatewayWorker {
       startedAt: new Date(startedAt).toISOString(),
       completedAt: new Date(this.now()).toISOString(),
       workerId: this.workerId,
+      ...(audit ? { audit } : {}),
       ...result,
     };
     const task: Promise<void> = this.withRetries(() => record(entry))
       .catch((storeError) => {
-        this.warn(`[trade-gateway] direct ${command.kind} ${shortId(command.accountId)} was answered but could not be recorded: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
+        this.warn(`[trade-gateway] direct ${command.kind} ${shortId(command.accountId)} was answered but its result or audit could not be recorded: ${storeError instanceof Error ? storeError.message : "unknown error"}`);
       })
       .finally(() => {
         this.answers.delete(task);

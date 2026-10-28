@@ -87,6 +87,9 @@ describe("the protocol", () => {
     expect(parseDirectRequest(null)).toMatchObject({ ok: false });
     expect(parseDirectRequest({ ...request(), ttlMs: 10_000_000 })).toMatchObject({ ok: true, request: { ttlMs: 60_000 } });
     expect(parseDirectRequest({ ...request(), ttlMs: 1 })).toMatchObject({ ok: true, request: { ttlMs: 1_000 } });
+    expect(parseDirectRequest(request({ audit: "AWS_DEMO_OPEN" }))).toMatchObject({ ok: true, request: { audit: "AWS_DEMO_OPEN" } });
+    expect(parseDirectRequest({ ...request(), audit: "unknown" })).toMatchObject({ ok: false });
+    expect(parseDirectRequest({ ...request(), kind: "CLOSE", audit: "AWS_DEMO_OPEN" })).toMatchObject({ ok: false });
   });
 
   test("an answer is accepted only for the request it names", () => {
@@ -292,6 +295,16 @@ describe("the worker's side", () => {
       outcome: { ticket: "9001" },
     });
     expect(store.complete).not.toHaveBeenCalled();
+  });
+
+  test("a marked demo order carries its audit marker only to the tracked write-behind record", async () => {
+    const { store, worker } = rig();
+    const reply = await worker.runDirect(request({ audit: "AWS_DEMO_OPEN" }));
+    expect(reply).toMatchObject({ ok: true });
+    await worker.idle();
+    const reservation = store.reserveDirect.mock.calls[0] as unknown[];
+    expect(reservation[0]).not.toHaveProperty("audit");
+    expect(store.recordDirect.mock.calls[0][0]).toMatchObject({ audit: "AWS_DEMO_OPEN" });
   });
 
   test("the same request again - after the answer or while it is still with the broker - never places a second order", async () => {

@@ -6,7 +6,7 @@
  */
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { DIRECT_LANE_VERSION, DIRECT_ORDER_TTL_MS, type DirectRequest } from "../../../src/lib/gateway/directLane";
-import { sendDirect } from "../../../src/lib/gateway/directLaneClient";
+import { sendDirect, warmDirectLane } from "../../../src/lib/gateway/directLaneClient";
 import { parseTradeCommand, TradeCommandError } from "../../../src/lib/gateway/tradeCommands";
 import { webTradeOpenSchema } from "../../../src/lib/trade/webTradeSchemas";
 
@@ -82,32 +82,6 @@ function passFor(value: string | undefined, token: string, account: string, now:
   return claims;
 }
 
-async function auditOpen(userId: string, accountId: string, order: {
-  symbol: string; side: string; volume: number; orderKind: string; price: number | null;
-  stopLoss: number | null; takeProfit: number | null;
-}, ticket: string | null): Promise<void> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!url || !key) return;
-  try {
-    const response = await fetch(`${url}/rest/v1/audit_logs`, {
-      method: "POST",
-      headers: { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json", prefer: "return=minimal" },
-      body: JSON.stringify({
-        actor_user_id: userId,
-        action: "WEB_TRADE_ORDER_OPENED",
-        entity_type: "trading_account",
-        entity_id: accountId,
-        metadata: { ...order, ticket, route: "aws-demo-direct" },
-      }),
-      signal: AbortSignal.timeout(2_000),
-    });
-    if (!response.ok) console.error(`[demo-order] audit write failed: HTTP ${response.status}`);
-  } catch {
-    console.error("[demo-order] audit write failed");
-  }
-}
-
 export async function handler(event: GatewayEvent) {
   const startedAt = Date.now();
   if (event.rawPath !== "/demo/open" || event.requestContext?.http?.method !== "POST") {
@@ -118,6 +92,22 @@ export async function handler(event: GatewayEvent) {
   }
   const rawBody = event.isBase64Encoded ? Buffer.from(event.body ?? "", "base64").toString("utf8") : (event.body ?? "");
   if (Buffer.byteLength(rawBody) > MAX_BODY_BYTES) return fail("VALIDATION_ERROR", "Request is too large.", 413, true);
+  const directSecret = process.env.WSA_TRADE_DIRECT_SECRET?.trim();
+  const directUrl = process.env.WSA_TRADE_DIRECT_URL?.trim();
+  if (
+    rawBody === "{}" && event.headers?.authorization === "Bearer warm" &&
+    event.headers?.["x-wsa-pass"] === "warm"
+  ) {
+    // This exact invalid order is sent only to prime the browser's CORS preflight
+    // and the Lambda's signed, keep-alive connection to the worker. It never
+    // reserves a command or calls the broker.
+    if (directSecret && directUrl?.startsWith("https://")) {
+      const warmingAt = Date.now();
+      await warmDirectLane({ base: directUrl.replace(/\/+$/, ""), secret: directSecret });
+      console.info(`[demo-order] signed worker warm-up ${Date.now() - warmingAt}ms`);
+    }
+    return reply(200, { ok: true, data: { warm: true } });
+  }
   let raw: unknown;
   try { raw = JSON.parse(rawBody); } catch { return fail("VALIDATION_ERROR", "Invalid order.", 400, true); }
   const parsed = webTradeOpenSchema.safeParse(raw);
@@ -133,8 +123,6 @@ export async function handler(event: GatewayEvent) {
   const token = /^Bearer (\S+)$/i.exec(authorization)?.[1] ?? "";
   const claims = passFor(event.headers?.["x-wsa-pass"], token, order.accountId, Date.now());
   if (!claims) return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
-  const directSecret = process.env.WSA_TRADE_DIRECT_SECRET?.trim();
-  const directUrl = process.env.WSA_TRADE_DIRECT_URL?.trim();
   if (!directSecret || !directUrl || !directUrl.startsWith("https://")) {
     return fail("DEMO_ROUTE_OFFLINE", "The demo route is unavailable.", 503, true);
   }
@@ -157,6 +145,7 @@ export async function handler(event: GatewayEvent) {
     clientRequestId: order.clientRequestId,
     ttlMs: DIRECT_ORDER_TTL_MS,
     attempt: 1,
+    audit: "AWS_DEMO_OPEN",
   };
   const sentAt = Date.now();
   const lane = { base: directUrl.replace(/\/+$/, ""), secret: directSecret };
@@ -174,12 +163,10 @@ export async function handler(event: GatewayEvent) {
   const brokerAnsweredAt = Date.now();
   const outcome = sent.reply.outcome;
   const repeated = sent.reply.repeated === true;
-  if (!repeated) {
-    await auditOpen(claims.user, order.accountId, {
-      symbol: order.symbol, side: order.side, volume: order.volume, orderKind: "MARKET",
-      price: null, stopLoss: order.stopLoss ?? null, takeProfit: order.takeProfit ?? null,
-    }, outcome.ticket ?? null);
-  }
+  console.info(
+    `[demo-order] confirmed ${request.clientRequestId.slice(0, 8)} worker ${brokerAnsweredAt - sentAt}ms` +
+    ` queue ${outcome.timing?.queueMs ?? "?"}ms broker ${outcome.timing?.runMs ?? "?"}ms`,
+  );
   const result = {
     ok: true,
     ticket: outcome.ticket ?? null,

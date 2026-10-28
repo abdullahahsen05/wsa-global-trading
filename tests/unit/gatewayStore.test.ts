@@ -12,7 +12,7 @@ import {
   STATE_TABLE,
   SYMBOLS_TABLE,
 } from "@/lib/gateway/gatewayDb";
-import { createSupabaseGatewayStore, KEEP_COMMANDS_MS, KEEP_STATE_MS, LOST_AFTER_MS } from "@/lib/gateway/gatewayStore";
+import { createSupabaseGatewayStore, KEEP_COMMANDS_MS, KEEP_STATE_MS, LOST_AFTER_MS, type DirectRecord } from "@/lib/gateway/gatewayStore";
 import { MemoryDb, memoryClient, type Row } from "./helpers/memoryDb";
 
 const USER = "11111111-1111-4111-8111-111111111111";
@@ -218,6 +218,41 @@ describe("storing the answer", () => {
 
     await expect(store.complete("x", { ticket: "1" })).rejects.toBeInstanceOf(GatewayNotInstalledError);
     await expect(store.fail("x", { code: "A", message: "b", statusCode: 400 })).rejects.toBeInstanceOf(GatewayNotInstalledError);
+  });
+});
+
+describe("demo direct-order audit write-behind", () => {
+  const record: DirectRecord = {
+    id: "cccccccc-0000-4000-8000-000000000001",
+    userId: USER,
+    accountId: ACCOUNT,
+    kind: "OPEN",
+    payload: { symbol: "XAUUSD", side: "BUY", volume: 0.01, orderKind: "MARKET", price: null, stopLoss: null, takeProfit: null },
+    clientRequestId: "request-1",
+    receivedAt: ago(500), expiresAt: new Date(NOW.getTime() + 12_000).toISOString(),
+    startedAt: ago(100), completedAt: NOW.toISOString(), workerId: "worker-1",
+    outcome: { ticket: "9001" }, audit: "AWS_DEMO_OPEN",
+  };
+
+  test("records the answer and one audit row even if write-behind retries", async () => {
+    db.tables[COMMANDS_TABLE] = [commandRow()];
+    db.unique.audit_logs = [["id"]];
+
+    await store.recordDirect?.(record);
+    await store.recordDirect?.(record);
+
+    expect(rowOf(COMMANDS_TABLE, record.id)).toMatchObject({ status: "DONE", result: { ticket: "9001" } });
+    expect(db.tables.audit_logs).toHaveLength(1);
+    expect(db.tables.audit_logs[0]).toMatchObject({
+      id: record.id, actor_user_id: USER, action: "WEB_TRADE_ORDER_OPENED", entity_id: ACCOUNT,
+      metadata: { symbol: "XAUUSD", volume: 0.01, ticket: "9001", route: "aws-demo-direct", clientRequestId: "request-1" },
+    });
+  });
+
+  test("a broker refusal never writes an opened-order audit", async () => {
+    db.tables[COMMANDS_TABLE] = [commandRow()];
+    await store.recordDirect?.({ ...record, outcome: undefined, error: { code: "BROKER_PROVIDER_ERROR", message: "market closed", statusCode: 502 } });
+    expect(db.tables.audit_logs ?? []).toHaveLength(0);
   });
 });
 

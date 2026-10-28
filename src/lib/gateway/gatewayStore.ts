@@ -60,10 +60,12 @@ export interface DirectRecord {
   workerId: string;
   outcome?: TradeCommandOutcome;
   error?: StoredCommandError;
+  /** The one demo-pilot audit the worker writes after the broker answer. */
+  audit?: "AWS_DEMO_OPEN";
 }
 
 /** A durable claim made before a direct-lane order may reach the broker. */
-export type DirectReservation = Omit<DirectRecord, "completedAt" | "outcome" | "error">;
+export type DirectReservation = Omit<DirectRecord, "completedAt" | "outcome" | "error" | "audit">;
 
 /** The command stored for a (user, request id): enough to answer a repeated request. */
 export type StoredCommandRow = Pick<CommandRow, "status" | "result" | "error_code" | "error_message">;
@@ -235,6 +237,34 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
         .eq("id", entry.id)
         .eq("status", "RUNNING");
       failOnError(error, "record a direct command");
+      if (entry.audit === "AWS_DEMO_OPEN" && !failed && entry.kind === "OPEN") {
+        const payload = entry.payload && typeof entry.payload === "object" && !Array.isArray(entry.payload)
+          ? entry.payload as Record<string, unknown>
+          : {};
+        // The command id is also the audit id: a retry after an ambiguous DB answer
+        // cannot create a second log entry. This runs in the worker's tracked,
+        // retrying write-behind task rather than delaying the broker reply.
+        const { error: auditError } = await db.from("audit_logs").insert({
+          id: entry.id,
+          actor_user_id: entry.userId,
+          action: "WEB_TRADE_ORDER_OPENED",
+          entity_type: "trading_account",
+          entity_id: entry.accountId,
+          metadata: {
+            symbol: payload.symbol ?? null,
+            side: payload.side ?? null,
+            volume: payload.volume ?? null,
+            orderKind: payload.orderKind ?? "MARKET",
+            price: payload.price ?? null,
+            stopLoss: payload.stopLoss ?? null,
+            takeProfit: payload.takeProfit ?? null,
+            ticket: entry.outcome?.ticket ?? null,
+            route: "aws-demo-direct",
+            clientRequestId: entry.clientRequestId,
+          },
+        });
+        if (auditError?.code !== "23505") failOnError(auditError, "audit a direct demo order");
+      }
     },
 
     async findByRequest(userId, clientRequestId) {
