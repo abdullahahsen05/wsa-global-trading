@@ -68,9 +68,14 @@ function brokerText(timing: WebTradeTiming, runMs: number): string {
   const parts: string[] = [];
   if (isMs(timing.readMs) && timing.readMs > 0) parts.push(`read ${formatDuration(timing.readMs)}`);
   if (isMs(timing.sessionMs) && timing.sessionMs > 0) parts.push(`session ${formatDuration(timing.sessionMs)}`);
-  if (isMs(timing.sendMs)) parts.push(`send ${formatDuration(timing.sendMs)}`);
-  if (isMs(timing.providerHeadersMs)) parts.push(`provider headers ${formatDuration(timing.providerHeadersMs)}`);
-  if (isMs(timing.providerBodyMs)) parts.push(`body ${formatDuration(timing.providerBodyMs)}`);
+  const sendPhases: string[] = [];
+  if (isMs(timing.providerHeadersMs)) sendPhases.push(`headers ${formatDuration(timing.providerHeadersMs)}`);
+  if (isMs(timing.providerBodyMs)) sendPhases.push(`body ${formatDuration(timing.providerBodyMs)}`);
+  if (isMs(timing.sendMs)) {
+    parts.push(`send ${formatDuration(timing.sendMs)}${sendPhases.length ? ` (${sendPhases.join(" · ")})` : ""}`);
+  } else if (sendPhases.length) {
+    parts.push(...sendPhases);
+  }
   if (typeof timing.attempts === "number" && timing.attempts > 1) parts.push(`${timing.attempts} attempts`);
   return parts.length > 0 ? `${formatDuration(runMs)} (${parts.join(" · ")})` : formatDuration(runMs);
 }

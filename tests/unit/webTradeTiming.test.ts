@@ -52,7 +52,7 @@ describe("the time report of an order", () => {
 
   test("breaks a provider response into headers and body without adding them twice to the total", () => {
     expect(timingText({ queueMs: 20, runMs: 480, sendMs: 470, providerHeadersMs: 465, providerBodyMs: 5 })).toBe(
-      "500 ms (queue 20 ms · broker 480 ms (send 470 ms · provider headers 465 ms · body 5 ms))",
+      "500 ms (queue 20 ms · broker 480 ms (send 470 ms (headers 465 ms · body 5 ms)))",
     );
   });
 
