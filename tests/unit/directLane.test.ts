@@ -88,6 +88,13 @@ describe("the protocol", () => {
     expect(parseDirectRequest({ ...request(), ttlMs: 10_000_000 })).toMatchObject({ ok: true, request: { ttlMs: 60_000 } });
     expect(parseDirectRequest({ ...request(), ttlMs: 1 })).toMatchObject({ ok: true, request: { ttlMs: 1_000 } });
     expect(parseDirectRequest(request({ audit: "AWS_DEMO_OPEN" }))).toMatchObject({ ok: true, request: { audit: "AWS_DEMO_OPEN" } });
+    for (const [kind, audit] of [
+      ["CLOSE", "AWS_DEMO_CLOSE"], ["MODIFY", "AWS_DEMO_MODIFY"],
+      ["CANCEL", "AWS_DEMO_CANCEL"], ["CLOSE_BULK", "AWS_DEMO_CLOSE_BULK"],
+    ] as const) {
+      expect(parseDirectRequest(request({ kind, audit }))).toMatchObject({ ok: true, request: { kind, audit } });
+      expect(parseDirectRequest(request({ kind: "OPEN", audit }))).toMatchObject({ ok: false });
+    }
     expect(parseDirectRequest({ ...request(), audit: "unknown" })).toMatchObject({ ok: false });
     expect(parseDirectRequest({ ...request(), kind: "CLOSE", audit: "AWS_DEMO_OPEN" })).toMatchObject({ ok: false });
   });
@@ -305,6 +312,19 @@ describe("the worker's side", () => {
     const reservation = store.reserveDirect.mock.calls[0] as unknown[];
     expect(reservation[0]).not.toHaveProperty("audit");
     expect(store.recordDirect.mock.calls[0][0]).toMatchObject({ audit: "AWS_DEMO_OPEN" });
+  });
+
+  test("a marked demo close is reserved before the broker and recorded once", async () => {
+    const { store, adapter, worker } = rig();
+    const close = request({ kind: "CLOSE", payload: { ticket: "9001", volume: null }, audit: "AWS_DEMO_CLOSE" });
+    const reply = await worker.runDirect(close);
+    expect(reply).toMatchObject({ ok: true });
+    expect(adapter.closeTrade).toHaveBeenCalledTimes(1);
+    expect(store.reserveDirect.mock.invocationCallOrder[0]).toBeLessThan(adapter.closeTrade.mock.invocationCallOrder[0]);
+    await worker.idle();
+    expect(store.recordDirect.mock.calls[0][0]).toMatchObject({ kind: "CLOSE", audit: "AWS_DEMO_CLOSE" });
+    expect(await worker.runDirect({ ...close, attempt: 2 })).toMatchObject({ ok: true, repeated: true });
+    expect(adapter.closeTrade).toHaveBeenCalledTimes(1);
   });
 
   test("the same request again - after the answer or while it is still with the broker - never places a second order", async () => {

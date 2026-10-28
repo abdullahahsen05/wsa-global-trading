@@ -61,7 +61,7 @@ export interface DirectRecord {
   outcome?: TradeCommandOutcome;
   error?: StoredCommandError;
   /** The one demo-pilot audit the worker writes after the broker answer. */
-  audit?: "AWS_DEMO_OPEN";
+  audit?: import("./directLane").DemoAuditKind;
 }
 
 /** A durable claim made before a direct-lane order may reach the broker. */
@@ -237,31 +237,61 @@ export function createSupabaseGatewayStore(db: AdminDb = createAdminClient()): G
         .eq("id", entry.id)
         .eq("status", "RUNNING");
       failOnError(error, "record a direct command");
-      if (entry.audit === "AWS_DEMO_OPEN" && !failed && entry.kind === "OPEN") {
+      if (entry.audit && !failed && !(entry.kind === "CLOSE_BULK" &&
+        (entry.outcome?.closed ?? 0) === 0 && (entry.outcome?.failed ?? 0) > 0)) {
         const payload = entry.payload && typeof entry.payload === "object" && !Array.isArray(entry.payload)
           ? entry.payload as Record<string, unknown>
           : {};
+        const audit = (() => {
+          switch (entry.audit) {
+            case "AWS_DEMO_OPEN":
+              if (entry.kind !== "OPEN") return null;
+              return { action: "WEB_TRADE_ORDER_OPENED", metadata: {
+                symbol: payload.symbol ?? null, side: payload.side ?? null, volume: payload.volume ?? null,
+                orderKind: payload.orderKind ?? "MARKET", price: payload.price ?? null,
+                stopLoss: payload.stopLoss ?? null, takeProfit: payload.takeProfit ?? null,
+                ticket: entry.outcome?.ticket ?? null,
+              } };
+            case "AWS_DEMO_CLOSE":
+              if (entry.kind !== "CLOSE") return null;
+              return { action: "WEB_TRADE_POSITION_CLOSED", metadata: {
+                ticket: payload.ticket ?? null, requestedVolume: payload.volume ?? null,
+                closedVolume: entry.outcome?.detail?.volume ?? payload.volume ?? null,
+                partial: payload.volume !== null && payload.volume !== undefined,
+              } };
+            case "AWS_DEMO_MODIFY":
+              if (entry.kind !== "MODIFY") return null;
+              return { action: "WEB_TRADE_POSITION_MODIFIED", metadata: {
+                ticket: entry.outcome?.ticket ?? payload.ticket ?? null,
+                symbol: entry.outcome?.detail?.symbol ?? null,
+                stopLoss: entry.outcome?.detail?.stopLoss ?? null,
+                takeProfit: entry.outcome?.detail?.takeProfit ?? null,
+                price: entry.outcome?.detail?.price ?? null,
+              } };
+            case "AWS_DEMO_CANCEL":
+              if (entry.kind !== "CANCEL") return null;
+              return { action: "WEB_TRADE_ORDER_CANCELLED", metadata: {
+                ticket: payload.ticket ?? null, symbol: entry.outcome?.detail?.symbol ?? null,
+              } };
+            case "AWS_DEMO_CLOSE_BULK":
+              if (entry.kind !== "CLOSE_BULK") return null;
+              return { action: "WEB_TRADE_BULK_CLOSED", metadata: {
+                scope: payload.scope ?? null, symbol: payload.symbol ?? null,
+                closed: entry.outcome?.closed ?? 0, failed: entry.outcome?.failed ?? 0,
+              } };
+          }
+        })();
+        if (!audit) throw new Error("[trade-gateway] invalid demo audit command");
         // The command id is also the audit id: a retry after an ambiguous DB answer
         // cannot create a second log entry. This runs in the worker's tracked,
         // retrying write-behind task rather than delaying the broker reply.
         const { error: auditError } = await db.from("audit_logs").insert({
           id: entry.id,
           actor_user_id: entry.userId,
-          action: "WEB_TRADE_ORDER_OPENED",
+          action: audit.action,
           entity_type: "trading_account",
           entity_id: entry.accountId,
-          metadata: {
-            symbol: payload.symbol ?? null,
-            side: payload.side ?? null,
-            volume: payload.volume ?? null,
-            orderKind: payload.orderKind ?? "MARKET",
-            price: payload.price ?? null,
-            stopLoss: payload.stopLoss ?? null,
-            takeProfit: payload.takeProfit ?? null,
-            ticket: entry.outcome?.ticket ?? null,
-            route: "aws-demo-direct",
-            clientRequestId: entry.clientRequestId,
-          },
+          metadata: { ...audit.metadata, route: "aws-demo-direct", clientRequestId: entry.clientRequestId },
         });
         if (auditError?.code !== "23505") failOnError(auditError, "audit a direct demo order");
       }

@@ -254,6 +254,37 @@ describe("demo direct-order audit write-behind", () => {
     await store.recordDirect?.({ ...record, outcome: undefined, error: { code: "BROKER_PROVIDER_ERROR", message: "market closed", statusCode: 502 } });
     expect(db.tables.audit_logs ?? []).toHaveLength(0);
   });
+
+  test("a demo close records its own audit exactly once", async () => {
+    db.tables[COMMANDS_TABLE] = [commandRow()];
+    db.unique.audit_logs = [["id"]];
+    const close: DirectRecord = {
+      ...record, kind: "CLOSE", payload: { ticket: "9001", volume: null },
+      outcome: { ticket: "9001", detail: { volume: 0.01 } }, audit: "AWS_DEMO_CLOSE",
+    };
+    await store.recordDirect?.(close);
+    await store.recordDirect?.(close);
+    expect(db.tables.audit_logs).toHaveLength(1);
+    expect(db.tables.audit_logs[0]).toMatchObject({
+      action: "WEB_TRADE_POSITION_CLOSED",
+      metadata: { ticket: "9001", requestedVolume: null, closedVolume: 0.01, partial: false,
+        route: "aws-demo-direct", clientRequestId: "request-1" },
+    });
+  });
+
+  test("demo modify, cancel, and bulk actions retain their audit types", async () => {
+    const cases = [
+      { kind: "MODIFY", audit: "AWS_DEMO_MODIFY", action: "WEB_TRADE_POSITION_MODIFIED", payload: { ticket: "9001", stopLoss: 100 }, outcome: { ticket: "9001", detail: { stopLoss: 100 } } },
+      { kind: "CANCEL", audit: "AWS_DEMO_CANCEL", action: "WEB_TRADE_ORDER_CANCELLED", payload: { ticket: "9001" }, outcome: { ticket: "9001" } },
+      { kind: "CLOSE_BULK", audit: "AWS_DEMO_CLOSE_BULK", action: "WEB_TRADE_BULK_CLOSED", payload: { scope: "ALL", symbol: null }, outcome: { closed: 2, failed: 0 } },
+    ] as const;
+    for (const [index, item] of cases.entries()) {
+      const id = `cccccccc-0000-4000-8000-00000000000${index + 2}`;
+      db.tables[COMMANDS_TABLE] = [commandRow({ id })];
+      await store.recordDirect?.({ ...record, id, kind: item.kind, audit: item.audit, payload: item.payload, outcome: item.outcome });
+      expect(db.tables.audit_logs[index]).toMatchObject({ id, action: item.action, metadata: { route: "aws-demo-direct" } });
+    }
+  });
 });
 
 describe("housekeeping", () => {

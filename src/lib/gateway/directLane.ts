@@ -47,6 +47,15 @@ export const DIRECT_CLOCK_SKEW_MS = 20_000;
 export const DIRECT_MIN_SECRET_LENGTH = 32;
 /** How long an order may wait in the worker (behind another order on the same account) before it is NOT sent. */
 export const DIRECT_ORDER_TTL_MS = 12_000;
+/** Demo-only audit markers are accepted only with their matching command kind. */
+export const DEMO_AUDIT_KINDS = {
+  AWS_DEMO_OPEN: "OPEN",
+  AWS_DEMO_CLOSE: "CLOSE",
+  AWS_DEMO_MODIFY: "MODIFY",
+  AWS_DEMO_CANCEL: "CANCEL",
+  AWS_DEMO_CLOSE_BULK: "CLOSE_BULK",
+} as const;
+export type DemoAuditKind = keyof typeof DEMO_AUDIT_KINDS;
 const DIRECT_TTL_MIN_MS = 1_000;
 const DIRECT_TTL_MAX_MS = 60_000;
 
@@ -104,7 +113,7 @@ export interface DirectRequest {
   /** 1 = first try; 2 = the same request again after a dropped connection (the worker then looks for an earlier answer) */
   attempt: 1 | 2;
   /** An audit record written by the worker after a confirmed demo order, never by the browser. */
-  audit?: "AWS_DEMO_OPEN";
+  audit?: DemoAuditKind;
 }
 
 /** What the worker answers. `repeated`: this was a request it had already answered; nothing new was sent. */
@@ -140,7 +149,11 @@ export function parseDirectRequest(raw: unknown): { ok: true; request: DirectReq
     return { ok: false, message: "This command can not use the direct lane." };
   }
   if (!validRequestId(raw.clientRequestId)) return { ok: false, message: "clientRequestId is not valid." };
-  if (raw.audit !== undefined && (raw.audit !== "AWS_DEMO_OPEN" || raw.kind !== "OPEN")) {
+  if (raw.audit !== undefined && (
+    typeof raw.audit !== "string" ||
+    !(raw.audit in DEMO_AUDIT_KINDS) ||
+    DEMO_AUDIT_KINDS[raw.audit as DemoAuditKind] !== raw.kind
+  )) {
     return { ok: false, message: "Audit source is not valid for this command." };
   }
   const ttl = typeof raw.ttlMs === "number" && Number.isFinite(raw.ttlMs) ? raw.ttlMs : DIRECT_ORDER_TTL_MS;
@@ -155,7 +168,7 @@ export function parseDirectRequest(raw: unknown): { ok: true; request: DirectReq
       clientRequestId: raw.clientRequestId,
       ttlMs: Math.min(DIRECT_TTL_MAX_MS, Math.max(DIRECT_TTL_MIN_MS, Math.round(ttl))),
       attempt: raw.attempt === 2 ? 2 : 1,
-      ...(raw.audit === "AWS_DEMO_OPEN" ? { audit: "AWS_DEMO_OPEN" as const } : {}),
+      ...(raw.audit !== undefined ? { audit: raw.audit as DemoAuditKind } : {}),
     },
   };
 }
