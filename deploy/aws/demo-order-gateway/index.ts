@@ -19,6 +19,7 @@ type GatewayEvent = {
 };
 
 type Claims = { user: string; role: string; account: string; token: string; until: number; riskUntil?: number; aws?: { dbMs?: number; loopMs?: number } };
+type PassResult = { ok: true; claims: Claims } | { ok: false; reason: "config" | "malformed" | "signature" | "scope" | "expired" | "risk_expired" | "token_mismatch" | "session" };
 const MAX_BODY_BYTES = 16 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -44,23 +45,24 @@ function fail(code: string, message: string, statusCode: number, notSent = false
   return reply(statusCode, { ok: false, error: { code, message, ...(notSent ? { notSent: true } : {}) } });
 }
 
-function passFor(value: string | undefined, token: string, account: string, now: number): Claims | null {
+function passFor(value: string | undefined, token: string, account: string, now: number): PassResult {
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!secret || !value || value.length > 2048 || token.length > 8192) return null;
+  if (!secret) return { ok: false, reason: "config" };
+  if (!value || value.length > 2048 || token.length > 8192) return { ok: false, reason: "malformed" };
   const dot = value.indexOf(".");
-  if (dot < 1 || dot !== value.lastIndexOf(".")) return null;
+  if (dot < 1 || dot !== value.lastIndexOf(".")) return { ok: false, reason: "malformed" };
   const body = value.slice(0, dot);
   const key = createHmac("sha256", secret).update("wsa-order-pass-v1").digest();
   const expected = createHmac("sha256", key).update(body).digest();
   const given = Buffer.from(value.slice(dot + 1), "base64url");
-  if (!same(expected, given)) return null;
+  if (!same(expected, given)) return { ok: false, reason: "signature" };
   let raw: unknown;
   try {
     raw = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
   } catch {
-    return null;
+    return { ok: false, reason: "malformed" };
   }
-  if (!raw || typeof raw !== "object") return null;
+  if (!raw || typeof raw !== "object") return { ok: false, reason: "malformed" };
   const claims = raw as Claims & { v?: unknown };
   const tokenHash = createHash("sha256").update(token).digest("base64url");
   if (
@@ -68,24 +70,26 @@ function passFor(value: string | undefined, token: string, account: string, now:
     !UUID.test(claims.user) ||
     claims.user !== process.env.WSA_DEMO_USER_ID ||
     claims.account !== account ||
-    claims.token !== tokenHash ||
-    !["TRADER", "ADMIN", "SUPER_ADMIN"].includes(claims.role) ||
-    typeof claims.until !== "number" || !Number.isFinite(claims.until) ||
-    claims.until <= now || claims.until > now + 8_000 ||
-    typeof claims.riskUntil !== "number" || !Number.isFinite(claims.riskUntil) ||
-    claims.riskUntil <= now || claims.riskUntil > claims.until
-  ) return null;
+    !["TRADER", "ADMIN", "SUPER_ADMIN"].includes(claims.role)
+  ) return { ok: false, reason: "scope" };
+  if (typeof claims.until !== "number" || !Number.isFinite(claims.until) || claims.until <= now || claims.until > now + 8_000) {
+    return { ok: false, reason: "expired" };
+  }
+  if (typeof claims.riskUntil !== "number" || !Number.isFinite(claims.riskUntil) || claims.riskUntil <= now || claims.riskUntil > claims.until) {
+    return { ok: false, reason: "risk_expired" };
+  }
+  if (claims.token !== tokenHash) return { ok: false, reason: "token_mismatch" };
   // The pass was minted for a verified session. Its token must still name that
   // user and be unexpired, in addition to matching the pass's signed hash.
   try {
     const parts = token.split(".");
-    if (parts.length !== 3) return null;
+    if (parts.length !== 3) return { ok: false, reason: "session" };
     const jwt = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as { sub?: unknown; exp?: unknown };
-    if (jwt.sub !== claims.user || typeof jwt.exp !== "number" || jwt.exp * 1000 <= now) return null;
+    if (jwt.sub !== claims.user || typeof jwt.exp !== "number" || jwt.exp * 1000 <= now) return { ok: false, reason: "session" };
   } catch {
-    return null;
+    return { ok: false, reason: "session" };
   }
-  return claims;
+  return { ok: true, claims };
 }
 
 export async function handler(event: GatewayEvent) {
@@ -127,8 +131,12 @@ export async function handler(event: GatewayEvent) {
 
   const authorization = event.headers?.authorization ?? "";
   const token = /^Bearer (\S+)$/i.exec(authorization)?.[1] ?? "";
-  const claims = passFor(event.headers?.["x-wsa-pass"], token, order.accountId, Date.now());
-  if (!claims) return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
+  const checkedPass = passFor(event.headers?.["x-wsa-pass"], token, order.accountId, Date.now());
+  if (!checkedPass.ok) {
+    console.info(`[demo-order] pass refused: ${checkedPass.reason}`);
+    return fail("DEMO_PASS_EXPIRED", "Trading checks need a refresh. Try again in a moment.", 401, true);
+  }
+  const claims = checkedPass.claims;
   if (!directSecret || !directUrl || !directUrl.startsWith("https://")) {
     return fail("DEMO_ROUTE_OFFLINE", "The demo route is unavailable.", 503, true);
   }

@@ -58,6 +58,24 @@ describe("demo AWS order gateway", () => {
     expect(sendDirect).not.toHaveBeenCalled();
   });
 
+  it("logs only a coarse refusal reason, never a token or pass", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    try {
+      const staleRisk = await handler(authEvent(Date.now() - 4_000));
+      expect(staleRisk.statusCode).toBe(401);
+      expect(info).toHaveBeenCalledWith("[demo-order] pass refused: risk_expired");
+
+      const mismatched = authEvent();
+      const otherToken = mismatched.headers.authorization.replace("test-signature", "different-signature");
+      const wrongSession = await handler({ ...mismatched, headers: { ...mismatched.headers, authorization: otherToken } });
+      expect(wrongSession.statusCode).toBe(401);
+      expect(info).toHaveBeenCalledWith("[demo-order] pass refused: token_mismatch");
+      expect(sendDirect).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   it("limits the pilot to 0.01-lot market orders", async () => {
     const tooLarge = await handler(authEvent(Date.now(), { ...order, volume: 0.02 }));
     expect(tooLarge.statusCode).toBe(403);

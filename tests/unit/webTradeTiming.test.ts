@@ -122,6 +122,15 @@ describe("the time report of an order", () => {
       );
     });
 
+    test("a rejected demo pilot is shown as time already included in the standard-route total", () => {
+      expect(timingText({ ...whole, pilotFallback: "DEMO_PASS_EXPIRED", pilotAttemptMs: 410 })).toBe(
+        `${plain}${tail} AWS demo pilot declined before execution in 410 ms (DEMO_PASS_EXPIRED); standard route used. This time is already included above.`,
+      );
+      expect(timingText({ ...whole, pilotFallback: "STALE_PASS" })).toBe(
+        `${plain}${tail} AWS demo pilot skipped because its safety pass was near expiry; standard route used.`,
+      );
+    });
+
     test("a busy AWS worker is named only when its loop really ran late", () => {
       expect(timingText({ ...whole, awsLoopMs: 3 })).toBe(`${plain}${tail}`);
       expect(timingText({ ...whole, awsLoopMs: 19 })).toBe(`${plain}${tail}`);

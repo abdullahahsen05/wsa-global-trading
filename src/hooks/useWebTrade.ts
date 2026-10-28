@@ -209,15 +209,33 @@ export type WebTradeAction = "open" | "modify" | "close" | "cancel" | "close-bul
 const WEB_TRADE_ACTIONS: readonly WebTradeAction[] = ["open", "modify", "close", "cancel", "close-bulk"];
 const DEMO_ORDER_URL = process.env.NEXT_PUBLIC_WSA_DEMO_ORDER_URL?.trim() ?? "";
 const DEMO_ACCOUNT_ID = process.env.NEXT_PUBLIC_WSA_DEMO_ACCOUNT_ID?.trim() ?? "";
+const PILOT_PASS_MIN_REMAINING_MS = 1_000;
 
-/** Only the explicit 0.01-lot demo market order may use the AWS browser pilot. */
-function eligibleForDemoOrderRoute(action: WebTradeAction, body: Record<string, unknown>, pass: string | null): boolean {
+/** Only a routing hint: the AWS gateway still verifies the signature, session, account, and current risk window. */
+export function demoPilotPassFresh(pass: string, now: number = Date.now()): boolean {
+  try {
+    if (pass.length > 2_048) return false;
+    const body = pass.slice(0, pass.indexOf("."));
+    if (!body) return false;
+    const claims = JSON.parse(atob(body.replace(/-/g, "+").replace(/_/g, "/"))) as { until?: unknown; riskUntil?: unknown };
+    return typeof claims.until === "number" && claims.until > now + PILOT_PASS_MIN_REMAINING_MS &&
+      typeof claims.riskUntil === "number" && claims.riskUntil > now + PILOT_PASS_MIN_REMAINING_MS;
+  } catch {
+    return false;
+  }
+}
+
+function demoOrderCandidate(action: WebTradeAction, body: Record<string, unknown>): boolean {
   return Boolean(
-    DEMO_ORDER_URL && DEMO_ACCOUNT_ID && pass &&
-    action === "open" && body.accountId === DEMO_ACCOUNT_ID &&
+    DEMO_ORDER_URL && DEMO_ACCOUNT_ID && action === "open" && body.accountId === DEMO_ACCOUNT_ID &&
     body.volume === 0.01 && (body.orderKind === undefined || body.orderKind === "MARKET") &&
     typeof body.clientRequestId === "string",
   );
+}
+
+/** Only the explicit 0.01-lot demo market order may use the AWS browser pilot. */
+function eligibleForDemoOrderRoute(action: WebTradeAction, body: Record<string, unknown>, pass: string | null): boolean {
+  return demoOrderCandidate(action, body) && pass !== null && demoPilotPassFresh(pass);
 }
 
 /** The browser's high-resolution clock (falls back to the wall clock where there is none). */
@@ -276,6 +294,9 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
   let requestStartedAt = startedAt;
   let path = `/api/terminal/trade/${action}`;
   const pass = passOf(body.accountId);
+  let pilotFallback: string | undefined = demoOrderCandidate(action, body) && pass && !demoPilotPassFresh(pass)
+    ? "STALE_PASS" : undefined;
+  let pilotAttemptMs: number | undefined;
   let response: Response | undefined;
   try {
     if (eligibleForDemoOrderRoute(action, body, pass)) {
@@ -297,6 +318,9 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
           const failure = await response.clone().json().catch(() => null) as Envelope<unknown> | null;
           // Only an explicit pre-execution refusal may retry the same request id on the established Vercel route.
           if (failure?.error?.notSent === true) {
+            const code = failure.error.code;
+            pilotFallback = typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : "NOT_SENT";
+            pilotAttemptMs = Math.max(0, Math.round(clockMs() - requestStartedAt));
             path = `/api/terminal/trade/${action}`;
             response = undefined;
           } else if (!failure?.error?.code) {
@@ -307,6 +331,8 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
             );
           }
         }
+      } else {
+        pilotFallback = "NO_SESSION";
       }
     }
     if (!response) {
@@ -335,6 +361,8 @@ export async function sendWebTrade(action: WebTradeAction, body: Record<string, 
     ...result,
     timing: {
       ...result.timing,
+      ...(pilotFallback ? { pilotFallback } : {}),
+      ...(pilotAttemptMs !== undefined ? { pilotAttemptMs } : {}),
       ...browserOrderTiming(path, requestStartedAt, response),
       browserToHeadersMs: Math.max(0, Math.round(headersAt - startedAt)),
       browserReadMs: Math.max(0, Math.round(answeredAt - headersAt)),

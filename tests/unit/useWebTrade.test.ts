@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   WebTradeRequestError,
+  demoPilotPassFresh,
   newRequestId,
   nextStatePollMs,
   requestFastRefresh,
@@ -188,6 +189,19 @@ describe("sending an order", () => {
 
     fetchMock.mockResolvedValueOnce(new Response("<html>bad gateway</html>", { status: 502 }));
     await expect(sendWebTrade("open", {})).rejects.toMatchObject({ code: "BAD_RESPONSE", uncertain: false });
+  });
+});
+
+describe("the demo pilot's short safety window", () => {
+  test("a signed pass can still be usable by Vercel while its three-second pilot risk clearance has expired", () => {
+    const now = 1_000_000;
+    const pass = (until: number, riskUntil: number) =>
+      `${Buffer.from(JSON.stringify({ until, riskUntil })).toString("base64url")}.signature`;
+
+    expect(demoPilotPassFresh(pass(now + 8_000, now + 3_000), now)).toBe(true);
+    expect(demoPilotPassFresh(pass(now + 8_000, now + 900), now)).toBe(false);
+    expect(demoPilotPassFresh(pass(now + 900, now + 3_000), now)).toBe(false);
+    expect(demoPilotPassFresh("broken", now)).toBe(false);
   });
 });
 

@@ -10,6 +10,8 @@ The live site's `NEXT_PUBLIC_WSA_DEMO_ORDER_URL` and `NEXT_PUBLIC_WSA_DEMO_ACCOU
 
 For diagnosis, the API's `$default` stage writes access logs to `/aws/apigateway/wsa-demo-order-gateway-access` with seven-day retention. Only request IDs, method, status, response latency, and integration latency are logged; never log authorization headers, order bodies, IP addresses, or account IDs. CORS exposes `apigw-requestid`, and the Lambda's `Timing-Allow-Origin` exposes Resource Timing only to the WSA site. The terminal report includes that gateway trace ID plus browser DNS, connection (including TLS), and other setup times when the browser provides them. Match the trace ID to an access-log row; `responseLatency - integrationLatency` is gateway overhead, while browser first-byte time also includes network travel and the Lambda's broker-confirmed work. These timing phases overlap and must not be added to the report's residual `network` number.
 
+The pilot accepts an OPEN only while the state poll's signed pass still has over a second of risk clearance remaining. A near-expiry pass goes directly through the standard Vercel route instead of spending a browser round trip on a guaranteed AWS refusal. If AWS explicitly refuses before execution, the panel still uses the same request ID on the standard route, and now reports the pilot refusal and its elapsed time. Lambda logs only a coarse refusal reason (such as `risk_expired` or `token_mismatch`) for diagnosis; the generic 401 response and all execution gates are unchanged.
+
 Build the AWS Lambda package from the repo root:
 
 ```powershell

@@ -321,6 +321,10 @@ export interface WebTradeTiming {
   awsBrowserPilot?: boolean;
   /** API Gateway request id, for matching one browser report with the minimal AWS access log. */
   gatewayRequestId?: string;
+  /** An explicitly not-sent AWS pilot attempt (or a skipped stale pass) before the standard route. */
+  pilotFallback?: string;
+  /** Time already included in total/network, not an additional phase. */
+  pilotAttemptMs?: number;
 }
 
 /** What the broker said about the order, for showing the result before the next picture arrives. */

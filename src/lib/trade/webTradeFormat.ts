@@ -126,6 +126,13 @@ function factsText(timing: WebTradeTiming): string {
   if (timing.browserProtocol) sentences.push(`Browser transport: ${timing.browserProtocol}.`);
   if (timing.awsBrowserPilot) sentences.push("Route: browser → AWS demo pilot.");
   if (timing.gatewayRequestId) sentences.push(`Gateway trace: ${timing.gatewayRequestId}.`);
+  if (timing.pilotFallback === "STALE_PASS") {
+    sentences.push("AWS demo pilot skipped because its safety pass was near expiry; standard route used.");
+  } else if (timing.pilotFallback === "NO_SESSION") {
+    sentences.push("AWS demo pilot skipped because the browser session was unavailable; standard route used.");
+  } else if (timing.pilotFallback && isMs(timing.pilotAttemptMs)) {
+    sentences.push(`AWS demo pilot declined before execution in ${formatDuration(timing.pilotAttemptMs)} (${timing.pilotFallback}); standard route used. This time is already included above.`);
+  }
   return sentences.length > 0 ? ` ${sentences.join(" ")}` : "";
 }
 
